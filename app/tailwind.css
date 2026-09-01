@@ -1,0 +1,91 @@
+/*
+ * Tailwind v4 entry.
+ * Preflight (base reset) is intentionally skipped so the existing
+ * plain-CSS admin panel and board styles keep rendering as-is.
+ */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/* ---- keyframes for /visual/prototype (used via animate-[...] utilities) ---- */
+
+/* ember field falling downward; each layer is duplicated 1000px above for a seamless loop */
+@keyframes drift {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(1000px);
+  }
+}
+
+/* two stacked photos per frame; only opacity/scale animate */
+@keyframes swap-a {
+  0%,
+  44% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50%,
+  94% {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes swap-b {
+  0%,
+  44% {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+  50%,
+  94% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes name-a {
+  0%,
+  44% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0;
+    transform: translateY(-45%);
+  }
+  56%,
+  94% {
+    opacity: 0;
+    transform: translateY(45%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes name-b {
+  0%,
+  44% {
+    opacity: 0;
+    transform: translateY(45%);
+  }
+  50%,
+  94% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-45%);
+  }
+}
