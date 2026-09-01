@@ -1,4 +1,5 @@
 import './globals.css';
+import './tailwind.css';
 
 export const metadata = {
   title: 'Interview Admin Panel',

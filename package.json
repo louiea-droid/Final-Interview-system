@@ -11,10 +11,13 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.112.4",
+    "@tailwindcss/postcss": "^4.3.3",
     "lucide-react": "^1.38.0",
     "next": "latest",
+    "postcss": "^8.5.26",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@types/node": "latest",

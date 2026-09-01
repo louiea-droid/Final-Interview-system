@@ -1,60 +1,7 @@
-{"timestamp":"00:00:01.020","source":"Server","level":"LOG","message":""}
-{"timestamp":"00:00:02.941","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:13.581","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:25.153","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:39.360","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:46.108","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:00:52.462","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:01:09.191","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:01:09.781","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:01:22.062","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:01:33.547","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
-{"timestamp":"00:02:28.282","source":"Server","level":"LOG","message":"✓ Compiled in 6ms"}
-{"timestamp":"00:02:33.901","source":"Server","level":"LOG","message":"✓ Compiled in 4ms"}
-{"timestamp":"00:02:37.522","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:03:02.684","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:03:21.966","source":"Server","level":"LOG","message":"✓ Compiled in 4ms"}
-{"timestamp":"00:03:27.117","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:03:31.747","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:03:33.523","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:03:37.540","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:03:46.354","source":"Server","level":"LOG","message":"✓ Compiled in 6ms"}
-{"timestamp":"00:03:53.000","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:04:00.249","source":"Server","level":"LOG","message":"✓ Compiled in 8ms"}
-{"timestamp":"00:04:02.700","source":"Server","level":"LOG","message":"✓ Compiled in 10ms"}
-{"timestamp":"00:04:05.237","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:04:59.861","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:05:03.235","source":"Server","level":"LOG","message":"✓ Compiled in 4ms"}
-{"timestamp":"00:05:20.010","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:05:25.767","source":"Server","level":"LOG","message":"✓ Compiled in 4ms"}
-{"timestamp":"00:05:46.126","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:05:50.937","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:06:01.875","source":"Server","level":"LOG","message":"✓ Compiled in 6ms"}
-{"timestamp":"00:06:01.918","source":"Browser","level":"ERROR","message":"./app/globals.css:538:1\nError: Parsing CSS source code failed\n  536 |   font-size: 13px;\n  537 |   font\n> 538 | }\n      | ^\n  539 |\n  540 | .form-input,\n  541 | .form-select {\n\nUnexpected end of input\n\nGenerated code of PostCSS transform of file content of app/globals.css:\n./app/globals.css:538:1\n  536 |   font-size: 13px;\n  537 |   font\n> 538 | }\n      | ^\n  539 |\n  540 | .form-input,\n  541 | .form-select {\n\nImport trace:\n  Client Component Browser:\n    ./app/globals.css [Client Component Browser]\n    ./app/layout.tsx [Server Component] "}
-{"timestamp":"00:06:01.919","source":"Server","level":"ERROR","message":"[browser] \"./app/globals.css:538:1\\nError: Parsing CSS source code failed\\n  536 |   font-size: 13px;\\n  537 |   font\\n> 538 | }\\n      | ^\\n  539 |\\n  540 | .form-input,\\n  541 | .form-select {\\n\\nUnexpected end of input\\n\\nGenerated code of PostCSS transform of file content of app/globals.css:\\n./app/globals.css:538:1\\n  536 |   font-size: 13px;\\n  537 |   font\\n> 538 | }\\n      | ^\\n  539 |\\n  540 | .form-input,\\n  541 | .form-select {\\n\\nImport trace:\\n  Client Component Browser:\\n    ./app/globals.css [Client Component Browser]\\n    ./app/layout.tsx [Server Component]\" \"\""}
-{"timestamp":"00:06:01.953","source":"Browser","level":"ERROR","message":"./app/globals.css:538:1\nError: Parsing CSS source code failed\n  536 |   font-size: 13px;\n  537 |   font\n> 538 | }\n      | ^\n  539 |\n  540 | .form-input,\n  541 | .form-select {\n\nUnexpected end of input\n\nGenerated code of PostCSS transform of file content of app/globals.css:\n./app/globals.css:538:1\n  536 |   font-size: 13px;\n  537 |   font\n> 538 | }\n      | ^\n  539 |\n  540 | .form-input,\n  541 | .form-select {\n\nImport trace:\n  Client Component Browser:\n    ./app/globals.css [Client Component Browser]\n    ./app/layout.tsx [Server Component] "}
-{"timestamp":"00:06:01.953","source":"Server","level":"ERROR","message":"[browser] \"./app/globals.css:538:1\\nError: Parsing CSS source code failed\\n  536 |   font-size: 13px;\\n  537 |   font\\n> 538 | }\\n      | ^\\n  539 |\\n  540 | .form-input,\\n  541 | .form-select {\\n\\nUnexpected end of input\\n\\nGenerated code of PostCSS transform of file content of app/globals.css:\\n./app/globals.css:538:1\\n  536 |   font-size: 13px;\\n  537 |   font\\n> 538 | }\\n      | ^\\n  539 |\\n  540 | .form-input,\\n  541 | .form-select {\\n\\nImport trace:\\n  Client Component Browser:\\n    ./app/globals.css [Client Component Browser]\\n    ./app/layout.tsx [Server Component]\" \"\""}
-{"timestamp":"00:06:03.432","source":"Server","level":"LOG","message":"✓ Compiled in 4ms"}
-{"timestamp":"00:06:09.715","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:06:09.728","source":"Browser","level":"ERROR","message":"./app/globals.css:539:1\nError: Parsing CSS source code failed\n  537 |   font-weight: 500;\n  538 |   font\n> 539 | }\n      | ^\n  540 |\n  541 | .form-input,\n  542 | .form-select {\n\nUnexpected end of input\n\nGenerated code of PostCSS transform of file content of app/globals.css:\n./app/globals.css:539:1\n  537 |   font-weight: 500;\n  538 |   font\n> 539 | }\n      | ^\n  540 |\n  541 | .form-input,\n  542 | .form-select {\n\nImport trace:\n  Client Component Browser:\n    ./app/globals.css [Client Component Browser]\n    ./app/layout.tsx [Server Component] "}
-{"timestamp":"00:06:09.728","source":"Server","level":"ERROR","message":"[browser] \"./app/globals.css:539:1\\nError: Parsing CSS source code failed\\n  537 |   font-weight: 500;\\n  538 |   font\\n> 539 | }\\n      | ^\\n  540 |\\n  541 | .form-input,\\n  542 | .form-select {\\n\\nUnexpected end of input\\n\\nGenerated code of PostCSS transform of file content of app/globals.css:\\n./app/globals.css:539:1\\n  537 |   font-weight: 500;\\n  538 |   font\\n> 539 | }\\n      | ^\\n  540 |\\n  541 | .form-input,\\n  542 | .form-select {\\n\\nImport trace:\\n  Client Component Browser:\\n    ./app/globals.css [Client Component Browser]\\n    ./app/layout.tsx [Server Component]\" \"\""}
-{"timestamp":"00:06:13.178","source":"Browser","level":"ERROR","message":"./app/globals.css:539:1\nError: Parsing CSS source code failed\n  537 |   font-weight: 500;\n  538 |   font-b\n> 539 | }\n      | ^\n  540 |\n  541 | .form-input,\n  542 | .form-select {\n\nUnexpected end of input\n\nGenerated code of PostCSS transform of file content of app/globals.css:\n./app/globals.css:539:1\n  537 |   font-weight: 500;\n  538 |   font-b\n> 539 | }\n      | ^\n  540 |\n  541 | .form-input,\n  542 | .form-select {\n\nImport trace:\n  Client Component Browser:\n    ./app/globals.css [Client Component Browser]\n    ./app/layout.tsx [Server Component] "}
-{"timestamp":"00:06:13.178","source":"Server","level":"ERROR","message":"[browser] \"./app/globals.css:539:1\\nError: Parsing CSS source code failed\\n  537 |   font-weight: 500;\\n  538 |   font-b\\n> 539 | }\\n      | ^\\n  540 |\\n  541 | .form-input,\\n  542 | .form-select {\\n\\nUnexpected end of input\\n\\nGenerated code of PostCSS transform of file content of app/globals.css:\\n./app/globals.css:539:1\\n  537 |   font-weight: 500;\\n  538 |   font-b\\n> 539 | }\\n      | ^\\n  540 |\\n  541 | .form-input,\\n  542 | .form-select {\\n\\nImport trace:\\n  Client Component Browser:\\n    ./app/globals.css [Client Component Browser]\\n    ./app/layout.tsx [Server Component]\" \"\""}
-{"timestamp":"00:06:15.391","source":"Browser","level":"ERROR","message":"./app/globals.css:539:1\nError: Parsing CSS source code failed\n  537 |   font-weight: 500;\n  538 |   font-bol\n> 539 | }\n      | ^\n  540 |\n  541 | .form-input,\n  542 | .form-select {\n\nUnexpected end of input\n\nGenerated code of PostCSS transform of file content of app/globals.css:\n./app/globals.css:539:1\n  537 |   font-weight: 500;\n  538 |   font-bol\n> 539 | }\n      | ^\n  540 |\n  541 | .form-input,\n  542 | .form-select {\n\nImport trace:\n  Client Component Browser:\n    ./app/globals.css [Client Component Browser]\n    ./app/layout.tsx [Server Component] "}
-{"timestamp":"00:06:15.392","source":"Server","level":"ERROR","message":"[browser] \"./app/globals.css:539:1\\nError: Parsing CSS source code failed\\n  537 |   font-weight: 500;\\n  538 |   font-bol\\n> 539 | }\\n      | ^\\n  540 |\\n  541 | .form-input,\\n  542 | .form-select {\\n\\nUnexpected end of input\\n\\nGenerated code of PostCSS transform of file content of app/globals.css:\\n./app/globals.css:539:1\\n  537 |   font-weight: 500;\\n  538 |   font-bol\\n> 539 | }\\n      | ^\\n  540 |\\n  541 | .form-input,\\n  542 | .form-select {\\n\\nImport trace:\\n  Client Component Browser:\\n    ./app/globals.css [Client Component Browser]\\n    ./app/layout.tsx [Server Component]\" \"\""}
-{"timestamp":"00:06:17.273","source":"Server","level":"LOG","message":"✓ Compiled in 4ms"}
-{"timestamp":"00:06:30.815","source":"Server","level":"LOG","message":"✓ Compiled in 18ms"}
-{"timestamp":"00:06:35.665","source":"Server","level":"LOG","message":"✓ Compiled in 4ms"}
-{"timestamp":"00:06:38.561","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:07:16.704","source":"Server","level":"LOG","message":"✓ Compiled in 9ms"}
-{"timestamp":"00:07:20.211","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:07:41.773","source":"Server","level":"LOG","message":"✓ Compiled in 7ms"}
-{"timestamp":"00:07:44.514","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:07:49.900","source":"Server","level":"LOG","message":"✓ Compiled in 5ms"}
-{"timestamp":"00:11:50.946","source":"Server","level":"LOG","message":"✓ Compiled in 5ms"}
-{"timestamp":"00:12:05.396","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:12:14.674","source":"Server","level":"LOG","message":"✓ Compiled in 6ms"}
-{"timestamp":"00:13:36.407","source":"Server","level":"LOG","message":"✓ Compiled in 4ms"}
-{"timestamp":"00:13:39.911","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
-{"timestamp":"00:13:41.186","source":"Server","level":"LOG","message":"✓ Compiled in 10ms"}
-{"timestamp":"00:15:10.662","source":"Server","level":"LOG","message":"✓ Compiled in 11ms"}
+{"timestamp":"00:00:01.768","source":"Server","level":"LOG","message":""}
+{"timestamp":"00:00:02.748","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:02.902","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:03.226","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:03.384","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:03.560","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"00:00:03.690","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
