@@ -26,7 +26,6 @@ type Candidate = {
   id: string;
   name: string;
   photo_url: string | null;
-  client_code: string;
   position: string | null;
   interview_type: string;
   interview_date: string | null;
@@ -48,15 +47,15 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 
-  const [form, setForm] = useState({
-    name: '',
-    photo_url: '',
-    client_code: 'CLIENT-A',
-    position: '',
-    interview_date: '',
-    interview_time: '',
-    status: 'Scheduled',
-  });
+const [form, setForm] = useState({
+  name: '',
+  photo_file: null as File | null,
+  no_photo: false,
+  position: '',
+  interview_date: '',
+  interview_time: '',
+  status: 'Scheduled',
+});
 
   async function loadCandidates() {
     setLoading(true);
@@ -80,44 +79,73 @@ export default function AdminPage() {
     loadCandidates();
   }, []);
 
-  async function addCandidate(e: FormEvent) {
-    e.preventDefault();
+async function addCandidate(e: FormEvent) {
+  e.preventDefault();
 
-    setMessage('');
+  setMessage('');
 
-    const nextOrder = candidates.length
-      ? Math.max(...candidates.map((c) => c.sort_order)) + 1
-      : 1;
+  const nextOrder = candidates.length
+    ? Math.max(...candidates.map((c) => c.sort_order)) + 1
+    : 1;
 
-    const { error } = await supabase.from('candidates').insert({
-      ...form,
-      interview_type: 'Final Interview',
-      sort_order: nextOrder,
-      photo_url: form.photo_url || null,
-      position: form.position || null,
-      interview_date: form.interview_date || null,
-      interview_time: form.interview_time || null,
-    });
+  let photoUrl: string | null = null;
 
-    if (error) {
-      setMessage(error.message);
+  // Upload photo only when the user did not select "None"
+  if (!form.no_photo && form.photo_file) {
+    const file = form.photo_file;
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${crypto.randomUUID()}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('candidate-photos')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) {
+      setMessage(`Photo upload failed: ${uploadError.message}`);
       return;
     }
 
-    setForm({
-      name: '',
-      photo_url: '',
-      client_code: form.client_code || 'CLIENT-A',
-      position: '',
-      interview_date: '',
-      interview_time: '',
-      status: 'Scheduled',
-    });
+    const { data } = supabase.storage
+      .from('candidate-photos')
+      .getPublicUrl(fileName);
 
-    setMessage('Candidate added successfully.');
-
-    await loadCandidates();
+    photoUrl = data.publicUrl;
   }
+
+  const { error } = await supabase.from('candidates').insert({
+    name: form.name,
+    photo_url: photoUrl,
+    position: form.position || null,
+    interview_date: form.interview_date || null,
+    interview_time: form.interview_time || null,
+    status: form.status,
+    interview_type: 'Final Interview',
+    sort_order: nextOrder,
+  });
+
+  if (error) {
+    setMessage(error.message);
+    return;
+  }
+
+  setForm({
+    name: '',
+    photo_file: null,
+    no_photo: false,
+    position: '',
+    interview_date: '',
+    interview_time: '',
+    status: 'Scheduled',
+  });
+
+  setMessage('Candidate added successfully.');
+
+  await loadCandidates();
+}
 
   async function updateStatus(id: string, status: string) {
     setMessage('');
@@ -197,7 +225,7 @@ export default function AdminPage() {
 
         <div className="logo-area">
           <div className="logo-icon"></div>
-          <div className="logo-text">OptiHire</div>
+          <div className="logo-text">Hyacinth</div>
         </div>
 
         <div className="sidebar-search">
@@ -282,7 +310,7 @@ export default function AdminPage() {
 
           <div>
             <h1 className="greeting-title">
-              Good Morning, Admin!
+              Good Morning, Louie!
             </h1>
 
             <p className="greeting-subtitle">
@@ -452,41 +480,82 @@ export default function AdminPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">
-                  Photo URL
-                </label>
+  <label className="form-label">
+    Candidate Photo
+  </label>
 
-                <input
-                  className="form-input"
-                  placeholder="Optional photo URL"
-                  value={form.photo_url}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      photo_url: e.target.value,
-                    })
-                  }
-                />
-              </div>
+  <div className="photo-upload">
 
-              <div className="form-group">
-                <label className="form-label">
-                  Client Code
-                </label>
+    <label
+      htmlFor="candidate-photo"
+      className={`photo-upload-box ${
+        form.no_photo ? 'disabled' : ''
+      }`}
+    >
+      <input
+        id="candidate-photo"
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        disabled={form.no_photo}
+        onChange={(e) => {
+          const file = e.target.files?.[0] ?? null;
 
-                <input
-                  className="form-input"
-                  required
-                  placeholder="CLIENT-A"
-                  value={form.client_code}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      client_code: e.target.value,
-                    })
-                  }
-                />
-              </div>
+          setForm({
+            ...form,
+            photo_file: file,
+            no_photo: false,
+          });
+        }}
+      />
+
+      <div className="photo-upload-content">
+
+        {form.photo_file ? (
+          <>
+            <span className="photo-file-name">
+              {form.photo_file.name}
+            </span>
+
+            <span className="photo-file-change">
+              Change photo
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="photo-upload-title">
+              Upload Photo
+            </span>
+
+            <span className="photo-upload-subtitle">
+              PNG, JPG or WEBP
+            </span>
+          </>
+        )}
+
+      </div>
+    </label>
+
+    <label className="none-photo-option">
+      <input
+        type="checkbox"
+        checked={form.no_photo}
+        onChange={(e) =>
+          setForm({
+            ...form,
+            no_photo: e.target.checked,
+            photo_file: e.target.checked
+              ? null
+              : form.photo_file,
+          })
+        }
+      />
+
+      <span>None</span>
+    </label>
+
+  </div>
+</div>
+
 
               <div className="form-group">
                 <label className="form-label">
@@ -642,7 +711,6 @@ export default function AdminPage() {
                 <thead>
                   <tr>
                     <th>Candidate</th>
-                    <th>Client</th>
                     <th>Interview</th>
                     <th>Type</th>
                     <th>Status</th>
@@ -672,6 +740,17 @@ export default function AdminPage() {
                           />
 
                           <div>
+                            {candidate.photo_url ? (
+  <img
+    className="candidate-avatar"
+    src={candidate.photo_url}
+    alt={candidate.name}
+  />
+) : (
+  <div className="candidate-avatar no-photo-avatar">
+    <UserRound size={13} />
+  </div>
+)}
 
                             <div className="candidate-name">
                               {candidate.name}
@@ -687,15 +766,8 @@ export default function AdminPage() {
 
                       </td>
 
-                      {/* CLIENT */}
 
-                      <td>
-
-                        <span className="client-code">
-                          {candidate.client_code}
-                        </span>
-
-                      </td>
+                  
 
                       {/* INTERVIEW */}
 
@@ -779,7 +851,7 @@ export default function AdminPage() {
 
                     <tr>
 
-                      <td colSpan={6}>
+                      <td colSpan={5}>
 
                         <div className="empty-state">
                           No candidates yet. Add your first candidate above.
