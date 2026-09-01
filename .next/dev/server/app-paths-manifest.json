@@ -1,0 +1,6 @@
+{
+  "/Admin-Panel/page": "app/Admin-Panel/page.js",
+  "/Admin/page": "app/Admin/page.js",
+  "/Visual-Display/page": "app/Visual-Display/page.js",
+  "/_not-found/page": "app/_not-found/page.js"
+}
