@@ -9,13 +9,13 @@
 
 /* ---- keyframes for /visual/prototype (used via animate-[...] utilities) ---- */
 
-/* ember field scrolling upward; each layer is duplicated 1000px lower for a seamless loop */
+/* ember field falling downward; each layer is duplicated 1000px above for a seamless loop */
 @keyframes drift {
   from {
     transform: translateY(0);
   }
   to {
-    transform: translateY(-1000px);
+    transform: translateY(1000px);
   }
 }
 

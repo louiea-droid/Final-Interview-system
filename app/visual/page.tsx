@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import { Jost, Yellowtail } from 'next/font/google';
+import FullscreenSwitch from './fullscreen-switch';
 
 // "Neue Plak" from the prototype is a local font not present in the repo;
 // Jost 900 was its declared fallback and is served from Google Fonts.
@@ -55,22 +56,24 @@ function mulberry32(seed: number) {
   };
 }
 
-const SPARK_COLORS = ['230,60,40', '255,90,60', '255,140,90'];
+const SPARK_COLORS = ['224,40,24', '255,80,48', '255,140,60', '255,176,96'];
 
-function sparkField(seed: number, count: number): string {
+function sparkField(seed: number, count: number, maxR: number): string {
   const rand = mulberry32(seed);
   const shadows: string[] = [];
   for (let i = 0; i < count; i++) {
     const x = Math.floor(rand() * 1600);
     const y = Math.floor(rand() * 1000);
-    const spread = rand() < 0.35 ? 1 : 0;
+    // radius weighted toward small dots; blur grows with size for a bokeh look
+    const r = +(rand() * rand() * maxR).toFixed(1);
+    const blur = +((r + 0.5) * (1.5 + rand() * 2)).toFixed(1);
     const color = SPARK_COLORS[Math.floor(rand() * SPARK_COLORS.length)];
-    const alpha = +(0.2 + rand() * 0.35).toFixed(2);
-    shadows.push(`${x}px ${y}px 0 ${spread}px rgba(${color},${alpha})`);
-    // some sparks get a soft glow halo
-    if (rand() < 0.45) {
+    const alpha = +(0.25 + rand() * 0.55).toFixed(2);
+    shadows.push(`${x}px ${y}px ${blur}px ${r}px rgba(${color},${alpha})`);
+    // soft halo around some of the brighter dots
+    if (rand() < 0.35) {
       shadows.push(
-        `${x}px ${y}px ${spread ? 9 : 5}px ${spread}px rgba(${color},${+(alpha * 0.45).toFixed(2)})`
+        `${x}px ${y}px ${blur + 6}px ${r + 1.5}px rgba(${color},${+(alpha * 0.35).toFixed(2)})`
       );
     }
   }
@@ -78,16 +81,21 @@ function sparkField(seed: number, count: number): string {
 }
 
 const SPARK_LAYERS = [
-  { shadow: sparkField(11, 190), animation: 'animate-[drift_90s_linear_infinite] opacity-75' },
-  { shadow: sparkField(22, 95), animation: 'animate-[drift_60s_linear_infinite] opacity-90' },
-  { shadow: sparkField(33, 48), animation: 'animate-[drift_38s_linear_infinite]' },
+  // far dust: many tiny dots
+  { shadow: sparkField(11, 420, 1.2), animation: 'animate-[drift_45s_linear_infinite] opacity-75' },
+  // mid embers
+  { shadow: sparkField(22, 230, 2.4), animation: 'animate-[drift_28s_linear_infinite] opacity-90' },
+  // near embers: larger, brighter
+  { shadow: sparkField(33, 120, 4), animation: 'animate-[drift_16s_linear_infinite]' },
+  // out-of-focus bokeh: big soft discs
+  { shadow: sparkField(44, 36, 8), animation: 'animate-[drift_60s_linear_infinite] opacity-80' },
 ];
 
 export default function PrototypePage() {
   return (
     <main
       className="relative grid h-dvh place-items-center overflow-hidden bg-[#0b0102]
-        [background-image:radial-gradient(ellipse_55%_45%_at_50%_32%,#5c0d11_0%,rgba(92,13,17,0)_70%),radial-gradient(ellipse_120%_100%_at_50%_45%,#350609_0%,#1b0305_55%,#0b0102_100%)]"
+        [background-image:radial-gradient(ellipse_120%_100%_at_50%_42%,#240508_0%,#150304_55%,#0b0102_100%)]"
     >
       {/* blurred red swirl */}
       <div
@@ -96,9 +104,11 @@ export default function PrototypePage() {
           [background-image:radial-gradient(ellipse_40%_12%_at_25%_40%,rgba(190,35,30,.24),transparent_70%),radial-gradient(ellipse_32%_9%_at_78%_62%,rgba(210,50,35,.20),transparent_70%),radial-gradient(ellipse_50%_14%_at_60%_25%,rgba(160,25,25,.17),transparent_72%),radial-gradient(ellipse_28%_8%_at_15%_75%,rgba(190,40,30,.15),transparent_70%)]"
       />
 
-      {/* drifting embers: each density layer is doubled 1000px lower for a seamless loop */}
+      <FullscreenSwitch />
+
+      {/* falling embers: each density layer is doubled 1000px above for a seamless loop */}
       {SPARK_LAYERS.map((layer, i) =>
-        [0, 1000].map((top) => (
+        [0, -1000].map((top) => (
           <div
             key={`sparks-${i}-${top}`}
             aria-hidden
@@ -136,7 +146,9 @@ export default function PrototypePage() {
             max-[620px]:w-[min(100%,calc((78vh-70px)*1.1))] max-[620px]:grid-cols-2"
         >
           {FRAMES.map((frame, i) => {
-            const delay = { animationDelay: `-${(i * 0.18).toFixed(2)}s` };
+            // negative delay = head start in the cycle; give the leftmost frame
+            // the biggest head start so the swap wave travels left -> right
+            const delay = { animationDelay: `-${((FRAMES.length - 1 - i) * 0.18).toFixed(2)}s` };
             return (
               <div key={frame.a.name} className="flex flex-col bg-[#2e0505]">
                 <div
@@ -162,8 +174,9 @@ export default function PrototypePage() {
                   <span
                     className={`${yellowtail.className} absolute inset-0 flex items-center justify-center
                       overflow-hidden whitespace-nowrap px-[6px] pb-[3px] leading-none
-                      text-[clamp(11px,1.7vw,21px)] text-[#2b1704]
-                      [-webkit-text-stroke:0.6px_#2b1704] [paint-order:stroke_fill]
+                      text-[clamp(13px,1.9vw,24px)] text-[#1a0d02]
+                      [-webkit-text-stroke:1px_#1a0d02] [paint-order:stroke_fill]
+                      [text-shadow:0_1px_0_rgba(255,246,215,.65)]
                       animate-[name-a_9s_infinite] motion-reduce:animate-none
                       max-[620px]:text-[clamp(11px,3.4vw,18px)]`}
                     style={delay}
@@ -173,8 +186,9 @@ export default function PrototypePage() {
                   <span
                     className={`${yellowtail.className} absolute inset-0 flex items-center justify-center
                       overflow-hidden whitespace-nowrap px-[6px] pb-[3px] leading-none
-                      text-[clamp(11px,1.7vw,21px)] text-[#2b1704]
-                      [-webkit-text-stroke:0.6px_#2b1704] [paint-order:stroke_fill]
+                      text-[clamp(13px,1.9vw,24px)] text-[#1a0d02]
+                      [-webkit-text-stroke:1px_#1a0d02] [paint-order:stroke_fill]
+                      [text-shadow:0_1px_0_rgba(255,246,215,.65)]
                       animate-[name-b_9s_infinite] motion-reduce:animate-none motion-reduce:opacity-0
                       max-[620px]:text-[clamp(11px,3.4vw,18px)]`}
                     style={delay}
