@@ -1,7 +1,0 @@
-{
-  "/_global-error/page": "app/_global-error/page.js",
-  "/_not-found/page": "app/_not-found/page.js",
-  "/admin/page": "app/admin/page.js",
-  "/visual/page": "app/visual/page.js",
-  "/visual/prototype/page": "app/visual/prototype/page.js"
-}

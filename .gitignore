@@ -1,1 +1,8 @@
 node_modules
+
+# build output
+.next/
+next-env.d.ts
+
+# local env
+.env*.local
