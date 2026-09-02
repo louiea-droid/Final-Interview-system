@@ -4,19 +4,15 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   BarChart3,
-  CalendarDays,
   CheckCircle2,
   Clock3,
   LayoutDashboard,
-  MessageSquare,
+  Pencil,
   Plus,
-  Search,
   Settings,
   Trash2,
   UserRound,
   Users,
-  Video,
-  BriefcaseBusiness,
   Sun,
 } from 'lucide-react';
 
@@ -29,7 +25,6 @@ type Candidate = {
   position: string | null;
   interview_type: string;
   interview_date: string | null;
-  interview_time: string | null;
   status: string;
   sort_order: number;
 };
@@ -44,8 +39,12 @@ const statuses = [
 
 export default function AdminPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [totalCandidates, setTotalCandidates] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
 
 const [form, setForm] = useState({
   name: '',
@@ -53,16 +52,15 @@ const [form, setForm] = useState({
   no_photo: false,
   position: '',
   interview_date: '',
-  interview_time: '',
   status: 'Scheduled',
 });
 
   async function loadCandidates() {
     setLoading(true);
 
-    const { data, error } = await supabase
+    const { data, count, error } = await supabase
       .from('candidates')
-      .select('*')
+      .select('*', { count: 'exact' })
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true });
 
@@ -70,6 +68,7 @@ const [form, setForm] = useState({
       setMessage(error.message);
     } else {
       setCandidates(data ?? []);
+      setTotalCandidates(count ?? data?.length ?? 0);
     }
 
     setLoading(false);
@@ -79,16 +78,38 @@ const [form, setForm] = useState({
     loadCandidates();
   }, []);
 
-async function addCandidate(e: FormEvent) {
+  useEffect(() => {
+    const updateCurrentTime = () => setCurrentTime(new Date());
+
+    updateCurrentTime();
+    const intervalId = window.setInterval(updateCurrentTime, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    if (!message) return;
+
+    const timeoutId = window.setTimeout(() => setMessage(''), 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
+
+async function saveCandidate(e: FormEvent) {
   e.preventDefault();
 
   setMessage('');
 
+  const existingCandidate = editingId
+    ? candidates.find((candidate) => candidate.id === editingId)
+    : null;
   const nextOrder = candidates.length
     ? Math.max(...candidates.map((c) => c.sort_order)) + 1
     : 1;
 
-  let photoUrl: string | null = null;
+  let photoUrl: string | null = form.no_photo
+    ? null
+    : existingCandidate?.photo_url ?? null;
 
   // Upload photo only when the user did not select "None"
   if (!form.no_photo && form.photo_file) {
@@ -98,7 +119,7 @@ async function addCandidate(e: FormEvent) {
     const fileName = `${crypto.randomUUID()}.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage
-      .from('candidate-photos')
+      .from('Candidate-photos')
       .upload(fileName, file, {
         cacheControl: '3600',
         upsert: false,
@@ -110,22 +131,30 @@ async function addCandidate(e: FormEvent) {
     }
 
     const { data } = supabase.storage
-      .from('candidate-photos')
+      .from('Candidate-photos')
       .getPublicUrl(fileName);
 
     photoUrl = data.publicUrl;
   }
 
-  const { error } = await supabase.from('candidates').insert({
+  const candidateDetails = {
     name: form.name,
     photo_url: photoUrl,
     position: form.position || null,
     interview_date: form.interview_date || null,
-    interview_time: form.interview_time || null,
     status: form.status,
-    interview_type: 'Final Interview',
-    sort_order: nextOrder,
-  });
+  };
+
+  const { error } = editingId
+    ? await supabase
+        .from('candidates')
+        .update(candidateDetails)
+        .eq('id', editingId)
+    : await supabase.from('candidates').insert({
+        ...candidateDetails,
+        interview_type: 'Final Interview',
+        sort_order: nextOrder,
+      });
 
   if (error) {
     setMessage(error.message);
@@ -138,14 +167,44 @@ async function addCandidate(e: FormEvent) {
     no_photo: false,
     position: '',
     interview_date: '',
-    interview_time: '',
     status: 'Scheduled',
   });
 
-  setMessage('Candidate added successfully.');
+  setEditingId(null);
+  setMessage(
+    editingId
+      ? 'Candidate updated successfully.'
+      : 'Candidate added successfully.'
+  );
 
   await loadCandidates();
 }
+
+  function startEditing(candidate: Candidate) {
+    setEditingId(candidate.id);
+    setForm({
+      name: candidate.name,
+      photo_file: null,
+      no_photo: !candidate.photo_url,
+      position: candidate.position ?? '',
+      interview_date: candidate.interview_date ?? '',
+      status: candidate.status,
+    });
+    setMessage('');
+  }
+
+  function cancelEditing() {
+    setEditingId(null);
+    setForm({
+      name: '',
+      photo_file: null,
+      no_photo: false,
+      position: '',
+      interview_date: '',
+      status: 'Scheduled',
+    });
+    setMessage('');
+  }
 
   async function updateStatus(id: string, status: string) {
     setMessage('');
@@ -170,12 +229,6 @@ async function addCandidate(e: FormEvent) {
   }
 
   async function removeCandidate(id: string) {
-    const confirmed = window.confirm(
-      'Are you sure you want to remove this candidate?'
-    );
-
-    if (!confirmed) return;
-
     setMessage('');
 
     const { error } = await supabase
@@ -191,10 +244,11 @@ async function addCandidate(e: FormEvent) {
     setCandidates((current) =>
       current.filter((candidate) => candidate.id !== id)
     );
+    setCandidateToDelete(null);
   }
 
   const stats = useMemo(() => {
-    const total = candidates.length;
+    const total = totalCandidates;
 
     const scheduled = candidates.filter(
       (c) =>
@@ -212,7 +266,7 @@ async function addCandidate(e: FormEvent) {
       scheduled,
       completed,
     };
-  }, [candidates]);
+  }, [candidates, totalCandidates]);
 
   return (
     <div className="admin-layout">
@@ -224,51 +278,30 @@ async function addCandidate(e: FormEvent) {
       <aside className="sidebar">
 
         <div className="logo-area">
-          <div className="logo-icon"></div>
+          <img
+            className="logo-icon"
+            src="/visual/HILLC-Petals.png"
+            alt="Hyacinth logo"
+          />
           <div className="logo-text">Hyacinth</div>
         </div>
 
-        <div className="sidebar-search">
-          <Search size={13} />
-          <span>Search</span>
-        </div>
-
         <div className="sidebar-section">
-          <div className="sidebar-label">MAIN MENU</div>
+          
 
-          <div className="sidebar-link active">
+          <a className="sidebar-link active" href="/admin">
             <LayoutDashboard size={14} />
             <span>Dashboard</span>
-          </div>
+          </a>
 
-          <div className="sidebar-link">
-            <BriefcaseBusiness size={14} />
-            <span>Open Hiring</span>
-          </div>
-
-          <div className="sidebar-link">
+          <a className="sidebar-link" href="/admin/candidates">
             <Users size={14} />
             <span>Candidates</span>
-          </div>
-
-          <div className="sidebar-link">
-            <Video size={14} />
-            <span>Interviews</span>
-          </div>
+          </a>
         </div>
 
         <div className="sidebar-section">
           <div className="sidebar-label">MANAGEMENT</div>
-
-          <div className="sidebar-link">
-            <UserRound size={14} />
-            <span>Talent Pool</span>
-          </div>
-
-          <div className="sidebar-link">
-            <MessageSquare size={14} />
-            <span>Messages</span>
-          </div>
 
           <div className="sidebar-link">
             <BarChart3 size={14} />
@@ -310,20 +343,35 @@ async function addCandidate(e: FormEvent) {
 
           <div>
             <h1 className="greeting-title">
-              Good Morning, Louie!
+              Final Interview Applicants
             </h1>
 
             <p className="greeting-subtitle">
-              Here&apos;s your interview management overview.
+               
             </p>
           </div>
 
           <div className="header-actions">
 
-            <button className="header-button">
-              <CalendarDays size={13} />
-              Today
-            </button>
+            <div className="timezone-clocks" aria-label="Current time">
+              <div className="timezone-clock">
+                <span className="timezone-label">PHILIPPINE TME</span>
+                <span>
+                  {currentTime
+                    ? formatCurrentTime(currentTime, 'Asia/Manila')
+                    : 'Loading...'}
+                </span>
+              </div>
+
+              <div className="timezone-clock">
+                <span className="timezone-label">EASTERN TIME</span>
+                <span>
+                  {currentTime
+                    ? formatCurrentTime(currentTime)
+                    : 'Loading...'}
+                </span>
+              </div>
+            </div>
 
             <div className="profile">
               <img
@@ -441,11 +489,13 @@ async function addCandidate(e: FormEvent) {
 
               <div>
                 <h2 className="panel-title">
-                  Add Candidate
+                  {editingId ? 'Edit Candidate' : 'Add Candidate'}
                 </h2>
 
                 <p className="panel-subtitle">
-                  Add a candidate to the interview queue.
+                  {editingId
+                    ? "Update this candidate's interview details."
+                    : 'Add a candidate to the interview queue.'}
                 </p>
               </div>
 
@@ -454,7 +504,7 @@ async function addCandidate(e: FormEvent) {
           </div>
 
           <form
-            onSubmit={addCandidate}
+            onSubmit={saveCandidate}
             className="form-container"
           >
 
@@ -595,24 +645,6 @@ async function addCandidate(e: FormEvent) {
 
               <div className="form-group">
                 <label className="form-label">
-                  Interview Time
-                </label>
-
-                <input
-                  className="form-input"
-                  type="time"
-                  value={form.interview_time}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      interview_time: e.target.value,
-                    })
-                  }
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">
                   Starting Status
                 </label>
 
@@ -641,9 +673,18 @@ async function addCandidate(e: FormEvent) {
                 type="submit"
                 className="primary-button"
               >
-                <Plus size={12} />
-                Add Candidate
+                {editingId ? <Pencil size={12} /> : <Plus size={12} />}
+                {editingId ? 'Save Changes' : 'Add Candidate'}
               </button>
+              {editingId && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={cancelEditing}
+                >
+                  Cancel
+                </button>
+              )}
             </div>
 
           </form>
@@ -711,8 +752,8 @@ async function addCandidate(e: FormEvent) {
                 <thead>
                   <tr>
                     <th>Candidate</th>
-                    <th>Interview</th>
-                    <th>Type</th>
+                    <th>Interview Schedule</th>
+                    <th>type</th>
                     <th>Status</th>
                     <th>Action</th>
                   </tr>
@@ -728,19 +769,9 @@ async function addCandidate(e: FormEvent) {
 
                       <td>
 
-                        <div className="candidate-info">
+                       <div className="candidate-info">
 
-                          <img
-                            className="candidate-avatar"
-                            src={
-                              candidate.photo_url ||
-                              'https://i.pravatar.cc/100?img=12'
-                            }
-                            alt={candidate.name}
-                          />
-
-                          <div>
-                            {candidate.photo_url ? (
+                         {candidate.photo_url ? (
   <img
     className="candidate-avatar"
     src={candidate.photo_url}
@@ -752,6 +783,7 @@ async function addCandidate(e: FormEvent) {
   </div>
 )}
 
+                         <div>
                             <div className="candidate-name">
                               {candidate.name}
                             </div>
@@ -775,16 +807,6 @@ async function addCandidate(e: FormEvent) {
 
                         <div>
                           {candidate.interview_date || '—'}
-                        </div>
-
-                        <div
-                          style={{
-                            color: '#62586b',
-                            fontSize: '6px',
-                            marginTop: '3px',
-                          }}
-                        >
-                          {candidate.interview_time || 'No time'}
                         </div>
 
                       </td>
@@ -826,16 +848,23 @@ async function addCandidate(e: FormEvent) {
 
                       </td>
 
-                      {/* DELETE */}
+                      {/* ACTIONS */}
 
                       <td>
 
                         <button
                           type="button"
+                          className="edit-button"
+                          onClick={() => startEditing(candidate)}
+                          aria-label={`Edit ${candidate.name}`}
+                        >
+                          <Pencil size={12} />
+                        </button>
+
+                        <button
+                          type="button"
                           className="delete-button"
-                          onClick={() =>
-                            removeCandidate(candidate.id)
-                          }
+                          onClick={() => setCandidateToDelete(candidate)}
                           aria-label={`Remove ${candidate.name}`}
                         >
                           <Trash2 size={12} />
@@ -872,9 +901,54 @@ async function addCandidate(e: FormEvent) {
 
         </section>
 
+        {candidateToDelete && (
+          <div className="confirmation-overlay" role="presentation">
+            <div
+              className="confirmation-popup"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="delete-confirmation-title"
+            >
+              <h2 id="delete-confirmation-title">
+                Are you sure you want to remove this candidate?
+              </h2>
+
+              <div className="confirmation-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setCandidateToDelete(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="confirm-delete-button"
+                  onClick={() => removeCandidate(candidateToDelete.id)}
+                >
+                  Yes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   );
+}
+
+function formatCurrentTime(date: Date, timeZone?: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  }).format(date);
 }
 
 function getStatusClass(status: string) {

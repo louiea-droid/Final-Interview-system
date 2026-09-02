@@ -112,39 +112,9 @@ button {
 }
 
 .logo-icon {
-  width: 22px;
-  height: 22px;
-
-  border-radius: 6px;
-
-  background:
-    linear-gradient(
-      135deg,
-      #db5aff,
-      #772cff
-    );
-
-  position: relative;
-  transform: rotate(45deg);
-
-  box-shadow:
-    0 0 18px rgba(167, 50, 255, 0.3);
-}
-
-.logo-icon::before {
-  content: "";
-
-  position: absolute;
-
-  width: 7px;
-  height: 7px;
-
-  top: 5px;
-  left: 5px;
-
-  border-radius: 2px;
-
-  background: #11071c;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
 }
 
 .logo-text {
@@ -154,28 +124,6 @@ button {
   letter-spacing: -0.03em;
 
   transform: rotate(0);
-}
-
-.sidebar-search {
-  height: 30px;
-
-  display: flex;
-  align-items: center;
-  gap: 7px;
-
-  padding: 0 10px;
-
-  margin-bottom: 19px;
-
-  border-radius: 6px;
-
-  color: #74697f;
-
-  border: 1px solid rgba(189, 106, 255, 0.23);
-
-  background: rgba(255, 255, 255, 0.015);
-
-  font-size: 13px;
 }
 
 .sidebar-section {
@@ -211,6 +159,7 @@ button {
   margin-bottom: 2px;
 
   transition: 0.18s ease;
+  text-decoration: none;
 }
 
 .sidebar-link:hover {
@@ -308,6 +257,36 @@ button {
   gap: 8px;
 }
 
+.timezone-clocks {
+  display: flex;
+  gap: 6px;
+}
+
+.timezone-clock {
+  min-width: 142px;
+  padding: 6px 9px;
+
+  border: 1px solid var(--border);
+  border-radius: 6px;
+
+  color: #c9bfd3;
+  background: rgba(255, 255, 255, 0.025);
+
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.timezone-label {
+  display: block;
+  margin-bottom: 3px;
+
+  color: #a33431;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
 .header-button {
   height: 29px;
 
@@ -339,8 +318,8 @@ button {
 }
 
 .profile-avatar {
-  width: 26px;
-  height: 26px;
+  width: 40px;
+  height: 40px;
 
   border-radius: 50%;
 
@@ -780,9 +759,9 @@ button {
 
   border-radius: 7px;
 
-  border: 1px solid rgba(134, 76, 229, 0.15);
+  border: 1px solid rgba(111, 12, 11, 0.42);
 
-  background: rgba(124, 55, 190, 0.08);
+  background: rgba(111, 12, 11, 0.1);
 
   color: #bbb0c5;
 
@@ -897,11 +876,11 @@ button {
 
   border-radius: 5px;
 
-  border: 1px solid rgba(190, 106, 255, 0.14);
+  border: 1px solid rgba(111, 12, 11, 0.45);
 
   color: #e2e2e2; 
 
-  background: #140a20;
+  background: #171111;
 
   font-size: 12px;
 
@@ -928,6 +907,7 @@ button {
   color: #d45d59;
 }
 
+.edit-button,
 .delete-button {
   width: 27px;
   height: 27px;
@@ -938,6 +918,25 @@ button {
 
 
   border-radius: 6px;
+}
+
+.edit-button {
+  margin-right: 5px;
+
+  color: #9d91a5;
+
+  border: 1px solid rgba(255, 255, 255, 0.1);
+
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.edit-button:hover {
+  color: #eeeeee;
+
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.delete-button {
 
 
     color: #bd5552;
@@ -949,6 +948,86 @@ button {
 
 .delete-button:hover {
   background: rgba(111, 12, 11, 0.16);
+}
+
+.secondary-button {
+  height: 34px;
+
+  padding: 0 14px;
+
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+
+  color: #bcbcbc;
+  background: rgba(255, 255, 255, 0.04);
+
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.secondary-button:hover {
+  color: #eeeeee;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.confirmation-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 20px;
+
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.confirmation-popup {
+  width: min(100%, 380px);
+  padding: 22px;
+
+  border: 1px solid var(--border);
+  border-radius: 8px;
+
+  background: #171717;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+}
+
+.confirmation-popup h2 {
+  margin: 0;
+
+  color: #f2f2f2;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+
+  margin-top: 20px;
+}
+
+.confirm-delete-button {
+  height: 34px;
+  padding: 0 16px;
+
+  border: 0;
+  border-radius: 6px;
+
+  color: #ffffff;
+  background: #6f0c0b;
+
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.confirm-delete-button:hover {
+  background: #8b1716;
 }
 
 /* =========================================
@@ -1032,7 +1111,17 @@ button {
     grid-template-columns: 1fr;
   }
 }
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.985);
+  }
 
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 /* =========================================================
    ASPHALT WHISPER + DEEP RED TEXT OVERRIDE
    Add this at the VERY BOTTOM of globals.css
@@ -1045,7 +1134,7 @@ body,
 }
 
 /* Headings */
-h1,
+
 h2,
 h3,
 h4,
@@ -1053,7 +1142,7 @@ h5,
 h6,
 .greeting-title,
 .panel-title {
-  color: #f2f2f2;
+  color: #ffffff;
 }
 
 /* Main/sub text */
@@ -1248,6 +1337,247 @@ small {
 /* Icons inheriting old purple colors */
 svg {
   color: inherit;
+}
+
+/* Candidates directory */
+.candidates-page {
+  animation: fadeIn 0.25s ease both;
+}
+
+.candidates-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 22px;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 12px;
+
+  color: #a33431;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.back-link:hover {
+  color: #d05b56;
+}
+
+.candidate-summary {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 150px;
+  padding: 12px 15px;
+
+  border: 1px solid rgba(111, 12, 11, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.candidate-summary strong {
+  color: #f1f1f1;
+  font-size: 25px;
+}
+
+.candidate-summary span,
+.candidate-summary small {
+  color: #858585;
+  font-size: 11px;
+}
+
+.candidate-summary small {
+  grid-column: 2;
+  color: #70bd88;
+}
+
+.candidate-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 12px;
+  padding: 11px 13px;
+
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.candidate-filter-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  color: #a2a2a2;
+  font-size: 12px;
+}
+
+.candidate-filter-title svg {
+  color: #a33431;
+}
+
+.candidate-date-filter {
+  height: 30px;
+  min-width: 170px;
+  padding: 0 9px;
+
+  border: 1px solid rgba(111, 12, 11, 0.45);
+  border-radius: 5px;
+  outline: none;
+
+  color: #d3d3d3;
+  background: #171111;
+  font-size: 12px;
+}
+
+.candidate-date-filter:focus {
+  border-color: rgba(163, 52, 49, 0.8);
+}
+
+.candidate-date-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.candidate-date-group {
+  overflow: hidden;
+
+  border: 1px solid rgba(111, 12, 11, 0.3);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #161616, #111111);
+}
+
+.candidate-date-heading {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.candidate-date-heading h2 {
+  margin: 0;
+  color: #e4e4e4;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.candidate-date-heading span {
+  display: block;
+  margin-top: 4px;
+  color: #777777;
+  font-size: 11px;
+}
+
+.candidate-directory-row {
+  display: grid;
+  grid-template-columns: 36px minmax(150px, 1.4fr) minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 62px;
+  padding: 9px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+}
+
+.candidate-directory-row:last-child {
+  border-bottom: 0;
+}
+
+.candidate-directory-row:hover {
+  background: rgba(111, 12, 11, 0.07);
+}
+
+.candidate-directory-avatar {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 7px;
+  background: #201414;
+}
+
+.candidate-directory-details h3 {
+  margin: 0;
+  color: #dedede;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.candidate-directory-details span,
+.candidate-directory-type {
+  color: #777777;
+  font-size: 11px;
+}
+
+.candidate-directory-details span {
+  display: block;
+  margin-top: 3px;
+}
+
+.candidate-status {
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  color: #a7a7a7;
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.candidate-status.waiting {
+  color: #d2b35c;
+}
+
+.candidate-status.progress {
+  color: #d05b56;
+}
+
+.candidate-status.completed {
+  color: #68c48b;
+}
+
+.candidate-status.cancelled {
+  color: #c95552;
+}
+
+.candidate-list-state {
+  padding: 50px 20px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  color: #777777;
+  background: rgba(255, 255, 255, 0.02);
+  text-align: center;
+  font-size: 13px;
+}
+
+@media (max-width: 750px) {
+  .candidates-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .candidate-summary {
+    width: 100%;
+  }
+
+  .candidate-filter-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .candidate-date-filter {
+    width: 100%;
+  }
+
+  .candidate-directory-row {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
+
+  .candidate-directory-type {
+    display: none;
+  }
 }
 
 /* Override common purple variables/classes */
