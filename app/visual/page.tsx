@@ -141,15 +141,36 @@ export default function DisplayPage() {
    * DISPLAY SETTINGS
    * =========================================================
    *
-   * Only 4 candidates are shown at one time.
+   * At most 4 candidates are shown at one time, and the
+   * candidates are spread evenly over the sets so that a set
+   * is never left with one or two lonely boxes.
    *
-   * Set 1 = candidates 1-4
-   * Set 2 = candidates 5-8
-   * Set 3 = candidates 9-12
-   * etc.
+   *   4 candidates  -> one set of 4
+   *   6 candidates  -> two sets of 3
+   *   8 candidates  -> two sets of 4
+   *   9 candidates  -> three sets of 3
+   *  12 candidates  -> three sets of 4
    */
 
-  const CANDIDATES_PER_SET = 4;
+  const MAX_CANDIDATES_PER_SET = 4;
+
+  /*
+   * Board size relative to the full-width layout.
+   *
+   * 0.8 = 80%
+   */
+
+  const BOARD_SCALE = 0.8;
+
+  /*
+   * Width of a single candidate box at full size.
+   */
+
+  const FULL_BOX_WIDTH = 295;
+
+  const BOX_WIDTH = Math.round(
+    FULL_BOX_WIDTH * BOARD_SCALE
+  );
 
   /*
    * Time before switching to the next set.
@@ -242,18 +263,49 @@ export default function DisplayPage() {
   }, []);
 
   /* =========================================================
+     BALANCED SET SIZES
+
+     Use as few sets as possible (max 4 per set), then spread
+     the candidates evenly so no set is left with a single
+     lonely box.
+
+     e.g.  6 -> [3, 3]      8 -> [4, 4]
+          10 -> [4, 3, 3]  13 -> [4, 3, 3, 3]
+  ========================================================= */
+
+  const setSizes = useMemo(() => {
+    const count = candidates.length;
+
+    if (count === 0) {
+      return [];
+    }
+
+    const setCount = Math.ceil(
+      count / MAX_CANDIDATES_PER_SET
+    );
+
+    const base = Math.floor(
+      count / setCount
+    );
+
+    const remainder = count % setCount;
+
+    return Array.from(
+      { length: setCount },
+      (_, index) =>
+        base +
+        (index < remainder ? 1 : 0)
+    );
+  }, [candidates.length]);
+
+  /* =========================================================
      TOTAL NUMBER OF SETS
   ========================================================= */
 
-  const totalSets = useMemo(() => {
-    return Math.max(
-      1,
-      Math.ceil(
-        candidates.length /
-          CANDIDATES_PER_SET
-      )
-    );
-  }, [candidates.length]);
+  const totalSets = Math.max(
+    1,
+    setSizes.length
+  );
 
   /* =========================================================
      RESET SET WHEN CANDIDATES CHANGE
@@ -299,35 +351,50 @@ export default function DisplayPage() {
 
   const visibleCandidates =
     useMemo(() => {
-      const start =
-        currentSet *
-        CANDIDATES_PER_SET;
+      if (setSizes.length === 0) {
+        return [];
+      }
 
-      const end =
-        start +
-        CANDIDATES_PER_SET;
+      const safeSet = Math.min(
+        currentSet,
+        setSizes.length - 1
+      );
+
+      const start = setSizes
+        .slice(0, safeSet)
+        .reduce(
+          (total, size) => total + size,
+          0
+        );
 
       return candidates.slice(
         start,
-        end
+        start + setSizes[safeSet]
       );
     }, [
       candidates,
       currentSet,
+      setSizes,
     ]);
 
   /* =========================================================
      ADAPT NUMBER OF COLUMNS
+
+     One column per visible candidate, so a set of 3 renders
+     as 3 boxes side by side and a set of 4 as 4.
   ========================================================= */
 
-  const gridClass =
-    visibleCandidates.length === 1
-      ? "grid-cols-1 w-[min(100%,295px)]"
-      : visibleCandidates.length === 2
-      ? "grid-cols-2 w-[min(100%,590px)]"
-      : visibleCandidates.length === 3
-      ? "grid-cols-3 w-[min(100%,885px)]"
-      : "grid-cols-4 w-[min(100%,1180px)]";
+  const columns =
+    visibleCandidates.length > 0
+      ? visibleCandidates.length
+      : MAX_CANDIDATES_PER_SET;
+
+  const boardStyle = {
+    gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+    width: `min(${
+      BOARD_SCALE * 100
+    }%, ${columns * BOX_WIDTH}px)`,
+  };
 
   return (
     <main
@@ -459,9 +526,9 @@ export default function DisplayPage() {
 
         <div
           key={currentSet}
+          style={boardStyle}
           className={`
             grid
-            ${gridClass}
             gap-px
             border
             border-[#c9a03c]
