@@ -514,14 +514,36 @@ button {
 .metric-grid {
   display: grid;
 
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 2.6fr 2.35fr;
 
   gap: 9px;
 
   margin-bottom: 10px;
 }
 
+.metric-group {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.metric-group-top {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.metric-card--chart {
+  flex: 1;
+  min-height: 0;
+  justify-content: flex-start;
+}
+
 .metric-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+
   min-height: 0;
 
   padding: 10px 14px;
@@ -620,6 +642,144 @@ button {
 }
 
 /* =========================================
+   VISUAL BOARD PREVIEW
+========================================= */
+
+.visual-preview-card {
+  display: flex;
+  flex-direction: column;
+
+  /*
+   * The embedded /visual page needs roughly 345-355px of height
+   * at this card's typical width before its own content (logo,
+   * title, candidate row, "Best of Luck!") stops clipping — this
+   * min-height keeps a safety margin above that measured need.
+   */
+  min-height: 410px;
+
+  border-radius: 9px;
+
+  border: 1px solid rgba(111, 12, 11, 0.32);
+
+  background:
+    linear-gradient(
+      180deg,
+      #181818,
+      #111111
+    );
+
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.02),
+    0 8px 20px rgba(0, 0, 0, 0.18);
+
+  overflow: hidden;
+
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.visual-preview-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(162, 29, 27, 0.5);
+}
+
+.visual-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  padding: 14px 14px 0;
+}
+
+.visual-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  color: var(--text-muted);
+
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  margin-left: 2px;
+
+  border-radius: 50%;
+
+  background: var(--green);
+  box-shadow: 0 0 0 0 rgba(107, 197, 142, 0.6);
+
+  animation: live-pulse 1.8s ease-out infinite;
+}
+
+.visual-preview-live-label {
+  color: var(--green);
+
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(107, 197, 142, 0.55);
+  }
+
+  70% {
+    box-shadow: 0 0 0 6px rgba(107, 197, 142, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(107, 197, 142, 0);
+  }
+}
+
+.visual-preview-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  color: var(--red-status);
+
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.visual-preview-link:hover {
+  color: #e5615c;
+}
+
+.visual-preview-frame-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+
+  margin: 10px 14px 14px;
+
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  overflow: hidden;
+  background: #0b0102;
+}
+
+.visual-preview-frame {
+  width: 100%;
+  height: 100%;
+
+  border: 0;
+
+  /* Passive preview only — interact via the "Open" link instead. */
+  pointer-events: none;
+}
+
+/* =========================================
    PANEL
 ========================================= */
 
@@ -714,6 +874,45 @@ button {
 
 .form-panel {
   margin-bottom: 10px;
+}
+
+.interview-chart-wrap {
+  overflow-x: auto;
+
+  padding: 10px 0 0;
+}
+
+.interview-chart {
+  display: block;
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+
+.interview-chart-baseline {
+  stroke: var(--border-light);
+  stroke-width: 1;
+}
+
+.interview-chart-bar {
+  fill: var(--red-status);
+  transition: fill 0.15s ease;
+}
+
+.interview-chart-bar:hover {
+  fill: #e5615c;
+}
+
+.interview-chart-value {
+  fill: var(--text-soft);
+
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.interview-chart-label {
+  fill: var(--text-muted);
+
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .form-container {
@@ -1184,6 +1383,25 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.candidate-table tbody tr[draggable="true"] {
+  cursor: grab;
+}
+
+.candidate-table tbody tr[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.candidate-table tbody tr.dragging-row {
+  opacity: 0.45;
+}
+
+.candidate-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .candidate-avatar {
@@ -1681,6 +1899,20 @@ button {
     max-width: 100%;
   }
 
+  .candidate-edit-popup {
+    width: min(100%, 520px);
+    max-height: calc(100dvh - 24px);
+    padding: 16px;
+  }
+
+  .record-edit-photo {
+    align-items: flex-start;
+  }
+
+  .record-edit-file-input {
+    max-width: 100%;
+  }
+
   .metric-grid {
     grid-template-columns: 1fr;
   }
@@ -1710,14 +1942,20 @@ button {
   }
 }
 @keyframes fadeIn {
+  /*
+   * Opacity only: animating transform here would leave a
+   * lingering (even identity) transform on .candidates-page,
+   * which creates a new containing block for any
+   * position: fixed descendant — including the confirmation
+   * and add-candidate modals — and mispositions them relative
+   * to this element's box instead of the real viewport.
+   */
   0% {
     opacity: 0;
-    transform: scale(0.985);
   }
 
   100% {
     opacity: 1;
-    transform: scale(1);
   }
 }
 /* =========================================
@@ -2001,14 +2239,64 @@ svg {
   flex-direction: column;
   gap: 7px;
   width: min(100%, 410px);
-  max-height: calc(100vh - 40px);
+  max-height: min(720px, calc(100dvh - 32px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 22px;
 
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #171717;
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+}
+
+.candidate-edit-popup::-webkit-scrollbar {
+  width: 8px;
+}
+
+.candidate-edit-popup::-webkit-scrollbar-track {
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.candidate-edit-popup::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
+}
+
+.modal-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-subtitle {
+  margin: -3px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.modal-close-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.modal-close-button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .candidate-edit-popup h2 {
@@ -2052,6 +2340,71 @@ svg {
   color: #cfcfcf;
   font-size: 12px;
   font-weight: 600;
+}
+
+.record-edit-fieldset {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+}
+
+.record-edit-fieldset + .record-edit-fieldset {
+  margin-top: 10px;
+}
+
+.record-edit-photo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.record-edit-photo-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.record-edit-photo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.record-edit-photo-controls {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.record-edit-file-input {
+  max-width: 220px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.record-edit-remove-photo {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.record-edit-file-name {
+  color: var(--green);
+  font-size: 10px;
 }
 
 .candidate-edit-popup .form-label:not(:first-of-type) {
@@ -2443,4 +2796,67 @@ svg {
 .admin-layout.light-mode .candidate-table td,
 .admin-layout.light-mode .candidate-directory-row {
   border-bottom-color: rgba(91, 55, 55, 0.12);
+}
+
+.admin-layout.light-mode .photo-upload-box,
+.admin-layout.light-mode .none-photo-option,
+.admin-layout.light-mode .record-edit-photo-preview,
+.admin-layout.light-mode .modal-close-button,
+.admin-layout.light-mode .candidate-list-state {
+  border-color: rgba(91, 55, 55, 0.2);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.admin-layout.light-mode .photo-upload-box:hover,
+.admin-layout.light-mode .none-photo-option:hover,
+.admin-layout.light-mode .modal-close-button:hover {
+  background: rgba(111, 12, 11, 0.08);
+}
+
+.admin-layout.light-mode .photo-upload-box.disabled {
+  opacity: 0.58;
+  background: rgba(91, 55, 55, 0.08);
+}
+
+.admin-layout.light-mode .record-edit-file-input,
+.admin-layout.light-mode .settings-avatar-input {
+  color: #4d3737;
+}
+
+.admin-layout.light-mode .record-edit-file-input::file-selector-button,
+.admin-layout.light-mode .settings-avatar-input::file-selector-button {
+  margin-right: 8px;
+  padding: 5px 9px;
+  border: 1px solid rgba(91, 55, 55, 0.2);
+  border-radius: 5px;
+  color: #4d3737;
+  background: #f3e7e3;
+  font: inherit;
+  cursor: pointer;
+}
+
+.admin-layout.light-mode .record-edit-file-input::file-selector-button:hover,
+.admin-layout.light-mode .settings-avatar-input::file-selector-button:hover {
+  background: #ead7d2;
+}
+
+.admin-layout.light-mode .group-edit-fields,
+.admin-layout.light-mode .record-edit-fieldset {
+  border-color: rgba(91, 55, 55, 0.18);
+}
+
+.admin-layout.light-mode .candidate-directory-row:hover,
+.admin-layout.light-mode .candidate-table tr:hover td {
+  background: rgba(111, 12, 11, 0.06);
+}
+
+.admin-layout.light-mode .candidate-status {
+  color: #5b4747;
+  background: rgba(91, 55, 55, 0.08);
+  border-color: rgba(91, 55, 55, 0.22);
+}
+
+.admin-layout.light-mode .settings-saved,
+.admin-layout.light-mode .record-edit-file-name {
+  color: #28734a;
 }

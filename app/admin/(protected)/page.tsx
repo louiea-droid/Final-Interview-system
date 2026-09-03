@@ -3,10 +3,12 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { removeBackground } from '@imgly/background-removal';
 import {
-  CheckCircle2,
+  CalendarDays,
   Clock3,
+  ExternalLink,
+  GripVertical,
+  MonitorPlay,
   Pencil,
-  Plus,
   Trash2,
   UserRound,
   UsersRound,
@@ -37,8 +39,6 @@ type Candidate = {
 
 const statuses = [
   'Scheduled',
-  'Waiting',
-  'In Progress',
   'Completed',
   'Cancelled',
 ];
@@ -52,6 +52,7 @@ export default function AdminPage() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
   const [processingPhoto, setProcessingPhoto] = useState(false);
+  const [draggingCandidateId, setDraggingCandidateId] = useState<string | null>(null);
   const batchStartKey = useRef(getEasternBatchStart().toISOString());
 
 const [form, setForm] = useState({
@@ -89,6 +90,42 @@ const [form, setForm] = useState({
     }
 
     setLoading(false);
+  }
+
+  async function moveCandidate(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+
+    const draggedIndex = candidates.findIndex((candidate) => candidate.id === draggedId);
+    const targetIndex = candidates.findIndex((candidate) => candidate.id === targetId);
+
+    if (draggedIndex < 0 || targetIndex < 0) return;
+
+    const reorderedCandidates = [...candidates];
+    const [draggedCandidate] = reorderedCandidates.splice(draggedIndex, 1);
+    const insertIndex = targetIndex > draggedIndex ? targetIndex - 1 : targetIndex;
+    reorderedCandidates.splice(insertIndex, 0, draggedCandidate);
+    const orderedCandidates = reorderedCandidates.map((candidate, index) => ({
+      ...candidate,
+      sort_order: index + 1,
+    }));
+
+    setCandidates(orderedCandidates);
+    setMessage('');
+
+    const results = await Promise.all(
+      orderedCandidates.map((candidate) =>
+        supabase
+          .from('candidates')
+          .update({ sort_order: candidate.sort_order })
+          .eq('id', candidate.id)
+      )
+    );
+    const failedResult = results.find((result) => result.error);
+
+    if (failedResult?.error) {
+      setMessage(`Unable to save candidate order: ${failedResult.error.message}`);
+      loadCandidates();
+    }
   }
 
   useEffect(() => {
@@ -151,16 +188,11 @@ const [form, setForm] = useState({
 async function saveCandidate(e: FormEvent) {
   e.preventDefault();
 
-  if (processingPhoto) return;
+  if (processingPhoto || !editingId) return;
 
   setMessage('');
 
-  const existingCandidate = editingId
-    ? candidates.find((candidate) => candidate.id === editingId)
-    : null;
-  const nextOrder = candidates.length
-    ? Math.max(...candidates.map((c) => c.sort_order)) + 1
-    : 1;
+  const existingCandidate = candidates.find((candidate) => candidate.id === editingId);
 
   let photoUrl: string | null = form.no_photo
     ? null
@@ -200,16 +232,10 @@ async function saveCandidate(e: FormEvent) {
     status: form.status,
   };
 
-  const { error } = editingId
-    ? await supabase
-        .from('candidates')
-        .update(candidateDetails)
-        .eq('id', editingId)
-    : await supabase.from('candidates').insert({
-        ...candidateDetails,
-        interview_type: 'Final Interview',
-        sort_order: nextOrder,
-      });
+  const { error } = await supabase
+    .from('candidates')
+    .update(candidateDetails)
+    .eq('id', editingId);
 
   if (error) {
     setMessage(error.message);
@@ -227,11 +253,7 @@ async function saveCandidate(e: FormEvent) {
 
   setEditingId(null);
   setEditModalOpen(false);
-  setMessage(
-    editingId
-      ? 'Candidate updated successfully.'
-      : 'Candidate added successfully.'
-  );
+  setMessage('Candidate updated successfully.');
 
   await loadCandidates();
 }
@@ -340,16 +362,30 @@ async function saveCandidate(e: FormEvent) {
         c.status === 'In Progress'
     ).length;
 
-    const completed = candidates.filter(
-      (c) => c.status === 'Completed'
-    ).length;
-
     return {
       total,
       scheduled,
-      completed,
     };
   }, [candidates, totalCandidates]);
+
+  const interviewDateBreakdown = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    candidates.forEach((candidate) => {
+      const key = candidate.interview_date || 'unscheduled';
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+
+    const scheduled = Array.from(counts.entries())
+      .filter(([date]) => date !== 'unscheduled')
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, count]) => ({ date, count }));
+
+    return {
+      scheduled,
+      unscheduledCount: counts.get('unscheduled') ?? 0,
+    };
+  }, [candidates]);
 
   return (
     <>
@@ -370,267 +406,117 @@ async function saveCandidate(e: FormEvent) {
 
       <section className="metric-grid">
 
-        <div className="metric-card">
+        <div className="metric-group">
 
-          <div className="metric-top">
-            <div className="metric-icon">
-              <UsersRound size={14} strokeWidth={2.2} />
-            </div>
+          <div className="metric-group-top">
 
-            Total Candidates
-          </div>
+            <div className="metric-card">
 
-          <div className="metric-value-row">
-            <div className="metric-value">
-              {stats.total}
-            </div>
-          </div>
+              <div className="metric-top">
+                <div className="metric-icon">
+                  <UsersRound size={14} strokeWidth={2.2} />
+                </div>
 
-          <div className="metric-description">
-            Candidates currently in the system
-          </div>
-
-        </div>
-
-        <div className="metric-card">
-
-          <div className="metric-top">
-            <div className="metric-icon">
-              <Clock3 size={14} />
-            </div>
-
-            Active Interviews
-          </div>
-
-          <div className="metric-value-row">
-            <div className="metric-value">
-              {stats.scheduled}
-            </div>
-          </div>
-
-          <div className="metric-description">
-            Scheduled or currently being interviewed
-          </div>
-
-        </div>
-
-        <div className="metric-card">
-
-          <div className="metric-top">
-            <div className="metric-icon">
-              <CheckCircle2 size={14} />
-            </div>
-
-            Completed
-          </div>
-
-          <div className="metric-value-row">
-            <div className="metric-value">
-              {stats.completed}
-            </div>
-          </div>
-
-          <div className="metric-description">
-            Candidates who completed their interview
-          </div>
-
-        </div>
-
-      </section>
-
-      {/* =========================================
-          ADD CANDIDATE
-      ========================================= */}
-
-      <section className="panel form-panel">
-
-        <form onSubmit={saveCandidate}>
-
-          <div className="panel-header">
-
-            <div className="panel-title-area">
-
-              <div className="panel-title-icon">
-                <Plus size={12} />
+                Total Candidates
               </div>
 
-              <div>
-                <h2 className="panel-title">
-                  {editingId ? 'Edit Candidate' : 'Add Candidate'}
-                </h2>
+              <div className="metric-value-row">
+                <div className="metric-value">
+                  {stats.total}
+                </div>
+              </div>
 
-                <p className="panel-subtitle">
-                  {editingId
-                    ? "Update this candidate's interview details."
-                    : 'Add a candidate to the interview queue.'}
-                </p>
+              <div className="metric-description">
+                Candidates currently in the system
               </div>
 
             </div>
 
-            <div className="panel-actions">
-              <button
-                type="submit"
-                className="primary-button"
-                disabled={processingPhoto}
-              >
-                {processingPhoto ? 'Processing Photo...' : (
-                  <>
-                    {editingId ? <Pencil size={12} /> : <Plus size={12} />}
-                    {editingId ? 'Save Changes' : 'Add Candidate'}
-                  </>
-                )}
-              </button>
-              {editingId && (
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={cancelEditing}
-                >
-                  Cancel
-                </button>
+            <div className="metric-card">
+
+              <div className="metric-top">
+                <div className="metric-icon">
+                  <Clock3 size={14} />
+                </div>
+
+                Active Interviews
+              </div>
+
+              <div className="metric-value-row">
+                <div className="metric-value">
+                  {stats.scheduled}
+                </div>
+              </div>
+
+              <div className="metric-description">
+                Scheduled or currently being interviewed
+              </div>
+
+            </div>
+
+          </div>
+
+          <div className="metric-card metric-card--chart">
+
+            <div className="metric-top">
+              <div className="metric-icon">
+                <CalendarDays size={14} strokeWidth={2.2} />
+              </div>
+
+              Interview Schedule
+            </div>
+
+            <div className="interview-chart-wrap">
+              {interviewDateBreakdown.scheduled.length ? (
+                <InterviewDateChart data={interviewDateBreakdown.scheduled} />
+              ) : (
+                <div className="empty-state">
+                  No interview dates scheduled yet.
+                </div>
               )}
             </div>
 
-          </div>
-
-          <div className="form-container">
-
-          <div className="form-grid">
-
-            <div className="form-group">
-              <label className="form-label">
-                Candidate Name
-              </label>
-
-              <input
-                className="form-input"
-                required
-                placeholder="Enter candidate name"
-                value={form.name}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    name: e.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <div className="form-group">
-<label className="form-label">
-  Candidate Photo
-</label>
-
-<div className="photo-upload">
-
-  <label
-    htmlFor="candidate-photo"
-    className={`photo-upload-box ${
-      form.no_photo ? 'disabled' : ''
-    }`}
-  >
-    <input
-      id="candidate-photo"
-      type="file"
-      accept="image/png,image/jpeg,image/webp"
-      disabled={form.no_photo}
-      onChange={(e) => {
-        const file = e.target.files?.[0] ?? null;
-        void handlePhotoChange(file);
-      }}
-    />
-
-    <div className="photo-upload-content">
-
-      {form.photo_file ? (
-        <>
-          <span className="photo-file-name">
-            {form.photo_file.name}
-          </span>
-
-          <span className="photo-file-change">
-            Change photo
-          </span>
-        </>
-      ) : (
-        <>
-          <span className="photo-upload-title">
-            Upload Photo
-          </span>
-
-          <span className="photo-upload-subtitle">
-            PNG, JPG or WEBP
-          </span>
-        </>
-      )}
-
-    </div>
-  </label>
-
-  <label className="none-photo-option">
-    <input
-      type="checkbox"
-      checked={form.no_photo}
-      onChange={(e) =>
-        setForm({
-          ...form,
-          no_photo: e.target.checked,
-          photo_file: e.target.checked
-            ? null
-            : form.photo_file,
-        })
-      }
-    />
-
-    <span>None</span>
-  </label>
-
-</div>
-</div>
-
-
-            <div className="form-group">
-              <label className="form-label">
-                Position
-              </label>
-
-              <input
-                className="form-input"
-                placeholder="Position"
-                value={form.position}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    position: e.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">
-                Interview Date
-              </label>
-
-              <input
-                className="form-input"
-                type="date"
-                value={form.interview_date}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    interview_date: e.target.value,
-                  })
-                }
-              />
-            </div>
+            {interviewDateBreakdown.unscheduledCount > 0 && (
+              <div className="metric-description">
+                {interviewDateBreakdown.unscheduledCount} not yet scheduled
+              </div>
+            )}
 
           </div>
 
+        </div>
+
+        <div className="visual-preview-card">
+
+          <div className="visual-preview-header">
+            <div className="visual-preview-title">
+              <MonitorPlay size={14} strokeWidth={2.2} />
+              Visual Board
+              <span className="live-dot" aria-hidden="true" />
+              <span className="visual-preview-live-label">Live</span>
+            </div>
+
+            <a
+              href="/visual"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="visual-preview-link"
+            >
+              Open
+              <ExternalLink size={11} />
+            </a>
           </div>
 
-        </form>
+          <div className="visual-preview-frame-wrap">
+            <iframe
+              src="/visual?preview=1"
+              title="Visual board preview"
+              className="visual-preview-frame"
+              loading="lazy"
+            />
+          </div>
+
+        </div>
 
       </section>
 
@@ -701,13 +587,31 @@ async function saveCandidate(e: FormEvent) {
 
                 {candidates.map((candidate) => (
 
-                  <tr key={candidate.id}>
+                  <tr
+                    key={candidate.id}
+                    className={draggingCandidateId === candidate.id ? 'dragging-row' : ''}
+                    draggable
+                    onDragStart={() => setDraggingCandidateId(candidate.id)}
+                    onDragEnd={() => setDraggingCandidateId(null)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      if (draggingCandidateId) {
+                        void moveCandidate(draggingCandidateId, candidate.id);
+                      }
+                      setDraggingCandidateId(null);
+                    }}
+                  >
 
                     {/* CANDIDATE */}
 
                     <td>
 
                      <div className="candidate-info">
+
+                       <span className="candidate-drag-handle" aria-label="Drag to reorder">
+                         <GripVertical size={14} />
+                       </span>
 
                        {candidate.photo_url ? (
 <img
@@ -846,7 +750,7 @@ async function saveCandidate(e: FormEvent) {
                     <td colSpan={6}>
 
                       <div className="empty-state">
-                        No candidates yet. Add your first candidate above.
+                        No candidates yet. Add one from the Records page.
                       </div>
 
                     </td>
@@ -872,6 +776,47 @@ async function saveCandidate(e: FormEvent) {
             aria-labelledby="dashboard-edit-candidate-title"
           >
             <h2 id="dashboard-edit-candidate-title">Edit Candidate</h2>
+
+            <label className="form-label" htmlFor="dashboard-edit-photo">
+              Candidate Photo
+            </label>
+            <div className="photo-upload">
+              <label
+                htmlFor="dashboard-edit-photo"
+                className={`photo-upload-box ${form.no_photo ? 'disabled' : ''}`}
+              >
+                <input
+                  id="dashboard-edit-photo"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  disabled={form.no_photo}
+                  onChange={(event) => {
+                    void handlePhotoChange(event.target.files?.[0] ?? null);
+                  }}
+                />
+                <div className="photo-upload-content">
+                  <span className="photo-upload-title">
+                    {form.photo_file ? form.photo_file.name : 'Change photo'}
+                  </span>
+                  <span className="photo-upload-subtitle">PNG, JPG or WEBP</span>
+                </div>
+              </label>
+
+              <label className="none-photo-option">
+                <input
+                  type="checkbox"
+                  checked={form.no_photo}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      no_photo: event.target.checked,
+                      photo_file: event.target.checked ? null : current.photo_file,
+                    }))
+                  }
+                />
+                <span>None</span>
+              </label>
+            </div>
 
             <label className="form-label" htmlFor="dashboard-edit-name">
               Candidate Name
@@ -982,6 +927,108 @@ async function saveCandidate(e: FormEvent) {
 function formatDateValue(date: string) {
   const [year, month, day] = date.split('-');
   return `${month}/${day}/${year}`;
+}
+
+function formatShortDate(date: string) {
+  const [, month, day] = date.split('-');
+  return `${Number(month)}/${Number(day)}`;
+}
+
+/*
+ * A single rounded-top, square-baseline bar, drawn as a path so the
+ * bottom two corners stay sharp against the shared baseline while
+ * the top two round off.
+ */
+function roundedTopBarPath(x: number, y: number, width: number, height: number, radius: number) {
+  if (height <= 0) return '';
+
+  const r = Math.min(radius, width / 2, height);
+
+  return `
+    M ${x} ${y + height}
+    L ${x} ${y + r}
+    Q ${x} ${y} ${x + r} ${y}
+    L ${x + width - r} ${y}
+    Q ${x + width} ${y} ${x + width} ${y + r}
+    L ${x + width} ${y + height}
+    Z
+  `;
+}
+
+function InterviewDateChart({
+  data,
+}: {
+  data: { date: string; count: number }[];
+}) {
+  const barWidth = 28;
+  const barGap = 16;
+  const plotHeight = 110;
+  const topPadding = 20;
+  const bottomPadding = 20;
+
+  const maxCount = Math.max(...data.map((point) => point.count), 1);
+  const width = data.length * (barWidth + barGap) - barGap;
+  const height = topPadding + plotHeight + bottomPadding;
+
+  const summary = data
+    .map((point) => `${formatDateValue(point.date)}: ${point.count}`)
+    .join(', ');
+
+  return (
+    <svg
+      role="img"
+      aria-label={`Candidates by interview date — ${summary}`}
+      viewBox={`0 0 ${width} ${height}`}
+      width={width}
+      height={height}
+      className="interview-chart"
+    >
+      <line
+        x1={0}
+        y1={topPadding + plotHeight}
+        x2={width}
+        y2={topPadding + plotHeight}
+        className="interview-chart-baseline"
+      />
+
+      {data.map((point, index) => {
+        const barHeight = (point.count / maxCount) * (plotHeight - 10);
+        const x = index * (barWidth + barGap);
+        const y = topPadding + plotHeight - barHeight;
+
+        return (
+          <g key={point.date}>
+            <title>
+              {formatDateValue(point.date)}: {point.count} candidate{point.count === 1 ? '' : 's'}
+            </title>
+
+            <text
+              x={x + barWidth / 2}
+              y={y - 6}
+              textAnchor="middle"
+              className="interview-chart-value"
+            >
+              {point.count}
+            </text>
+
+            <path
+              d={roundedTopBarPath(x, y, barWidth, barHeight, 4)}
+              className="interview-chart-bar"
+            />
+
+            <text
+              x={x + barWidth / 2}
+              y={topPadding + plotHeight + 16}
+              textAnchor="middle"
+              className="interview-chart-label"
+            >
+              {formatShortDate(point.date)}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
 }
 
 function getStatusClass(status: string) {

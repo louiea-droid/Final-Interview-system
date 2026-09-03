@@ -143,6 +143,23 @@ export default function DisplayPage() {
   const [loading, setLoading] =
     useState(true);
 
+  const [lightMode, setLightMode] = useState(false);
+
+  /*
+   * The dashboard's small live preview (an <iframe src="/visual?preview=1">)
+   * always wants the board's normal dark branding, regardless of whatever
+   * light/dark preference the admin has set for their own panel — that
+   * preference lives in the same localStorage key this page reads below,
+   * so without this guard toggling the admin's panel theme would also
+   * flip the actual public board. The real standalone page (opened
+   * without ?preview=1) is unaffected and keeps following that setting.
+   */
+  const [isPreviewEmbed] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("preview") === "1"
+  );
+
   /*
    * =========================================================
    * DISPLAY SETTINGS
@@ -243,6 +260,34 @@ export default function DisplayPage() {
   useEffect(() => {
     loadCandidates();
   }, []);
+
+  useEffect(() => {
+    if (isPreviewEmbed) return;
+
+    const loadTheme = () => {
+      const storedSettings = window.localStorage.getItem("interview-board-settings");
+
+      if (!storedSettings) {
+        setLightMode(false);
+        return;
+      }
+
+      try {
+        setLightMode(JSON.parse(storedSettings).lightMode === true);
+      } catch {
+        setLightMode(false);
+      }
+    };
+
+    loadTheme();
+    window.addEventListener("storage", loadTheme);
+    window.addEventListener("interview-board-settings-updated", loadTheme);
+
+    return () => {
+      window.removeEventListener("storage", loadTheme);
+      window.removeEventListener("interview-board-settings-updated", loadTheme);
+    };
+  }, [isPreviewEmbed]);
 
   /* =========================================================
      SUPABASE REALTIME
@@ -415,18 +460,18 @@ export default function DisplayPage() {
 
   return (
     <main
-      className="
+      className={`
         relative
         grid
         h-dvh
         place-items-center
         overflow-hidden
-        bg-[#0b0102]
-      "
+        ${lightMode ? "bg-[#f4efed]" : "bg-[#0b0102]"}
+      `}
     >
 
       <video
-        className="
+        className={`
           pointer-events-none
           absolute
           inset-0
@@ -434,8 +479,8 @@ export default function DisplayPage() {
           h-full
           w-full
           object-cover
-          opacity-75
-        "
+          ${lightMode ? "opacity-35" : "opacity-75"}
+        `}
         src="/visual/bg.mp4"
         autoPlay
         loop
@@ -446,13 +491,13 @@ export default function DisplayPage() {
 
       <div
         aria-hidden
-        className="
+        className={`
           pointer-events-none
           absolute
           inset-0
           z-[1]
-          bg-black/25
-        "
+          ${lightMode ? "bg-[#fffaf7]/70" : "bg-black/25"}
+        `}
       />
 
       <FullscreenSwitch />

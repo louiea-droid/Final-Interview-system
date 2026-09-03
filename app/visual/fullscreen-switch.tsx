@@ -5,30 +5,45 @@ import { useEffect } from 'react';
 /**
  * Browsers only allow requestFullscreen() from a user gesture, so the page
  * can't go fullscreen on load by itself. This renders nothing — it tries
- * immediately (works in kiosk/allowed contexts) and otherwise the very first
- * click, keypress, or touch anywhere switches the page to fullscreen.
+ * immediately (works in kiosk/allowed contexts) and otherwise the very
+ * first click or tap anywhere switches the page to fullscreen. Once
+ * fullscreen, the next click or tap exits it again — a plain key press
+ * (other than the browser's own Escape) only ever enters, so idly typing
+ * while presenting can't accidentally drop out of fullscreen.
  */
 export default function FullscreenSwitch() {
   useEffect(() => {
-    const enter = (e?: Event) => {
-      // Escape is the browser's own "exit fullscreen" key — don't fight it
-      if (e instanceof KeyboardEvent && e.key === 'Escape') return;
+    const enter = () => {
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {});
       }
     };
 
+    const toggle = () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      } else {
+        enter();
+      }
+    };
+
+    const handleKeydown = (e: KeyboardEvent) => {
+      // Escape is the browser's own "exit fullscreen" key — don't fight it
+      if (e.key === 'Escape') return;
+      enter();
+    };
+
     // attempt on load; silently rejected unless the browser permits it
     enter();
 
-    document.addEventListener('click', enter);
-    document.addEventListener('keydown', enter);
-    document.addEventListener('touchstart', enter);
+    document.addEventListener('click', toggle);
+    document.addEventListener('touchstart', toggle);
+    document.addEventListener('keydown', handleKeydown);
 
     return () => {
-      document.removeEventListener('click', enter);
-      document.removeEventListener('keydown', enter);
-      document.removeEventListener('touchstart', enter);
+      document.removeEventListener('click', toggle);
+      document.removeEventListener('touchstart', toggle);
+      document.removeEventListener('keydown', handleKeydown);
     };
   }, []);
 
