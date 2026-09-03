@@ -507,7 +507,7 @@ export default function DisplayPage() {
        <h1
   className={`
     ${poppins.className}
-    m-0
+    my-3
     w-fit
     max-w-full
     whitespace-nowrap
@@ -518,11 +518,11 @@ export default function DisplayPage() {
     tracking-[-0.012em]
     [word-spacing:-0.04em]
 
-    bg-[radial-gradient(ellipse_at_center,#9b722d_0%,#b98d42_24%,#d1a65b_45%,#e1bd78_65%,#f1d795_84%,#f7dfa3_100%)]
+    bg-[radial-gradient(ellipse_at_center,#fff5b8_0%,#f4ca5d_24%,#c68b22_45%,#e4b84d_65%,#ffe89a_84%,#fff3bc_100%)]
 
     bg-clip-text
     text-transparent
-    drop-shadow-[0_2px_8px_rgba(238,184,55,.3)]
+    drop-shadow-[0_2px_10px_rgba(244,194,74,.55)]
 
     [filter:drop-shadow(0_2px_1px_rgba(0,0,0,.55))_drop-shadow(0_0_22px_rgba(227,179,91,.40))]
 
@@ -743,10 +743,10 @@ export default function DisplayPage() {
             text-center
             text-[clamp(24px,5vw,48px)]
             leading-[1.12]
-            bg-[radial-gradient(ellipse_at_center,#9b722d_0%,#b98d42_24%,#d1a65b_45%,#e1bd78_65%,#f1d795_84%,#f7dfa3_100%)]
+            bg-[radial-gradient(ellipse_at_center,#fff5b8_0%,#f4ca5d_24%,#c68b22_45%,#e4b84d_65%,#ffe89a_84%,#fff3bc_100%)]
             bg-clip-text
             text-transparent
-            drop-shadow-[0_2px_5px_rgba(118,66,8,.45)]
+            drop-shadow-[0_2px_8px_rgba(244,194,74,.6)]
         
           `}
         >

@@ -6,9 +6,9 @@ import {
   CircleUserRound,
   History,
   LayoutDashboard,
+  Moon,
   Settings,
   Sun,
-  TrendingUp,
 } from 'lucide-react';
 
 import AdminSignOutButton from '../../../components/AdminSignOutButton';
@@ -21,7 +21,12 @@ export default function AdminProtectedLayout({
 }) {
   const pathname = usePathname();
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
-  const [accountPanelOpen, setAccountPanelOpen] = useState(false);
+  const [adminProfile, setAdminProfile] = useState({
+    displayName: 'Admin',
+    role: 'Administrator',
+    avatarUrl: '',
+  });
+  const [lightMode, setLightMode] = useState(false);
 
   useEffect(() => {
     const updateCurrentTime = () => setCurrentTime(new Date());
@@ -32,8 +37,76 @@ export default function AdminProtectedLayout({
     return () => window.clearInterval(intervalId);
   }, []);
 
+  useEffect(() => {
+    const loadTheme = () => {
+      const storedSettings = window.localStorage.getItem('interview-board-settings');
+
+      if (!storedSettings) return;
+
+      try {
+        const settings = JSON.parse(storedSettings);
+        setLightMode(settings.lightMode === true);
+      } catch {
+        window.localStorage.removeItem('interview-board-settings');
+      }
+    };
+
+    loadTheme();
+    window.addEventListener('interview-board-settings-updated', loadTheme);
+
+    return () => window.removeEventListener('interview-board-settings-updated', loadTheme);
+  }, []);
+
+  function toggleTheme() {
+    const nextLightMode = !lightMode;
+    setLightMode(nextLightMode);
+
+    const storedSettings = window.localStorage.getItem('interview-board-settings');
+    let settings = {};
+
+    try {
+      settings = storedSettings ? JSON.parse(storedSettings) : {};
+    } catch {
+      settings = {};
+    }
+
+    window.localStorage.setItem(
+      'interview-board-settings',
+      JSON.stringify({ ...settings, lightMode: nextLightMode })
+    );
+    window.dispatchEvent(new Event('interview-board-settings-updated'));
+  }
+
+  useEffect(() => {
+    const loadAdminProfile = () => {
+      const storedProfile = window.localStorage.getItem('interview-admin-profile');
+
+      if (!storedProfile) return;
+
+      try {
+        const profile = JSON.parse(storedProfile);
+        setAdminProfile((current) => ({
+          displayName: typeof profile.displayName === 'string' && profile.displayName
+            ? profile.displayName
+            : current.displayName,
+          role: typeof profile.role === 'string' && profile.role
+            ? profile.role
+            : current.role,
+          avatarUrl: typeof profile.avatarUrl === 'string' ? profile.avatarUrl : current.avatarUrl,
+        }));
+      } catch {
+        window.localStorage.removeItem('interview-admin-profile');
+      }
+    };
+
+    loadAdminProfile();
+    window.addEventListener('interview-admin-profile-updated', loadAdminProfile);
+
+    return () => window.removeEventListener('interview-admin-profile-updated', loadAdminProfile);
+  }, []);
+
   return (
-    <div className="admin-layout">
+    <div className={`admin-layout ${lightMode ? 'light-mode' : ''}`}>
 
       {/* =========================================
           SIDEBAR
@@ -68,26 +141,32 @@ export default function AdminProtectedLayout({
             <span>History</span>
           </a>
 
-          <div className="sidebar-link">
-            <TrendingUp size={17} strokeWidth={2.2} />
-            <span>Analytics</span>
-          </div>
-        </div>
-
-        <div className="sidebar-section">
-          <div className="sidebar-link">
+          <a
+            className={`sidebar-link ${pathname.startsWith('/admin/settings') ? 'active' : ''}`}
+            href="/admin/settings"
+          >
             <Settings size={17} strokeWidth={2.2} />
             <span>Settings</span>
-          </div>
+          </a>
+        </div>
 
-          <div className="sidebar-link">
-            <Sun size={17} strokeWidth={2.2} />
-            <span>Light Mode</span>
+        <div className="sidebar-account">
+          <div className="sidebar-profile">
+            <span className="profile-avatar profile-avatar-icon">
+              {adminProfile.avatarUrl ? (
+                <img src={adminProfile.avatarUrl} alt="" className="profile-avatar-image" />
+              ) : (
+                <CircleUserRound size={18} strokeWidth={2} />
+              )}
+            </span>
 
-            <div className="mode-toggle">
-              <div className="mode-toggle-circle"></div>
+            <div className="sidebar-profile-details">
+              <strong>{adminProfile.displayName}</strong>
+              <span>{adminProfile.role}</span>
             </div>
           </div>
+
+          <AdminSignOutButton />
         </div>
 
       </aside>
@@ -99,6 +178,20 @@ export default function AdminProtectedLayout({
       <main className="dashboard-content">
 
         <div className="admin-topbar">
+
+          <button
+            type="button"
+            className={`theme-switch ${lightMode ? 'on' : ''}`}
+            onClick={toggleTheme}
+            aria-label={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
+            aria-pressed={lightMode}
+          >
+            {lightMode ? <Sun size={14} /> : <Moon size={14} />}
+            <span>{lightMode ? 'Light' : 'Dark'}</span>
+            <span className="theme-switch-track" aria-hidden="true">
+              <span className="theme-switch-thumb" />
+            </span>
+          </button>
 
           <div className="timezone-clocks" aria-label="Current time">
             <div className="timezone-clock">
@@ -120,65 +213,9 @@ export default function AdminProtectedLayout({
             </div>
           </div>
 
-          <button
-            type="button"
-            className="profile"
-            onClick={() => setAccountPanelOpen(true)}
-            aria-haspopup="dialog"
-            aria-expanded={accountPanelOpen}
-          >
-            <span className="profile-avatar profile-avatar-icon">
-              <CircleUserRound size={18} strokeWidth={2} />
-            </span>
-
-            <span>Admin</span>
-          </button>
-
         </div>
 
         {children}
-
-        {accountPanelOpen && (
-          <div
-            className="account-drawer-overlay"
-            role="presentation"
-            onClick={() => setAccountPanelOpen(false)}
-          >
-            <aside
-              className="account-drawer"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="account-drawer-title"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <button
-                type="button"
-                className="account-drawer-close"
-                onClick={() => setAccountPanelOpen(false)}
-                aria-label="Close account menu"
-              >
-                &times;
-              </button>
-
-              <div className="account-drawer-header">
-                <span className="profile-avatar profile-avatar-icon profile-avatar-lg">
-                  <CircleUserRound size={26} strokeWidth={2} />
-                </span>
-
-                <div>
-                  <div id="account-drawer-title" className="account-drawer-name">
-                    Admin
-                  </div>
-                  <div className="account-drawer-role">Administrator</div>
-                </div>
-              </div>
-
-              <div className="account-drawer-actions">
-                <AdminSignOutButton />
-              </div>
-            </aside>
-          </div>
-        )}
 
       </main>
     </div>

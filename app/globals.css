@@ -93,6 +93,11 @@ button {
   width: 194px;
   min-width: 194px;
   min-height: 100vh;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  z-index: 10;
 
   padding: 18px 12px;
 
@@ -194,6 +199,43 @@ button {
     0 7px 17px rgba(111, 12, 11, 0.28);
 }
 
+.sidebar-account {
+  margin-top: auto;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.sidebar-profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 7px 10px;
+}
+
+.sidebar-profile-details {
+  min-width: 0;
+}
+
+.sidebar-profile-details strong,
+.sidebar-profile-details span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-profile-details strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sidebar-profile-details span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
 .mode-toggle {
   margin-left: auto;
 
@@ -280,6 +322,58 @@ button {
   margin-bottom: 12px;
 }
 
+.theme-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.theme-switch:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.theme-switch.on {
+  color: #603f0b;
+  border-color: rgba(159, 113, 37, 0.45);
+  background: rgba(238, 201, 111, 0.22);
+}
+
+.theme-switch-track {
+  display: flex;
+  align-items: center;
+  width: 27px;
+  height: 14px;
+  padding: 2px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.theme-switch-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffffff;
+  transform: translateX(0);
+  transition: transform 0.18s ease;
+}
+
+.theme-switch.on .theme-switch-track {
+  background: rgba(111, 12, 11, 0.35);
+}
+
+.theme-switch.on .theme-switch-thumb {
+  transform: translateX(13px);
+}
+
 .timezone-clocks {
   display: flex;
   gap: 6px;
@@ -356,6 +450,56 @@ button {
 .profile-avatar-lg {
   width: 48px;
   height: 48px;
+}
+
+.profile-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.settings-avatar-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+
+.settings-avatar-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+  border-radius: 50%;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.settings-avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-avatar-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.settings-avatar-input {
+  max-width: 240px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.settings-avatar-copy small {
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 /* =========================================
@@ -570,6 +714,75 @@ button {
 .form-container {
   padding: 15px;
 
+}
+
+.settings-options {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-profile-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.settings-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.settings-option strong,
+.settings-option small {
+  display: block;
+}
+
+.settings-option-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.settings-option-label > svg {
+  flex-shrink: 0;
+  color: var(--red-status);
+}
+
+.settings-option strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-option small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.settings-option input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--red-bright);
+  flex-shrink: 0;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.settings-saved {
+  color: var(--green);
+  font-size: 12px;
 }
 
 .form-grid {
@@ -1310,6 +1523,7 @@ button {
     width: 100%;
     min-width: 0;
     min-height: auto;
+    height: auto;
 
     padding: 12px;
 
@@ -1345,6 +1559,10 @@ button {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-profile-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -1947,4 +2165,126 @@ svg {
   height: 36px;
   border-radius: 6px;
   border: 1px solid var(--border-light);
+}
+
+.admin-layout.light-mode {
+  --text: #241616;
+  --text-soft: #5b4747;
+  --text-muted: #806f6f;
+  --border-light: rgba(91, 55, 55, 0.16);
+  background: #f4efed;
+  color: var(--text);
+}
+
+.admin-layout.light-mode .sidebar {
+  background: linear-gradient(180deg, #fffaf7 0%, #eee4e0 100%);
+  border-right-color: rgba(91, 55, 55, 0.14);
+}
+
+.admin-layout.light-mode .logo-text,
+.admin-layout.light-mode .sidebar-link,
+.admin-layout.light-mode .profile,
+.admin-layout.light-mode .panel-title,
+.admin-layout.light-mode .metric-value {
+  color: #241616;
+}
+
+.admin-layout.light-mode .sidebar-link:hover,
+.admin-layout.light-mode .sidebar-link.active {
+  color: #ffffff;
+}
+
+.admin-layout.light-mode .panel,
+.admin-layout.light-mode .metric-card {
+  border-color: rgba(111, 12, 11, 0.2);
+  background: linear-gradient(180deg, #fffdfa, #f5edeb);
+  box-shadow: 0 8px 20px rgba(80, 42, 42, 0.08);
+}
+
+.admin-layout.light-mode .form-input,
+.admin-layout.light-mode .form-select,
+.admin-layout.light-mode .settings-option,
+.admin-layout.light-mode .timezone-clock {
+  color: #352525;
+  border-color: rgba(91, 55, 55, 0.22);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.admin-layout.light-mode .metric-top,
+.admin-layout.light-mode .form-label {
+  color: #684f4f;
+}
+
+.admin-layout.light-mode .metric-description,
+.admin-layout.light-mode .panel-subtitle,
+.admin-layout.light-mode .settings-option small {
+  color: #806f6f;
+}
+
+.admin-layout.light-mode .greeting-title,
+.admin-layout.light-mode .panel-count,
+.admin-layout.light-mode .candidate-filter-title,
+.admin-layout.light-mode .candidate-date-heading h2,
+.admin-layout.light-mode .candidate-directory-details h3,
+.admin-layout.light-mode .candidate-name,
+.admin-layout.light-mode .candidate-edit-popup h2,
+.admin-layout.light-mode .inline-group-editor > h3,
+.admin-layout.light-mode .group-edit-fields legend {
+  color: #241616;
+}
+
+.admin-layout.light-mode .greeting-subtitle,
+.admin-layout.light-mode .candidate-date-heading span,
+.admin-layout.light-mode .candidate-directory-details span,
+.admin-layout.light-mode .candidate-directory-type,
+.admin-layout.light-mode .candidate-list-state,
+.admin-layout.light-mode .loading-state {
+  color: #806f6f;
+}
+
+.admin-layout.light-mode .photo-upload-title,
+.admin-layout.light-mode .photo-file-name,
+.admin-layout.light-mode .none-photo-option,
+.admin-layout.light-mode .message-box,
+.admin-layout.light-mode .candidate-table td,
+.admin-layout.light-mode .candidate-directory-type strong,
+.admin-layout.light-mode .inline-group-editor > h3,
+.admin-layout.light-mode .group-edit-fields legend {
+  color: #4d3737;
+}
+
+.admin-layout.light-mode .photo-upload-subtitle,
+.admin-layout.light-mode .candidate-table th,
+.admin-layout.light-mode .candidate-position,
+.admin-layout.light-mode .candidate-directory-type small {
+  color: #806f6f;
+}
+
+.admin-layout.light-mode .candidate-date-filter,
+.admin-layout.light-mode .status-select,
+.admin-layout.light-mode .direct-edit-status {
+  color: #352525;
+  background: #fffdfa;
+}
+
+.admin-layout.light-mode .secondary-button,
+.admin-layout.light-mode .edit-button,
+.admin-layout.light-mode .date-edit-button {
+  color: #5b2b2b;
+}
+
+.admin-layout.light-mode .secondary-button:hover,
+.admin-layout.light-mode .edit-button:hover,
+.admin-layout.light-mode .date-edit-button:hover {
+  color: #241616;
+}
+
+.admin-layout.light-mode .candidate-date-group,
+.admin-layout.light-mode .candidate-edit-popup {
+  background: linear-gradient(180deg, #fffdfa, #f5edeb);
+}
+
+.admin-layout.light-mode .candidate-table td,
+.admin-layout.light-mode .candidate-directory-row {
+  border-bottom-color: rgba(91, 55, 55, 0.12);
 }
