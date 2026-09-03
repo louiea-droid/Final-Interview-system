@@ -422,21 +422,36 @@ export default function DisplayPage() {
         place-items-center
         overflow-hidden
         bg-[#0b0102]
-        [background-image:radial-gradient(ellipse_120%_100%_at_50%_42%,#240508_0%,#150304_55%,#0b0102_100%)]
       "
     >
 
-      {/* blurred red swirl */}
+      <video
+        className="
+          pointer-events-none
+          absolute
+          inset-0
+          z-0
+          h-full
+          w-full
+          object-cover
+          opacity-75
+        "
+        src="/visual/bg.mp4"
+        autoPlay
+        loop
+        muted
+        playsInline
+        aria-hidden="true"
+      />
 
       <div
         aria-hidden
         className="
           pointer-events-none
           absolute
-          -inset-[20%]
-          -rotate-12
-          blur-[28px]
-          [background-image:radial-gradient(ellipse_40%_12%_at_25%_40%,rgba(190,35,30,.24),transparent_70%),radial-gradient(ellipse_32%_9%_at_78%_62%,rgba(210,50,35,.20),transparent_70%),radial-gradient(ellipse_50%_14%_at_60%_25%,rgba(160,25,25,.17),transparent_72%),radial-gradient(ellipse_28%_8%_at_15%_75%,rgba(190,40,30,.15),transparent_70%)]
+          inset-0
+          z-[1]
+          bg-black/25
         "
       />
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, Suspense, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 function AdminLoginForm() {
@@ -8,6 +9,7 @@ function AdminLoginForm() {
   const searchParams = useSearchParams();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -29,6 +31,7 @@ function AdminLoginForm() {
       return;
     }
 
+    await new Promise((resolve) => window.setTimeout(resolve, 650));
     const destination = searchParams.get('from') || '/admin';
     router.replace(destination);
     router.refresh();
@@ -39,7 +42,7 @@ function AdminLoginForm() {
       <form className="login-card" onSubmit={handleSubmit}>
         <img className="login-logo" src="/visual/HILLC-Petals.png" alt="Hyacinth logo" />
 
-        <h1 className="login-title">Admin Sign In</h1>
+        <h1 className="login-title">Admin Log in</h1>
         <p className="login-subtitle">
           Enter your username and password to continue.
         </p>
@@ -66,15 +69,26 @@ function AdminLoginForm() {
             Password
           </label>
 
-          <input
-            id="admin-password"
-            className="form-input"
-            type="password"
-            required
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
+          <div className="password-input-wrapper">
+            <input
+              id="admin-password"
+              className="form-input"
+              type={passwordVisible ? 'text' : 'password'}
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            <button
+              type="button"
+              className="password-visibility-button"
+              onClick={() => setPasswordVisible((current) => !current)}
+              aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+              aria-pressed={passwordVisible}
+            >
+              {passwordVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
         </div>
 
         {error && <div className="message-box login-error">{error}</div>}
@@ -83,6 +97,17 @@ function AdminLoginForm() {
           {submitting ? 'Signing in...' : 'Sign In'}
         </button>
       </form>
+
+      {submitting && (
+        <div className="login-loading-screen" role="status" aria-live="polite">
+          <img
+            className="login-loading-logo"
+            src="/visual/HILLC-Petals.png"
+            alt=""
+          />
+          <span>Signing in...</span>
+        </div>
+      )}
     </div>
   );
 }

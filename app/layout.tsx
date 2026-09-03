@@ -19,6 +19,9 @@ const poppins = Poppins({
 export const metadata = {
   title: 'Interview Admin Panel',
   description: 'Interview candidate management dashboard',
+  icons: {
+    icon: '/visual/HILLC-Petals.png',
+  },
 };
 
 export default function RootLayout({

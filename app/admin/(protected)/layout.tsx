@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import {
   CircleUserRound,
-  History,
+  ClipboardList,
   LayoutDashboard,
+  Menu,
+  X,
   Moon,
   Settings,
   Sun,
@@ -27,6 +29,7 @@ export default function AdminProtectedLayout({
     avatarUrl: '',
   });
   const [lightMode, setLightMode] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     const updateCurrentTime = () => setCurrentTime(new Date());
@@ -112,7 +115,7 @@ export default function AdminProtectedLayout({
           SIDEBAR
       ========================================= */}
 
-      <aside className="sidebar">
+      <aside className={`sidebar ${sidebarOpen ? 'mobile-open' : ''}`}>
 
         <div className="logo-area">
           <img
@@ -128,22 +131,25 @@ export default function AdminProtectedLayout({
           <a
             className={`sidebar-link ${pathname === '/admin' ? 'active' : ''}`}
             href="/admin"
+            onClick={() => setSidebarOpen(false)}
           >
             <LayoutDashboard size={17} strokeWidth={2.2} />
             <span>Dashboard</span>
           </a>
 
           <a
-            className={`sidebar-link ${pathname.startsWith('/admin/history') ? 'active' : ''}`}
-            href="/admin/history"
+            className={`sidebar-link ${pathname.startsWith('/admin/records') ? 'active' : ''}`}
+            href="/admin/records"
+            onClick={() => setSidebarOpen(false)}
           >
-            <History size={17} strokeWidth={2.2} />
-            <span>History</span>
+            <ClipboardList size={17} strokeWidth={2.2} />
+            <span>Records</span>
           </a>
 
           <a
             className={`sidebar-link ${pathname.startsWith('/admin/settings') ? 'active' : ''}`}
             href="/admin/settings"
+            onClick={() => setSidebarOpen(false)}
           >
             <Settings size={17} strokeWidth={2.2} />
             <span>Settings</span>
@@ -177,7 +183,26 @@ export default function AdminProtectedLayout({
 
       <main className="dashboard-content">
 
+        {sidebarOpen && (
+          <button
+            type="button"
+            className="sidebar-backdrop"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close navigation"
+          />
+        )}
+
         <div className="admin-topbar">
+
+          <button
+            type="button"
+            className="mobile-menu-button"
+            onClick={() => setSidebarOpen((current) => !current)}
+            aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'}
+            aria-expanded={sidebarOpen}
+          >
+            {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
 
           <button
             type="button"

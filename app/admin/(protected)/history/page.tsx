@@ -87,7 +87,7 @@ export default function CandidatesPage() {
     return Array.from(
       new Set(
         candidates
-          .map((candidate) => getAddedDateKey(candidate.created_at))
+          .map((candidate) => getInterviewDateKey(candidate.interview_date))
           .filter((date): date is string => Boolean(date))
       )
     );
@@ -97,12 +97,12 @@ export default function CandidatesPage() {
     const filteredCandidates = candidates.filter(
       (candidate) =>
         selectedDate === 'all' ||
-        getAddedDateKey(candidate.created_at) === selectedDate
+        getInterviewDateKey(candidate.interview_date) === selectedDate
     );
     const groups = new Map<string, Candidate[]>();
 
     filteredCandidates.forEach((candidate) => {
-      const dateKey = getAddedDateKey(candidate.created_at);
+      const dateKey = getInterviewDateKey(candidate.interview_date);
       const group = groups.get(dateKey) ?? [];
       group.push(candidate);
       groups.set(dateKey, group);
@@ -228,9 +228,9 @@ export default function CandidatesPage() {
     <div className="candidates-page">
       <header className="candidates-page-header">
         <div>
-          <h1 className="greeting-title">History</h1>
+          <h1 className="greeting-title">Records</h1>
           <p className="greeting-subtitle">
-            The complete candidate history, organized by date added.
+            Candidates organized by interview schedule.
           </p>
         </div>
       </header>
@@ -238,18 +238,18 @@ export default function CandidatesPage() {
       <section className="candidate-filter-bar">
         <div className="candidate-filter-title">
           <CalendarDays size={15} />
-          <span>View candidates by date</span>
+          <span>View candidates by interview date</span>
         </div>
         <select
           className="candidate-date-filter"
           value={selectedDate}
           onChange={(event) => setSelectedDate(event.target.value)}
-          aria-label="Filter candidates by date added"
+          aria-label="Filter candidates by interview date"
         >
           <option value="all">All dates</option>
           {dates.map((date) => (
             <option key={date} value={date}>
-              {formatInterviewDate(date)}
+              {formatInterviewGroup(date)}
             </option>
           ))}
         </select>
@@ -271,7 +271,7 @@ export default function CandidatesPage() {
               <div className="candidate-date-heading">
                 <div>
                   <h2>
-                    {formatInterviewDate(date)}
+                    {formatInterviewGroup(date)}
                   </h2>
                   <span>
                     {dateCandidates.length}{' '}
@@ -290,7 +290,7 @@ export default function CandidatesPage() {
                     }
                     aria-label={`${
                       allShownOnBoard ? 'Hide' : 'Show'
-                    } all candidates added on ${formatInterviewDate(date)} on the visual board`}
+                    } all candidates scheduled on ${formatInterviewGroup(date)} on the visual board`}
                   >
                     <span className="visual-toggle-track">
                       <span className="visual-toggle-thumb2" />
@@ -385,11 +385,9 @@ export default function CandidatesPage() {
                       />
                     ) : (
                       <div className="candidate-directory-type">
-                        <small>Interview schedule</small>
+                        <small>Date added</small>
                         <strong>
-                          {candidate.interview_date
-                            ? formatInterviewDate(candidate.interview_date)
-                            : 'Not scheduled'}
+                          {formatInterviewDate(getAddedDateKey(candidate.created_at))}
                         </strong>
                       </div>
                     )}
@@ -444,9 +442,9 @@ export default function CandidatesPage() {
             className="confirmation-popup"
             role="alertdialog"
             aria-modal="true"
-            aria-labelledby="history-delete-confirmation-title"
+            aria-labelledby="records-delete-confirmation-title"
           >
-            <h2 id="history-delete-confirmation-title">
+            <h2 id="records-delete-confirmation-title">
               Are you sure you want to remove this candidate?
             </h2>
 
@@ -475,21 +473,37 @@ export default function CandidatesPage() {
 }
 
 function formatInterviewDate(date: string) {
+  const parsedDate = new Date(`${date}T00:00:00Z`);
+
+  if (Number.isNaN(parsedDate.getTime())) return 'Invalid date';
+
   return new Intl.DateTimeFormat('en-US', {
     month: '2-digit',
     day: '2-digit',
     year: 'numeric',
     timeZone: 'UTC',
-  }).format(new Date(`${date}T00:00:00Z`));
+  }).format(parsedDate);
+}
+
+function formatInterviewGroup(date: string) {
+  return date === 'unscheduled' ? 'Not scheduled' : formatInterviewDate(date);
+}
+
+function getInterviewDateKey(interviewDate: string | null) {
+  return interviewDate || 'unscheduled';
 }
 
 function getAddedDateKey(createdAt: string) {
+  const parsedDate = new Date(createdAt);
+
+  if (Number.isNaN(parsedDate.getTime())) return 'unknown';
+
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Manila',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date(createdAt));
+  }).formatToParts(parsedDate);
   const values = Object.fromEntries(
     parts
       .filter(({ type }) => type !== 'literal')
