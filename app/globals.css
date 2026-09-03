@@ -1020,6 +1020,80 @@ button {
   border-color: rgba(212, 93, 89, 0.35);
 }
 
+/* =========================================
+   VISUAL BOARD TOGGLE
+========================================= */
+
+.visual-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 0;
+
+  border: 0;
+  background: transparent;
+
+  color: var(--text-muted);
+
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.visual-toggle-track {
+  position: relative;
+
+  width: 34px;
+  height: 18px;
+
+  flex-shrink: 0;
+
+  border-radius: 999px;
+
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.07);
+
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.visual-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+
+  width: 12px;
+  height: 12px;
+
+  border-radius: 50%;
+
+  background: #8e8e8e;
+
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.visual-toggle.on .visual-toggle-track {
+  border-color: rgba(107, 197, 142, 0.45);
+  background: rgba(107, 197, 142, 0.22);
+}
+
+.visual-toggle.on .visual-toggle-thumb {
+  transform: translateX(16px);
+  background: var(--green);
+}
+
+.visual-toggle.on .visual-toggle-label {
+  color: var(--green);
+}
+
+.visual-toggle:hover .visual-toggle-track {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.visual-toggle.on:hover .visual-toggle-track {
+  border-color: rgba(107, 197, 142, 0.7);
+}
+
 .edit-button,
 .delete-button {
   width: 27px;

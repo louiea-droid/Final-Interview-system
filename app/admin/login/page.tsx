@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 function AdminLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -18,12 +19,12 @@ function AdminLoginForm() {
     const response = await fetch('/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     });
 
     if (!response.ok) {
       const body = await response.json().catch(() => null);
-      setError(body?.error ?? 'Incorrect password.');
+      setError(body?.error ?? 'Incorrect username or password.');
       setSubmitting(false);
       return;
     }
@@ -39,7 +40,26 @@ function AdminLoginForm() {
         <img className="login-logo" src="/visual/HILLC-Petals.png" alt="Hyacinth logo" />
 
         <h1 className="login-title">Admin Sign In</h1>
-        <p className="login-subtitle">Enter the admin password to continue.</p>
+        <p className="login-subtitle">
+          Enter your username and password to continue.
+        </p>
+
+        <div className="form-group">
+          <label className="form-label" htmlFor="admin-username">
+            Username
+          </label>
+
+          <input
+            id="admin-username"
+            className="form-input"
+            type="text"
+            required
+            autoFocus
+            autoComplete="username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+          />
+        </div>
 
         <div className="form-group">
           <label className="form-label" htmlFor="admin-password">
@@ -51,7 +71,7 @@ function AdminLoginForm() {
             className="form-input"
             type="password"
             required
-            autoFocus
+            autoComplete="current-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />

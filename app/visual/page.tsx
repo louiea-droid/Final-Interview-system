@@ -28,6 +28,12 @@ type Candidate = {
   position: string | null;
   status: string;
   sort_order: number;
+  /*
+   * Set from the admin candidate list. Optional so the board
+   * keeps working on rows saved before the show_in_visual
+   * column existed; a missing value counts as shown.
+   */
+  show_in_visual?: boolean | null;
 };
 
 /* ---------------- ember field ---------------- */
@@ -188,19 +194,18 @@ export default function DisplayPage() {
   ========================================================= */
 
   async function loadCandidates() {
+    /*
+     * Selecting every column (instead of naming show_in_visual)
+     * keeps the board working even if that column has not been
+     * added to the table yet.
+     */
+
     const {
       data,
       error,
     } = await supabase
       .from("candidates")
-      .select(`
-        id,
-        name,
-        photo_url,
-        position,
-        status,
-        sort_order
-      `)
+      .select("*")
       .order("sort_order", {
         ascending: true,
       });
@@ -215,7 +220,18 @@ export default function DisplayPage() {
       return;
     }
 
-    setCandidates(data ?? []);
+    /*
+     * Candidates hidden from the board in the admin panel are
+     * dropped here, before the sets are worked out, so a hidden
+     * candidate never leaves an empty slot behind.
+     */
+
+    const shown = (data ?? []).filter(
+      (candidate: Candidate) =>
+        candidate.show_in_visual !== false
+    );
+
+    setCandidates(shown);
     setLoading(false);
   }
 

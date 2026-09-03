@@ -24,7 +24,18 @@ type Candidate = {
   status: string;
   sort_order: number;
   created_at: string;
+  /*
+   * Whether the candidate appears on the /visual board.
+   *
+   * Optional so rows saved before the show_in_visual column
+   * existed still type-check; a missing value counts as shown.
+   */
+  show_in_visual?: boolean | null;
 };
+
+function isShownOnBoard(candidate: Candidate) {
+  return candidate.show_in_visual !== false;
+}
 
 const statuses = [
   'Scheduled',
@@ -237,6 +248,31 @@ async function saveCandidate(e: FormEvent) {
       current.map((candidate) =>
         candidate.id === id
           ? { ...candidate, status }
+          : candidate
+      )
+    );
+  }
+
+  async function toggleShowOnBoard(
+    id: string,
+    nextValue: boolean
+  ) {
+    setMessage('');
+
+    const { error } = await supabase
+      .from('candidates')
+      .update({ show_in_visual: nextValue })
+      .eq('id', id);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setCandidates((current) =>
+      current.map((candidate) =>
+        candidate.id === id
+          ? { ...candidate, show_in_visual: nextValue }
           : candidate
       )
     );
@@ -658,6 +694,7 @@ async function saveCandidate(e: FormEvent) {
                   <th>Interview Schedule</th>
                   <th>Date Added</th>
                   <th>Status</th>
+                  <th>Visual Board</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -744,6 +781,38 @@ async function saveCandidate(e: FormEvent) {
 
                     </td>
 
+                    {/* VISUAL BOARD */}
+
+                    <td>
+
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={isShownOnBoard(candidate)}
+                        className={`visual-toggle ${
+                          isShownOnBoard(candidate) ? 'on' : ''
+                        }`}
+                        onClick={() =>
+                          toggleShowOnBoard(
+                            candidate.id,
+                            !isShownOnBoard(candidate)
+                          )
+                        }
+                        aria-label={`${
+                          isShownOnBoard(candidate) ? 'Hide' : 'Show'
+                        } ${candidate.name} on the visual board`}
+                      >
+                        <span className="visual-toggle-track">
+                          <span className="visual-toggle-thumb" />
+                        </span>
+
+                        <span className="visual-toggle-label">
+                          {isShownOnBoard(candidate) ? 'Shown' : 'Hidden'}
+                        </span>
+                      </button>
+
+                    </td>
+
                     {/* ACTIONS */}
 
                     <td>
@@ -776,7 +845,7 @@ async function saveCandidate(e: FormEvent) {
 
                   <tr>
 
-                    <td colSpan={5}>
+                    <td colSpan={6}>
 
                       <div className="empty-state">
                         No candidates yet. Add your first candidate above.
