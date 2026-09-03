@@ -75,8 +75,6 @@ export default function AdminProtectedLayout({
         </div>
 
         <div className="sidebar-section">
-          <div className="sidebar-label">OTHERS</div>
-
           <div className="sidebar-link">
             <Settings size={17} strokeWidth={2.2} />
             <span>Settings</span>

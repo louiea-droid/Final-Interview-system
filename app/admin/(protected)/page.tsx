@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { removeBackground } from '@imgly/background-removal';
 import {
   CheckCircle2,
   Clock3,
@@ -13,6 +14,7 @@ import {
 
 import { supabase } from '../../../lib/supabase';
 import { formatCurrentDate, getEasternBatchStart } from '../../../lib/adminTime';
+import { isShownOnBoard } from '../../../lib/candidateVisibility';
 
 type Candidate = {
   id: string;
@@ -33,10 +35,6 @@ type Candidate = {
   show_in_visual?: boolean | null;
 };
 
-function isShownOnBoard(candidate: Candidate) {
-  return candidate.show_in_visual !== false;
-}
-
 const statuses = [
   'Scheduled',
   'Waiting',
@@ -53,6 +51,7 @@ export default function AdminPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
+  const [processingPhoto, setProcessingPhoto] = useState(false);
   const batchStartKey = useRef(getEasternBatchStart().toISOString());
 
 const [form, setForm] = useState({
@@ -117,8 +116,42 @@ const [form, setForm] = useState({
     return () => window.clearTimeout(timeoutId);
   }, [message]);
 
+  async function handlePhotoChange(file: File | null) {
+    if (!file) return;
+
+    setProcessingPhoto(true);
+    setMessage('Removing photo background...');
+
+    try {
+      const backgroundRemoved = await removeBackground(file);
+      const processedFile = new File(
+        [backgroundRemoved],
+        `${file.name.replace(/\.[^.]+$/, '')}.png`,
+        { type: 'image/png' }
+      );
+
+      setForm((current) => ({
+        ...current,
+        photo_file: processedFile,
+        no_photo: false,
+      }));
+      setMessage('Photo background removed.');
+    } catch {
+      setForm((current) => ({
+        ...current,
+        photo_file: file,
+        no_photo: false,
+      }));
+      setMessage('Background removal failed; using the original photo.');
+    } finally {
+      setProcessingPhoto(false);
+    }
+  }
+
 async function saveCandidate(e: FormEvent) {
   e.preventDefault();
+
+  if (processingPhoto) return;
 
   setMessage('');
 
@@ -351,10 +384,6 @@ async function saveCandidate(e: FormEvent) {
             <div className="metric-value">
               {stats.total}
             </div>
-
-            <div className="metric-change">
-              Live
-            </div>
           </div>
 
           <div className="metric-description">
@@ -377,10 +406,6 @@ async function saveCandidate(e: FormEvent) {
             <div className="metric-value">
               {stats.scheduled}
             </div>
-
-            <div className="metric-change">
-              Active
-            </div>
           </div>
 
           <div className="metric-description">
@@ -402,10 +427,6 @@ async function saveCandidate(e: FormEvent) {
           <div className="metric-value-row">
             <div className="metric-value">
               {stats.completed}
-            </div>
-
-            <div className="metric-change">
-              Done
             </div>
           </div>
 
@@ -451,9 +472,14 @@ async function saveCandidate(e: FormEvent) {
               <button
                 type="submit"
                 className="primary-button"
+                disabled={processingPhoto}
               >
-                {editingId ? <Pencil size={12} /> : <Plus size={12} />}
-                {editingId ? 'Save Changes' : 'Add Candidate'}
+                {processingPhoto ? 'Processing Photo...' : (
+                  <>
+                    {editingId ? <Pencil size={12} /> : <Plus size={12} />}
+                    {editingId ? 'Save Changes' : 'Add Candidate'}
+                  </>
+                )}
               </button>
               {editingId && (
                 <button
@@ -511,12 +537,7 @@ async function saveCandidate(e: FormEvent) {
       disabled={form.no_photo}
       onChange={(e) => {
         const file = e.target.files?.[0] ?? null;
-
-        setForm({
-          ...form,
-          photo_file: file,
-          no_photo: false,
-        });
+        void handlePhotoChange(file);
       }}
     />
 
@@ -603,29 +624,6 @@ async function saveCandidate(e: FormEvent) {
                   })
                 }
               />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">
-                Starting Status
-              </label>
-
-              <select
-                className="form-select"
-                value={form.status}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    status: e.target.value,
-                  })
-                }
-              >
-                {statuses.map((status) => (
-                  <option key={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
             </div>
 
           </div>

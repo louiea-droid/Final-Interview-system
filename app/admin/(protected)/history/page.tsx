@@ -4,10 +4,12 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays,
   Pencil,
+  Trash2,
   UserRound,
 } from 'lucide-react';
 
 import { supabase } from '../../../../lib/supabase';
+import { isShownOnBoard } from '../../../../lib/candidateVisibility';
 
 type Candidate = {
   id: string;
@@ -18,6 +20,13 @@ type Candidate = {
   interview_date: string | null;
   status: string;
   created_at: string;
+  /*
+   * Whether the candidate appears on the /visual board.
+   *
+   * Optional so rows saved before the show_in_visual column
+   * existed still type-check; a missing value counts as shown.
+   */
+  show_in_visual?: boolean | null;
 };
 
 type CandidateEdit = {
@@ -52,14 +61,13 @@ export default function CandidatesPage() {
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [editForms, setEditForms] = useState<CandidateEdit[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
 
   useEffect(() => {
     async function loadCandidates() {
       const { data, error } = await supabase
         .from('candidates')
-        .select(
-          'id, name, photo_url, position, interview_type, interview_date, status, created_at'
-        )
+        .select('*')
         .order('created_at', { ascending: false })
         .order('name', { ascending: true });
 
@@ -134,9 +142,7 @@ export default function CandidatesPage() {
             status: candidate.status,
           })
           .eq('id', candidate.id)
-          .select(
-            'id, name, photo_url, position, interview_type, interview_date, status, created_at'
-          )
+          .select('*')
           .single()
       )
     );
@@ -163,6 +169,57 @@ export default function CandidatesPage() {
     setEditForms((current) =>
       current.map((candidate) =>
         candidate.id === id ? { ...candidate, [field]: value } : candidate
+      )
+    );
+  }
+
+  async function removeCandidate(id: string) {
+    setErrorMessage('');
+
+    const { error } = await supabase
+      .from('candidates')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    setCandidates((current) =>
+      current.filter((candidate) => candidate.id !== id)
+    );
+    // Drop any pending inline edit for this candidate too, so a
+    // stale id doesn't get sent along on the next Save Changes.
+    setEditForms((current) =>
+      current.filter((candidate) => candidate.id !== id)
+    );
+    setCandidateToDelete(null);
+  }
+
+  async function toggleGroupVisibility(
+    groupCandidates: Candidate[],
+    nextValue: boolean
+  ) {
+    setErrorMessage('');
+
+    const ids = groupCandidates.map((candidate) => candidate.id);
+
+    const { error } = await supabase
+      .from('candidates')
+      .update({ show_in_visual: nextValue })
+      .in('id', ids);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    setCandidates((current) =>
+      current.map((candidate) =>
+        ids.includes(candidate.id)
+          ? { ...candidate, show_in_visual: nextValue }
+          : candidate
       )
     );
   }
@@ -204,7 +261,12 @@ export default function CandidatesPage() {
         <div className="candidate-list-state">Loading candidates...</div>
       ) : groupedCandidates.length ? (
         <div className="candidate-date-groups">
-          {groupedCandidates.map(([date, dateCandidates]) => (
+          {groupedCandidates.map(([date, dateCandidates]) => {
+            const allShownOnBoard = dateCandidates.every((candidate) =>
+              isShownOnBoard(candidate)
+            );
+
+            return (
             <section className="candidate-date-group" key={date}>
               <div className="candidate-date-heading">
                 <div>
@@ -216,34 +278,57 @@ export default function CandidatesPage() {
                     {dateCandidates.length === 1 ? 'candidate' : 'candidates'}
                   </span>
                 </div>
-                {editingDate === date ? (
-                  <div className="date-edit-actions">
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => setEditingDate(null)}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="confirm-delete-button"
-                      onClick={() => saveEdit()}
-                      disabled={savingEdit}
-                    >
-                      {savingEdit ? 'Saving...' : 'Save Changes'}
-                    </button>
-                  </div>
-                ) : (
+
+                <div className="date-heading-actions">
                   <button
                     type="button"
-                    className="edit-button date-edit-button"
-                    onClick={() => startEditing(date, dateCandidates)}
+                    role="switch"
+                    aria-checked={allShownOnBoard}
+                    className={`visual-toggle ${allShownOnBoard ? 'on' : ''}`}
+                    onClick={() =>
+                      toggleGroupVisibility(dateCandidates, !allShownOnBoard)
+                    }
+                    aria-label={`${
+                      allShownOnBoard ? 'Hide' : 'Show'
+                    } all candidates added on ${formatInterviewDate(date)} on the visual board`}
                   >
-                    <Pencil size={12} />
-                    Edit candidates
+                    <span className="visual-toggle-track">
+                      <span className="visual-toggle-thumb2" />
+                    </span>
+                    <span className="visual-toggle-label">
+                      {allShownOnBoard ? 'Shown' : 'Hidden'}
+                    </span>
                   </button>
-                )}
+
+                  {editingDate === date ? (
+                    <div className="date-edit-actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => setEditingDate(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="confirm-delete-button"
+                        onClick={() => saveEdit()}
+                        disabled={savingEdit}
+                      >
+                        {savingEdit ? 'Saving...' : 'Save Changes'}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="edit-button date-edit-button"
+                      onClick={() => startEditing(date, dateCandidates)}
+                    >
+                      <Pencil size={13} />
+                      Edit candidates
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="candidate-directory">
@@ -328,16 +413,60 @@ export default function CandidatesPage() {
                       </span>
                     )}
 
+                    <div className="candidate-directory-edit">
+                      <button
+                        type="button"
+                        className="delete-button"
+                        onClick={() => setCandidateToDelete(candidate)}
+                        aria-label={`Remove ${candidate.name}`}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+
                   </article>
                 ))}
               </div>
 
             </section>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="candidate-list-state">
           No candidates found for this date.
+        </div>
+      )}
+
+      {candidateToDelete && (
+        <div className="confirmation-overlay" role="presentation">
+          <div
+            className="confirmation-popup"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="history-delete-confirmation-title"
+          >
+            <h2 id="history-delete-confirmation-title">
+              Are you sure you want to remove this candidate?
+            </h2>
+
+            <div className="confirmation-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setCandidateToDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="confirm-delete-button"
+                onClick={() => removeCandidate(candidateToDelete.id)}
+              >
+                Yes
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

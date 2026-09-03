@@ -373,9 +373,9 @@ button {
 }
 
 .metric-card {
-  min-height: 97px;
+  min-height: 0;
 
-  padding: 14px;
+  padding: 10px 14px;
 
   border-radius: 9px;
 
@@ -429,9 +429,10 @@ button {
 .metric-value-row {
   display: flex;
   align-items: baseline;
+  justify-content: center;
   gap: 8px;
 
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .metric-value {
@@ -462,7 +463,7 @@ button {
 }
 
 .metric-description {
-  margin-top: 12px;
+  margin-top: 6px;
 
   color: #727272;
 
@@ -1057,6 +1058,7 @@ button {
   transition: background 0.18s ease, border-color 0.18s ease;
 }
 
+
 .visual-toggle-thumb {
   position: absolute;
   top: 2px;
@@ -1072,6 +1074,20 @@ button {
   transition: transform 0.18s ease, background 0.18s ease;
 }
 
+.visual-toggle-thumb2 {
+  position: absolute;
+  top: -2px;
+  left: 2px;
+
+  width: 12px;
+  height: 12px;
+
+  border-radius: 50%;
+
+  background: #8e8e8e;
+
+  transition: transform 0.18s ease, background 0.18s ease;
+}
 .visual-toggle.on .visual-toggle-track {
   border-color: rgba(107, 197, 142, 0.45);
   background: rgba(107, 197, 142, 0.22);
@@ -1082,6 +1098,10 @@ button {
   background: var(--green);
 }
 
+.visual-toggle.on .visual-toggle-thumb2 {
+  transform: translateX(16px);
+  background: var(--green);
+}
 .visual-toggle.on .visual-toggle-label {
   color: var(--green);
 }
@@ -1270,6 +1290,11 @@ button {
   }
 
   .candidate-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .candidate-directory-edit {
     grid-column: 2;
     justify-self: start;
   }
@@ -1469,6 +1494,13 @@ svg {
   border-bottom: 1px solid var(--border-light);
 }
 
+.date-heading-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
 .candidate-date-heading h2 {
   margin: 0;
   font-family: var(--font-display), var(--font-sans), sans-serif;
@@ -1491,12 +1523,14 @@ svg {
   gap: 6px;
   width: auto;
   padding: 0 10px;
-  color: #b84d49;
-  font-size: 11px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .date-edit-button:hover {
-  color: #e06a64;
+  color: #ffffff;
 }
 
 .date-edit-actions {

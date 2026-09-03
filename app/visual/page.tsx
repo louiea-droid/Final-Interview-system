@@ -1,19 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Poppins, Yellowtail } from "next/font/google";
+import { Poppins } from "next/font/google";
 import localFont from "next/font/local";
 import FullscreenSwitch from "./fullscreen-switch";
 import { supabase } from "../../lib/supabase";
+import { isShownOnBoard } from "../../lib/candidateVisibility";
 
 const poppins = Poppins({
   subsets: ["latin"],
   weight: "800",
 });
 
-const yellowtail = Yellowtail({
-  subsets: ["latin"],
-  weight: "400",
+const magneton = localFont({
+  src: "../fonts/magneton.ttf",
+  display: "swap",
 });
 
 const styleFormal = localFont({
@@ -228,7 +229,7 @@ export default function DisplayPage() {
 
     const shown = (data ?? []).filter(
       (candidate: Candidate) =>
-        candidate.show_in_visual !== false
+        isShownOnBoard(candidate)
     );
 
     setCandidates(shown);
@@ -521,6 +522,7 @@ export default function DisplayPage() {
 
     bg-clip-text
     text-transparent
+    drop-shadow-[0_2px_8px_rgba(238,184,55,.3)]
 
     [filter:drop-shadow(0_2px_1px_rgba(0,0,0,.55))_drop-shadow(0_0_22px_rgba(227,179,91,.40))]
 
@@ -623,7 +625,7 @@ export default function DisplayPage() {
                           absolute
                           inset-0
                           bg-cover
-                          bg-center
+                          bg-top
                           bg-no-repeat
                         "
                         style={{
@@ -671,23 +673,21 @@ export default function DisplayPage() {
 
                     <span
                       className={`
-                        ${yellowtail.className}
+                        ${magneton.className}
 
                         flex
                         items-center
                         justify-center
 
                         text-center
-                        leading-none
+                        leading-[1.08]
+                        tracking-[0.01em]
 
-                        text-[clamp(16px,2vw,28px)]
+                        text-[clamp(16.8px,2.1vw,29.4px)]
 
-                        text-[#1a0d02]
+                        text-[#560606]
 
-                        [-webkit-text-stroke:1px_#1a0d02]
-                        [paint-order:stroke_fill]
-
-                        [text-shadow:0_1px_0_rgba(255,246,215,.65)]
+                        [text-shadow:1px_1px_1px_rgba(63,39,10,.3)]
                       `}
                     >
                       {candidate.name}
@@ -737,12 +737,16 @@ export default function DisplayPage() {
         <div
           className={`
             ${styleFormal.className}
-            mt-[1vh]
+            mt-[2vh]
+            px-[0.08em]
+            pb-[0.12em]
             text-center
             text-[clamp(24px,5vw,48px)]
-            leading-none
-            text-[#f0d689]
-            drop-shadow-[0_2px_5px_rgba(0,0,0,.65)]
+            leading-[1.12]
+            bg-[radial-gradient(ellipse_at_center,#9b722d_0%,#b98d42_24%,#d1a65b_45%,#e1bd78_65%,#f1d795_84%,#f7dfa3_100%)]
+            bg-clip-text
+            text-transparent
+            drop-shadow-[0_2px_5px_rgba(118,66,8,.45)]
         
           `}
         >
