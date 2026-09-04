@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import {
-  CircleUserRound,
   ClipboardList,
   LayoutDashboard,
   Menu,
@@ -18,15 +17,21 @@ import { formatCurrentTime } from '../lib/adminTime';
 
 const COLLAPSE_KEY = 'interview-sidebar-collapsed';
 
+/*
+ * The page title lives in the header rather than in each page, so it sits
+ * beside the clocks and stays put while the page scrolls.
+ */
+function pageTitle(pathname) {
+  if (pathname.startsWith('/admin/settings')) return 'Settings';
+  if (pathname.startsWith('/admin/records')) return 'Records';
+  if (pathname.startsWith('/admin/history')) return 'Records';
+  return 'Final Interview Applicants';
+}
+
 export default function AdminProtectedLayout() {
   // nested routes render through <Outlet /> where `children` used to go
   const { pathname } = useLocation();
   const [currentTime, setCurrentTime] = useState(null);
-  const [adminProfile, setAdminProfile] = useState({
-    displayName: 'Admin',
-    role: 'Administrator',
-    avatarUrl: '',
-  });
   const [lightMode, setLightMode] = useState(false);
 
   // the mobile drawer; separate from the desktop collapse below
@@ -107,34 +112,6 @@ export default function AdminProtectedLayout() {
     window.dispatchEvent(new Event('interview-board-settings-updated'));
   }
 
-  useEffect(() => {
-    const loadAdminProfile = () => {
-      const storedProfile = window.localStorage.getItem('interview-admin-profile');
-
-      if (!storedProfile) return;
-
-      try {
-        const profile = JSON.parse(storedProfile);
-        setAdminProfile((current) => ({
-          displayName: typeof profile.displayName === 'string' && profile.displayName
-            ? profile.displayName
-            : current.displayName,
-          role: typeof profile.role === 'string' && profile.role
-            ? profile.role
-            : current.role,
-          avatarUrl: typeof profile.avatarUrl === 'string' ? profile.avatarUrl : current.avatarUrl,
-        }));
-      } catch {
-        window.localStorage.removeItem('interview-admin-profile');
-      }
-    };
-
-    loadAdminProfile();
-    window.addEventListener('interview-admin-profile-updated', loadAdminProfile);
-
-    return () => window.removeEventListener('interview-admin-profile-updated', loadAdminProfile);
-  }, []);
-
   const layoutClasses = [
     'admin-layout',
     lightMode ? 'light-mode' : '',
@@ -194,8 +171,24 @@ export default function AdminProtectedLayout() {
           </a>
         </div>
 
-        {/* the profile itself now lives in the header; signing out stays here */}
         <div className="sidebar-account">
+
+          <button
+            type="button"
+            className="sidebar-link sidebar-theme-toggle"
+            onClick={() => applyTheme(!lightMode)}
+            aria-label={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
+            title={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
+          >
+            {lightMode ? (
+              <Sun size={19} strokeWidth={2.1} />
+            ) : (
+              <Moon size={19} strokeWidth={2.1} />
+            )}
+            <span>{lightMode ? 'Light mode' : 'Dark mode'}</span>
+          </button>
+
+          <span className="sidebar-separator" aria-hidden="true" />
 
           <button
             type="button"
@@ -251,72 +244,31 @@ export default function AdminProtectedLayout() {
               {sidebarOpen ? <X size={19} /> : <Menu size={19} />}
             </button>
 
+            <h1 className="header-title">{pageTitle(pathname)}</h1>
+
+          </div>
+
+          <div className="admin-header-right">
+
             <div className="timezone-clocks" aria-label="Current time">
               <div className="timezone-clock">
-                <span className="timezone-label">Philippine Time</span>
+                <span className="timezone-label">Philippine</span>
                 <span className="timezone-value">
                   {currentTime
                     ? formatCurrentTime(currentTime, 'Asia/Manila')
-                    : 'Loading...'}
+                    : '--'}
                 </span>
               </div>
 
               <span className="timezone-divider" aria-hidden="true" />
 
               <div className="timezone-clock">
-                <span className="timezone-label">Eastern Time</span>
+                <span className="timezone-label">Eastern</span>
                 <span className="timezone-value">
                   {currentTime
                     ? formatCurrentTime(currentTime, 'America/New_York')
-                    : 'Loading...'}
+                    : '--'}
                 </span>
-              </div>
-            </div>
-
-          </div>
-
-          <div className="admin-header-right">
-
-            <div className="theme-toggle" role="group" aria-label="Colour theme">
-              <button
-                type="button"
-                className={`theme-toggle-option ${lightMode ? 'active' : ''}`}
-                onClick={() => applyTheme(true)}
-                aria-pressed={lightMode}
-                aria-label="Light mode"
-                title="Light mode"
-              >
-                <Sun size={17} strokeWidth={2.1} />
-              </button>
-
-              <button
-                type="button"
-                className={`theme-toggle-option ${lightMode ? '' : 'active'}`}
-                onClick={() => applyTheme(false)}
-                aria-pressed={!lightMode}
-                aria-label="Dark mode"
-                title="Dark mode"
-              >
-                <Moon size={17} strokeWidth={2.1} />
-              </button>
-            </div>
-
-            <div className="header-profile">
-              <span className="profile-avatar profile-avatar-icon">
-                {adminProfile.avatarUrl ? (
-                  <img
-                    src={adminProfile.avatarUrl}
-                    alt=""
-                    className="profile-avatar-image"
-                  />
-                ) : (
-                  <CircleUserRound size={20} strokeWidth={2} />
-                )}
-              </span>
-
-              <div className="header-profile-details">
-                <strong>{adminProfile.displayName}</strong>
-                <span>{adminProfile.role}</span>
               </div>
             </div>
 

@@ -13,6 +13,7 @@ import { localClient as supabase } from '../lib/localBackend';
 import { isShownOnBoard } from '../lib/candidateVisibility';
 import { getStatusPillClass } from '../lib/candidateStatus';
 import CandidateDetailsModal from '../components/CandidateDetailsModal';
+import TablePagination from '../components/TablePagination';
 import PhotoCropModal from '../components/PhotoCropModal';
 import DateField from '../components/DateField';
 import { useToast } from '../components/ToastProvider';
@@ -90,15 +91,34 @@ export default function CandidatesPage() {
     );
   }, [candidates]);
 
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const filteredCandidates = useMemo(
+    () =>
+      candidates.filter(
+        (candidate) =>
+          selectedDate === 'all' ||
+          getInterviewDateKey(candidate.interview_date) === selectedDate
+      ),
+    [candidates, selectedDate]
+  );
+
+  const pageCandidates = useMemo(
+    () => filteredCandidates.slice((page - 1) * pageSize, page * pageSize),
+    [filteredCandidates, page, pageSize]
+  );
+
+  /*
+   * Grouping is applied to the page rather than the whole list, so a page
+   * always holds exactly `pageSize` candidates while still being broken up
+   * by interview date. A date spanning a page boundary simply appears as a
+   * heading on both pages.
+   */
   const groupedCandidates = useMemo(() => {
-    const filteredCandidates = candidates.filter(
-      (candidate) =>
-        selectedDate === 'all' ||
-        getInterviewDateKey(candidate.interview_date) === selectedDate
-    );
     const groups = new Map();
 
-    filteredCandidates.forEach((candidate) => {
+    pageCandidates.forEach((candidate) => {
       const dateKey = getInterviewDateKey(candidate.interview_date);
       const group = groups.get(dateKey) ?? [];
       group.push(candidate);
@@ -106,7 +126,13 @@ export default function CandidatesPage() {
     });
 
     return Array.from(groups.entries());
-  }, [candidates, selectedDate]);
+  }, [pageCandidates]);
+
+  // a shrinking list must not leave the view stranded past the end
+  useEffect(() => {
+    const pageCount = Math.max(1, Math.ceil(filteredCandidates.length / pageSize));
+    if (page > pageCount) setPage(pageCount);
+  }, [filteredCandidates.length, page, pageSize]);
 
   function startEditing(date, dateCandidates) {
     setEditingDate(date);
@@ -480,7 +506,6 @@ export default function CandidatesPage() {
     <div className="candidates-page">
       <header className="candidates-page-header">
         <div>
-          <h1 className="greeting-title">Records</h1>
           <p className="greeting-subtitle">
             Candidates organized by interview schedule.
           </p>
@@ -517,9 +542,18 @@ export default function CandidatesPage() {
       </section>
 
       {loading ? (
-        <div className="candidate-list-state">Loading candidates...</div>
+        <div
+          className="candidate-list-state"
+          style={{ '--rows-per-page': pageSize }}
+        >Loading candidates...</div>
       ) : groupedCandidates.length ? (
-        <div className="candidate-date-groups">
+        <div
+          className="candidate-date-groups"
+          style={{
+            '--rows-per-page': pageSize,
+            '--group-count': groupedCandidates.length,
+          }}
+        >
           {groupedCandidates.map(([date, dateCandidates]) => {
             const allShownOnBoard = dateCandidates.every((candidate) =>
               isShownOnBoard(candidate)
@@ -602,17 +636,6 @@ export default function CandidatesPage() {
                       <span>{candidate.position || 'No position'}</span>
                     </button>
 
-                    <div className="candidate-directory-type">
-                      <small>Date added</small>
-                      <strong>
-                        {formatInterviewDate(getAddedDateKey(candidate.created_at))}
-                      </strong>
-                    </div>
-
-                    <span className={statusClasses[candidate.status] ?? 'candidate-status'}>
-                      {candidate.status}
-                    </span>
-
                     <div className="candidate-directory-edit">
                       <button
                         type="button"
@@ -633,9 +656,25 @@ export default function CandidatesPage() {
           })}
         </div>
       ) : (
-        <div className="candidate-list-state">
+        <div
+          className="candidate-list-state"
+          style={{ '--rows-per-page': pageSize }}
+        >
           No candidates found for this date.
         </div>
+      )}
+
+      {!loading && (
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          totalItems={filteredCandidates.length}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+        />
       )}
 
       {editingDate && (

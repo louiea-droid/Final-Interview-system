@@ -18,6 +18,7 @@ import {
   formatCurrentDate,
   getEasternBatchStart,
   isSameDay,
+  toDayKey,
 } from '../lib/adminTime';
 import { isShownOnBoard } from '../lib/candidateVisibility';
 import CandidateDetailsModal from '../components/CandidateDetailsModal';
@@ -376,7 +377,7 @@ async function saveCandidate(e) {
     const counts = new Map();
 
     candidates.forEach((candidate) => {
-      const key = candidate.interview_date || 'unscheduled';
+      const key = toDayKey(candidate.interview_date, LIST_TIME_ZONE) ?? 'unscheduled';
       counts.set(key, (counts.get(key) ?? 0) + 1);
     });
 
@@ -395,14 +396,6 @@ async function saveCandidate(e) {
     <>
 
       {/* HEADER */}
-
-      <header className="dashboard-header">
-        <div>
-          <h1 className="greeting-title">
-            Final Interview Applicants
-          </h1>
-        </div>
-      </header>
 
       {/* =========================================
           METRICS
@@ -571,7 +564,6 @@ async function saveCandidate(e) {
                   <th>Candidate</th>
                   <th>Interview Schedule</th>
                   <th>Date Added</th>
-                  <th>Status</th>
                   <th>Visual Board</th>
                   <th>Action</th>
                 </tr>
@@ -659,29 +651,6 @@ async function saveCandidate(e) {
 
                     {/* STATUS */}
 
-                    <td>
-
-                      <select
-                        className={`status-select ${getStatusClass(
-                          candidate.status
-                        )}`}
-                        value={candidate.status}
-                        onChange={(e) =>
-                          updateStatus(
-                            candidate.id,
-                            e.target.value
-                          )
-                        }
-                      >
-                        {statuses.map((status) => (
-                          <option key={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-
-                    </td>
-
                     {/* VISUAL BOARD */}
 
                     <td>
@@ -746,7 +715,7 @@ async function saveCandidate(e) {
 
                   <tr>
 
-                    <td colSpan={6}>
+                    <td colSpan={5}>
 
                       <div className="empty-state">
                         No interviews scheduled for today.
@@ -943,13 +912,23 @@ async function saveCandidate(e) {
   );
 }
 
+/*
+ * Both formatters take either a 'YYYY-MM-DD' key or a full timestamp -
+ * splitting a timestamp on '-' used to leave the time stuck to the day.
+ */
 function formatDateValue(date) {
-  const [year, month, day] = date.split('-');
+  const key = toDayKey(date, LIST_TIME_ZONE);
+  if (!key) return '--';
+
+  const [year, month, day] = key.split('-');
   return `${month}/${day}/${year}`;
 }
 
 function formatShortDate(date) {
-  const [, month, day] = date.split('-');
+  const key = toDayKey(date, LIST_TIME_ZONE);
+  if (!key) return '--';
+
+  const [, month, day] = key.split('-');
   return `${Number(month)}/${Number(day)}`;
 }
 
@@ -974,77 +953,173 @@ function roundedTopBarPath(x, y, width, height, radius) {
   `;
 }
 
-function InterviewDateChart({
-  data,
-}) {
-  const barWidth = 28;
-  const barGap = 16;
-  const plotHeight = 110;
-  const topPadding = 20;
-  const bottomPadding = 20;
+/*
+ * Candidates per interview date.
+ *
+ * One series, so one hue and no legend - the panel title names it. The y
+ * gridlines carry the magnitudes, which is why only the tallest bar, today's,
+ * and the hovered one are labelled rather than every bar.
+ *
+ * Geometry is computed from the measured pixel width rather than drawn in a
+ * fixed viewBox and scaled: scaling a viewBox to fit stretches the text and
+ * the bars with it, which is what made this chart look smeared.
+ */
+function InterviewDateChart({ data }) {
+  const [hovered, setHovered] = useState(null);
+  const wrapRef = useRef(null);
+  const [width, setWidth] = useState(0);
 
-  const maxCount = Math.max(...data.map((point) => point.count), 1);
-  const width = data.length * (barWidth + barGap) - barGap;
-  const height = topPadding + plotHeight + bottomPadding;
+  useEffect(() => {
+    const node = wrapRef.current;
+    if (!node) return;
+
+    const measure = () => setWidth(node.clientWidth);
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const HEIGHT = 158;
+  const PAD = { top: 18, right: 6, bottom: 34, left: 28 };
+
+  const plotWidth = Math.max(0, width - PAD.left - PAD.right);
+  const plotHeight = HEIGHT - PAD.top - PAD.bottom;
+  const baseline = PAD.top + plotHeight;
+
+  const peak = Math.max(...data.map((point) => point.count), 1);
+
+  // round the axis up to a number a person would have chosen
+  const step = peak <= 4 ? 1 : peak <= 10 ? 2 : peak <= 25 ? 5 : 10;
+  const axisMax = Math.ceil(peak / step) * step;
+  const ticks = [...new Set([0, axisMax / 2, axisMax])].filter(Number.isInteger);
+
+  const band = data.length > 0 ? plotWidth / data.length : 0;
+  const barWidth = Math.min(34, Math.max(5, band - 14));
+
+  const todayKey = toDayKey(new Date(), LIST_TIME_ZONE);
+  const peakIndex = data.findIndex((point) => point.count === peak);
+
+  // keep x labels from colliding once the bands get narrow
+  const labelEvery = band < 34 ? Math.ceil(34 / band) : 1;
 
   const summary = data
     .map((point) => `${formatDateValue(point.date)}: ${point.count}`)
     .join(', ');
 
+  const active = hovered === null ? null : data[hovered];
+
   return (
-    <svg
-      role="img"
-      aria-label={`Candidates by interview date — ${summary}`}
-      viewBox={`0 0 ${width} ${height}`}
-      width={width}
-      height={height}
-      className="interview-chart"
-    >
-      <line
-        x1={0}
-        y1={topPadding + plotHeight}
-        x2={width}
-        y2={topPadding + plotHeight}
-        className="interview-chart-baseline"
-      />
+    <div className="interview-chart-figure" ref={wrapRef}>
+      {width > 0 && (
+        <svg
+          role="img"
+          aria-label={`Candidates by interview date - ${summary}`}
+          width={width}
+          height={HEIGHT}
+          className="interview-chart"
+        >
+          {ticks.map((tick) => {
+            const y = baseline - (tick / axisMax) * plotHeight;
 
-      {data.map((point, index) => {
-        const barHeight = (point.count / maxCount) * (plotHeight - 10);
-        const x = index * (barWidth + barGap);
-        const y = topPadding + plotHeight - barHeight;
+            return (
+              <g key={tick}>
+                <line
+                  x1={PAD.left}
+                  y1={y}
+                  x2={width - PAD.right}
+                  y2={y}
+                  className={tick === 0 ? 'chart-axis' : 'chart-grid'}
+                />
+                <text x={PAD.left - 8} y={y + 3.5} className="chart-tick">
+                  {tick}
+                </text>
+              </g>
+            );
+          })}
 
-        return (
-          <g key={point.date}>
-            <title>
-              {formatDateValue(point.date)}: {point.count} candidate{point.count === 1 ? '' : 's'}
-            </title>
+          {data.map((point, index) => {
+            const height = (point.count / axisMax) * plotHeight;
+            const x = PAD.left + index * band + (band - barWidth) / 2;
+            const y = baseline - height;
 
-            <text
-              x={x + barWidth / 2}
-              y={y - 6}
-              textAnchor="middle"
-              className="interview-chart-value"
-            >
-              {point.count}
-            </text>
+            const isToday = point.date === todayKey;
+            const isHovered = hovered === index;
+            const labelled = isToday || index === peakIndex || isHovered;
 
-            <path
-              d={roundedTopBarPath(x, y, barWidth, barHeight, 4)}
-              className="interview-chart-bar"
-            />
+            return (
+              <g key={point.date}>
+                <path
+                  d={roundedTopBarPath(x, y, barWidth, height, 4)}
+                  className={`interview-chart-bar${isToday ? ' is-today' : ''}${
+                    isHovered ? ' is-hovered' : ''
+                  }`}
+                />
 
-            <text
-              x={x + barWidth / 2}
-              y={topPadding + plotHeight + 16}
-              textAnchor="middle"
-              className="interview-chart-label"
-            >
-              {formatShortDate(point.date)}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+                {labelled && height > 0 && (
+                  <text
+                    x={x + barWidth / 2}
+                    y={y - 6}
+                    textAnchor="middle"
+                    className="interview-chart-value"
+                  >
+                    {point.count}
+                  </text>
+                )}
+
+                {index % labelEvery === 0 && (
+                  <text
+                    x={x + barWidth / 2}
+                    y={baseline + 15}
+                    textAnchor="middle"
+                    className={`interview-chart-label${isToday ? ' is-today' : ''}`}
+                  >
+                    {formatShortDate(point.date)}
+                  </text>
+                )}
+
+                {isToday && (
+                  <text
+                    x={x + barWidth / 2}
+                    y={baseline + 27}
+                    textAnchor="middle"
+                    className="interview-chart-today"
+                  >
+                    TODAY
+                  </text>
+                )}
+
+                {/* a hit target spanning the band, not just the bar */}
+                <rect
+                  x={PAD.left + index * band}
+                  y={PAD.top}
+                  width={band}
+                  height={plotHeight}
+                  fill="transparent"
+                  onMouseEnter={() => setHovered(index)}
+                  onMouseLeave={() => setHovered(null)}
+                />
+              </g>
+            );
+          })}
+        </svg>
+      )}
+
+      {active && (
+        <div
+          className="chart-tooltip"
+          style={{ left: `${PAD.left + hovered * band + band / 2}px` }}
+          role="status"
+        >
+          <strong>{formatDateValue(active.date)}</strong>
+          <span>
+            {active.count} candidate{active.count === 1 ? '' : 's'}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 

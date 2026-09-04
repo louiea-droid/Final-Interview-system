@@ -12,7 +12,7 @@ body {
 }
 
 body {
-  background: #0b0b0b;
+  background: #212121;
   color: #f2f2f2;
 }
 
@@ -32,10 +32,16 @@ button {
 }
 
 :root {
-  --bg: #0b0b0b;
-  --sidebar: #101010;
-  --card: #151515;
-  --card-hover: #1b1b1b;
+  /*
+   * Neutral greys rather than warm near-blacks. The brand red stays for
+   * accents - active nav, primary buttons - and no longer tints surfaces,
+   * borders or backgrounds.
+   */
+  --bg: #212121;
+  --sidebar: #171717;
+  --card: #2a2a2a;
+  --card-hover: #323232;
+  --surface-raised: #303030;
 
   /* Main theme colors */
   --red: #6f0c0b;
@@ -48,13 +54,14 @@ button {
   --asphalt-dark: #454545;
 
   /* Text */
-  --text: #f2f2f2;
-  --text-soft: #c8c8c8;
-  --text-muted: #818181;
+  --text: #ececec;
+  --text-soft: #c6c6c6;
+  --text-muted: #9b9b9b;
 
-  /* Borders */
-  --border: rgba(111, 12, 11, 0.38);
+  /* Borders - neutral, never red */
+  --border: rgba(255, 255, 255, 0.12);
   --border-light: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.2);
 
   /* Status */
   --green: #6bc58e;
@@ -71,18 +78,7 @@ button {
   width: 100%;
   min-height: 100vh;
 
-  background:
-    radial-gradient(
-      circle at 80% 0%,
-      rgba(111, 12, 11, 0.14),
-      transparent 32%
-    ),
-    radial-gradient(
-      circle at 45% 55%,
-      rgba(98, 98, 98, 0.07),
-      transparent 38%
-    ),
-    #0b0b0b;
+  background: var(--bg);
 }
 
 /* =========================================
@@ -101,14 +97,9 @@ button {
 
   padding: 18px 12px;
 
-  background:
-    linear-gradient(
-      180deg,
-      #151515 0%,
-      #0c0c0c 100%
-    );
+  background: var(--sidebar);
 
-  border-right: 1px solid rgba(255, 255, 255, 0.055);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
 
   display: flex;
   flex-direction: column;
@@ -181,7 +172,7 @@ button {
 }
 
 .sidebar-link:hover {
-  background: rgba(111, 12, 11, 0.14);
+  background: rgba(255, 255, 255, 0.06);
   color: #d8d8d8;
 }
 
@@ -196,7 +187,7 @@ button {
     );
 
   box-shadow:
-    0 7px 17px rgba(111, 12, 11, 0.28);
+    0 7px 17px rgba(255, 255, 255, 0.112);
 }
 
 .sidebar-account {
@@ -355,7 +346,7 @@ button {
   align-items: center;
   justify-content: center;
 
-  background: rgba(111, 12, 11, 0.18);
+  background: rgba(255, 255, 255, 0.072);
   color: #c94a46;
 }
 
@@ -457,13 +448,13 @@ button {
 
   border-radius: 9px;
 
-  border: 1px solid rgba(111, 12, 11, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.128);
 
   background:
     linear-gradient(
       180deg,
-      #181818,
-      #111111
+      #2a2a2a,
+      #212121
     );
 
   box-shadow:
@@ -566,13 +557,13 @@ button {
 
   border-radius: 9px;
 
-  border: 1px solid rgba(111, 12, 11, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.128);
 
   background:
     linear-gradient(
       180deg,
-      #181818,
-      #111111
+      #2a2a2a,
+      #212121
     );
 
   box-shadow:
@@ -693,16 +684,11 @@ button {
 .panel {
   border-radius: 9px;
 
-  border: 1px solid rgba(111, 12, 11, 0.32);
+  border: 1px solid var(--border-light);
 
-  background:
-    linear-gradient(
-      180deg,
-      #181818,
-      #111111
-    );
+  background: var(--card);
 
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: none;
 
   overflow: hidden;
 }
@@ -784,42 +770,119 @@ button {
 }
 
 .interview-chart-wrap {
-  overflow-x: auto;
+  padding: 8px 0 0;
+}
 
-  padding: 10px 0 0;
+/* the tooltip is positioned against this, so it must be the containing block */
+.interview-chart-figure {
+  position: relative;
 }
 
 .interview-chart {
   display: block;
+
+  /* sized in the component, in real pixels, so text is never stretched */
   font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
 }
 
-.interview-chart-baseline {
-  stroke: var(--border-light);
+/* the axis reads slightly stronger than the gridlines above it */
+.chart-axis {
+  stroke: rgba(255, 255, 255, 0.16);
   stroke-width: 1;
 }
 
+.chart-grid {
+  stroke: rgba(255, 255, 255, 0.07);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.chart-tick {
+  fill: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  text-anchor: end;
+  font-variant-numeric: tabular-nums;
+}
+
 .interview-chart-bar {
-  fill: var(--red-status);
+  fill: #e0453f;
   transition: fill 0.15s ease;
 }
 
-.interview-chart-bar:hover {
-  fill: #e5615c;
+/* today is the one bar worth picking out, and it is labelled as well as lit */
+.interview-chart-bar.is-today {
+  fill: #ff8a80;
+}
+
+.interview-chart-bar.is-hovered {
+  fill: #ff6b63;
 }
 
 .interview-chart-value {
   fill: var(--text-soft);
-
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .interview-chart-label {
   fill: var(--text-muted);
-
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.interview-chart-label.is-today {
+  fill: var(--text-soft);
+  font-weight: 700;
+}
+
+.interview-chart-today {
+  fill: #ff8a80;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chart-tooltip {
+  position: absolute;
+  bottom: calc(100% - 14px);
+  z-index: 5;
+
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+
+  padding: 7px 10px;
+
+  /* centred on the hovered band, and never intercepting the pointer */
+  transform: translateX(-50%);
+  pointer-events: none;
+  white-space: nowrap;
+
+  border-radius: 8px;
+  background: #3a3a3a;
+
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+.chart-tooltip strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chart-tooltip span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .interview-chart-bar {
+    transition: none;
+  }
 }
 
 .form-container {
@@ -933,9 +996,9 @@ button {
 
   border-radius: 6px;
 
-  border: 1px solid rgba(98, 98, 98, 0.35);
+  border: 1px solid var(--border);
 
-  background:  rgba(8, 8, 8, 0.72);
+  background: rgba(255, 255, 255, 0.04);
 
   font-size: 14px;
 
@@ -948,15 +1011,14 @@ button {
 
 .form-input:hover,
 .form-select:hover {
-  border-color: rgba(98, 98, 98, 0.55);
+  border-color: var(--border-strong);
 }
 
 .form-input:focus,
 .form-select:focus {
-  border-color: rgba(111, 12, 11, 0.75);
+  border-color: rgba(255, 255, 255, 0.36);
 
-  box-shadow:
-    0 0 0 2px rgba(111, 12, 11, 0.12);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
 }
 
 .form-input::placeholder {
@@ -1015,7 +1077,7 @@ button {
       #8b1716
     );
   box-shadow:
-    0 8px 20px rgba(111, 12, 11, 0.28);
+    0 8px 20px rgba(255, 255, 255, 0.112);
 
   font-size: 12px;
   font-weight: 600;
@@ -1027,7 +1089,7 @@ button {
 .primary-button:hover {
   filter: brightness(1.15);
   transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(111, 12, 11, 0.38);
+  box-shadow: 0 10px 24px rgba(255, 255, 255, 0.152);
 }
 
 .primary-button:active {
@@ -1064,10 +1126,10 @@ button {
 
   border-radius: 6px;
 
-  border: 1px dashed rgba(111, 12, 11, 0.65);
+  border: 1px dashed rgba(255, 255, 255, 0.18);
 
   background:
-    rgba(111, 12, 11, 0.035);
+    rgba(255, 255, 255, 0.06);
 
   cursor: pointer;
 
@@ -1078,7 +1140,7 @@ button {
   border-color: rgba(139, 23, 22, 0.9);
 
   background:
-    rgba(111, 12, 11, 0.09);
+    rgba(255, 255, 255, 0.06);
 }
 
 .photo-upload-box.disabled {
@@ -1201,8 +1263,8 @@ button {
   background:
     linear-gradient(
       135deg,
-      #241515,
-      #140909
+      #2a2a2a,
+      #212121
     );
 
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -1263,7 +1325,7 @@ button {
 }
 
 .candidate-table tr:hover td {
-  background: rgba(111, 12, 11, 0.06);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .candidate-info {
@@ -1315,7 +1377,7 @@ button {
 
   border-radius: 6px;
 
-  background: #201414;
+  background: #303030;
 }
 
 .candidate-name {
@@ -1344,11 +1406,11 @@ button {
 
   border-radius: 999px;
 
-  border: 1px solid rgba(111, 12, 11, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
 
   color: #e2e2e2;
 
-  background: #171111;
+  background: #2a2a2a;
 
   font-size: 12px;
   font-weight: 600;
@@ -1520,13 +1582,13 @@ button {
 
     color: #b84d49;
 
-  border: 1px solid rgba(111, 12, 11, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 
-  background: rgba(111, 12, 11, 0.05);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .delete-button:hover {
-  background: rgba(111, 12, 11, 0.16);
+  background: rgba(255, 255, 255, 0.064);
 }
 
 .secondary-button {
@@ -1914,12 +1976,12 @@ svg {
   min-width: 170px;
   padding: 0 9px;
 
-  border: 1px solid rgba(111, 12, 11, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 5px;
   outline: none;
 
   color: #d3d3d3;
-  background: #171111;
+  background: #2a2a2a;
   font-size: 12px;
   font-weight: 500;
 
@@ -1937,21 +1999,38 @@ svg {
 .candidate-date-groups {
   display: grid;
   gap: 12px;
+  align-content: start;
+
+  /*
+   * Holds the height a full page would occupy, so the pagination bar and
+   * everything under it stay put whether the page has ten rows, one, or
+   * none. Each group also costs its heading, hence the second term.
+   */
+  /* measured from the rendered list, so the reserve matches a real page */
+  --row-height: 58px;
+  --group-heading-height: 68px;
+  --group-chrome: 14px;
+
+  min-height: calc(
+    var(--rows-per-page, 10) * var(--row-height) +
+      var(--group-count, 1) *
+      (var(--group-heading-height) + var(--group-chrome))
+  );
 }
 
 .candidate-date-group {
   overflow: hidden;
 
-  border: 1px solid rgba(111, 12, 11, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
-  background: linear-gradient(180deg, #161616, #111111);
+  background: linear-gradient(180deg, #212121, #212121);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 
   transition: border-color 0.18s ease;
 }
 
 .candidate-date-group:hover {
-  border-color: rgba(111, 12, 11, 0.5);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .candidate-date-heading {
@@ -2021,14 +2100,21 @@ svg {
   font-size: 11px;
 }
 
+/*
+ * Fixed columns, so every row in every group lines up: the mark, the name,
+ * then the action pinned to the right edge. The row height is fixed too, so
+ * a page of one row is as tall as a page of ten.
+ */
 .candidate-directory-row {
   display: grid;
-  grid-template-columns: 36px minmax(150px, 1.4fr) minmax(120px, 1fr) auto auto;
+  grid-template-columns: 36px minmax(0, 1fr) 40px;
   align-items: center;
-  gap: 12px;
-  min-height: 62px;
-  padding: 9px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+  gap: 14px;
+
+  height: var(--row-height, 58px);
+  padding: 0 16px;
+
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 
   transition: background 0.15s ease;
 }
@@ -2038,7 +2124,7 @@ svg {
 }
 
 .candidate-directory-row:hover {
-  background: rgba(111, 12, 11, 0.07);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .candidate-directory-avatar {
@@ -2046,7 +2132,7 @@ svg {
   height: 36px;
   object-fit: cover;
   border-radius: 7px;
-  background: #201414;
+  background: #303030;
 }
 
 .candidate-directory-avatar-button {
@@ -2279,7 +2365,7 @@ svg {
   border-radius: 12px;
   border: 1px solid var(--border-light);
 
-  background: #201414;
+  background: #303030;
 }
 
 /* =========================================
@@ -2396,8 +2482,8 @@ svg {
   display: grid;
   gap: 10px;
   padding: 16px;
-  border-top: 1px solid rgba(111, 12, 11, 0.35);
-  background: rgba(111, 12, 11, 0.04);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .inline-group-editor > h3 {
@@ -2952,7 +3038,7 @@ svg {
 }
 
 .date-field-day.today {
-  border-color: rgba(111, 12, 11, 0.6);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .date-field-day.selected {
@@ -3013,10 +3099,16 @@ svg {
 }
 
 .candidate-list-state {
-  padding: 50px 20px;
+  display: grid;
+  place-items: center;
+
+  /* matches .candidate-date-groups, so an empty list occupies a full page */
+  min-height: calc(var(--rows-per-page, 10) * 58px + 82px);
+
+  padding: 40px 20px;
   border: 1px solid var(--border-light);
   border-radius: 8px;
-  color: #777777;
+  color: var(--text-muted);
   background: rgba(255, 255, 255, 0.02);
   text-align: center;
   font-size: 13px;
@@ -3094,7 +3186,7 @@ svg {
 
   padding: 22px 20px;
 
-  background: linear-gradient(180deg, #171717 0%, #0d0d0d 100%);
+  background: linear-gradient(180deg, #171717 0%, #171717 100%);
   border-left: 1px solid rgba(255, 255, 255, 0.07);
 
   display: flex;
@@ -3169,7 +3261,7 @@ svg {
 }
 
 .admin-layout.light-mode {
-  --text: #241616;
+  --text: #2a2a2a;
   --text-soft: #5b4747;
   --text-muted: #806f6f;
   --border-light: rgba(91, 55, 55, 0.16);
@@ -3187,7 +3279,7 @@ svg {
 .admin-layout.light-mode .profile,
 .admin-layout.light-mode .panel-title,
 .admin-layout.light-mode .metric-value {
-  color: #241616;
+  color: #2a2a2a;
 }
 
 .admin-layout.light-mode .sidebar-link:hover,
@@ -3197,7 +3289,7 @@ svg {
 
 .admin-layout.light-mode .panel,
 .admin-layout.light-mode .metric-card {
-  border-color: rgba(111, 12, 11, 0.2);
+  border-color: rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, #fffdfa, #f5edeb);
   box-shadow: 0 8px 20px rgba(80, 42, 42, 0.08);
 }
@@ -3231,7 +3323,7 @@ svg {
 .admin-layout.light-mode .candidate-edit-popup h2,
 .admin-layout.light-mode .inline-group-editor > h3,
 .admin-layout.light-mode .record-edit-fieldset-name {
-  color: #241616;
+  color: #2a2a2a;
 }
 
 .admin-layout.light-mode .greeting-subtitle,
@@ -3276,7 +3368,7 @@ svg {
 .admin-layout.light-mode .secondary-button:hover,
 .admin-layout.light-mode .edit-button:hover,
 .admin-layout.light-mode .date-edit-button:hover {
-  color: #241616;
+  color: #2a2a2a;
 }
 
 .admin-layout.light-mode .candidate-date-group,
@@ -3301,7 +3393,7 @@ svg {
 .admin-layout.light-mode .photo-upload-box:hover,
 .admin-layout.light-mode .none-photo-option:hover,
 .admin-layout.light-mode .modal-close-button:hover {
-  background: rgba(111, 12, 11, 0.08);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .admin-layout.light-mode .photo-upload-box.disabled {
@@ -3338,7 +3430,7 @@ svg {
 
 .admin-layout.light-mode .candidate-directory-row:hover,
 .admin-layout.light-mode .candidate-table tr:hover td {
-  background: rgba(111, 12, 11, 0.06);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .admin-layout.light-mode .candidate-status {

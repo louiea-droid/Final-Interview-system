@@ -83,7 +83,17 @@
 
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
+}
+
+.sidebar-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.admin-layout.light-mode .sidebar-separator {
+  background: rgba(60, 20, 20, 0.12);
 }
 
 .sidebar-link.sidebar-signout {
@@ -113,6 +123,7 @@
 
 .admin-layout.sidebar-collapsed .sidebar-link,
 .admin-layout.sidebar-collapsed .sidebar-link.sidebar-signout,
+.admin-layout.sidebar-collapsed .sidebar-theme-toggle,
 .admin-layout.sidebar-collapsed .sidebar-collapse-toggle {
   justify-content: center;
   padding: 0;
@@ -142,7 +153,7 @@
 
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 
-  background: rgba(11, 11, 11, 0.82);
+  background: rgba(33, 33, 33, 0.85);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
@@ -156,11 +167,18 @@
 }
 
 .admin-header-right {
-  gap: 12px;
+  gap: 14px;
   flex: 0 0 auto;
 }
 
-/* sits with the sign-out at the foot of the rail, styled as a nav row */
+/* right-aligned, so the values line up with the edge of the content */
+.admin-header-right .timezone-clock {
+  align-items: flex-end;
+  text-align: right;
+}
+
+/* sit with the sign-out at the foot of the rail, styled as nav rows */
+.sidebar-theme-toggle,
 .sidebar-collapse-toggle {
   width: 100%;
   border: 0;
@@ -169,9 +187,35 @@
   color: var(--text-muted);
 }
 
+.sidebar-theme-toggle:hover,
 .sidebar-collapse-toggle:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text);
+}
+
+/* --------------------------------------------------- title + separator */
+
+.header-title {
+  margin: 0;
+
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+
+  /* a long title yields to the clocks rather than pushing them out */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.header-separator {
+  width: 1px;
+  height: 26px;
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* --------------------------------------------------------- the clocks */
@@ -266,62 +310,6 @@
   font-size: 11px;
 }
 
-/* ------------------------------------------------------- theme control */
-
-/*
- * Two icons rather than one toggle, so the current mode is stated rather
- * than inferred from which icon is showing.
- */
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  flex: 0 0 auto;
-
-  padding: 3px;
-
-  border: 1px solid var(--border-light);
-  border-radius: 9px;
-
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.theme-toggle-option {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  width: 32px;
-  height: 30px;
-  padding: 0;
-
-  border: 0;
-  border-radius: 6px;
-
-  color: #7c7c7c;
-  background: transparent;
-
-  transition:
-    color 0.16s ease,
-    background 0.16s ease,
-    box-shadow 0.16s ease;
-}
-
-.theme-toggle-option:hover:not(.active) {
-  color: var(--text-soft);
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.theme-toggle-option.active {
-  color: #ffffff;
-
-  background: linear-gradient(180deg, #8b1514, #5d0c0c);
-
-  box-shadow:
-    0 4px 12px rgba(93, 12, 12, 0.42),
-    0 1px 0 rgba(255, 255, 255, 0.14) inset;
-}
-
 /* ------------------------------------------------------------- content */
 
 .dashboard-content {
@@ -341,23 +329,12 @@
   background-color: transparent;
 }
 
-.admin-layout.light-mode .timezone-divider {
-  background: rgba(60, 20, 20, 0.12);
+.admin-layout.light-mode .timezone-divider,
+.admin-layout.light-mode .header-separator {
+  background: rgba(60, 20, 20, 0.14);
 }
 
-.admin-layout.light-mode .theme-toggle {
-  border-color: rgba(60, 20, 20, 0.14);
-  background: rgba(60, 20, 20, 0.04);
-}
 
-.admin-layout.light-mode .theme-toggle-option {
-  color: #8a7a78;
-}
-
-.admin-layout.light-mode .theme-toggle-option:hover:not(.active) {
-  color: #241a19;
-  background: rgba(60, 20, 20, 0.07);
-}
 
 /* --------------------------------------------------------- responsive */
 
@@ -394,6 +371,14 @@
 
   .timezone-value {
     font-size: 12.5px;
+  }
+}
+
+@media (max-width: 700px) {
+  /* the clocks matter more here than restating where you are */
+  .header-title,
+  .header-separator {
+    display: none;
   }
 }
 

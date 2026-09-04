@@ -75,7 +75,6 @@ export default function SettingsPage() {
     <>
       <header className="dashboard-header">
         <div>
-          <h1 className="greeting-title">Settings</h1>
           <p className="greeting-subtitle">Configure the interview board experience.</p>
         </div>
       </header>
