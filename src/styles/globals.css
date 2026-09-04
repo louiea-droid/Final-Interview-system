@@ -286,58 +286,6 @@ button {
   display: none;
 }
 
-.theme-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 0 8px;
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
-  color: var(--text-soft);
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.theme-switch:hover {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.09);
-}
-
-.theme-switch.on {
-  color: #603f0b;
-  border-color: rgba(159, 113, 37, 0.45);
-  background: rgba(238, 201, 111, 0.22);
-}
-
-.theme-switch-track {
-  display: flex;
-  align-items: center;
-  width: 27px;
-  height: 14px;
-  padding: 2px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.theme-switch-thumb {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #ffffff;
-  transform: translateX(0);
-  transition: transform 0.18s ease;
-}
-
-.theme-switch.on .theme-switch-track {
-  background: rgba(111, 12, 11, 0.35);
-}
-
-.theme-switch.on .theme-switch-thumb {
-  transform: translateX(13px);
-}
-
 .timezone-clocks {
   display: flex;
   gap: 6px;
@@ -1798,10 +1746,6 @@ button {
     flex: 1 1 0;
   }
 
-  .theme-switch {
-    align-self: flex-end;
-  }
-
   .dashboard-header {
     flex-direction: column;
     gap: 12px;
@@ -1886,10 +1830,6 @@ button {
     flex: 1 1 130px;
   }
 
-  .theme-switch {
-    align-self: stretch;
-    justify-content: center;
-  }
 }
 @keyframes fadeIn {
   /*

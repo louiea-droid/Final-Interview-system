@@ -260,12 +260,60 @@
   font-size: 11px;
 }
 
-.theme-switch {
-  min-height: 36px;
-  gap: 7px;
-  padding: 0 10px;
-  border-radius: 8px;
-  font-size: 12px;
+/* ------------------------------------------------------- theme control */
+
+/*
+ * Two icons rather than one toggle, so the current mode is stated rather
+ * than inferred from which icon is showing.
+ */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+
+  padding: 3px;
+
+  border: 1px solid var(--border-light);
+  border-radius: 9px;
+
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.theme-toggle-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 32px;
+  height: 30px;
+  padding: 0;
+
+  border: 0;
+  border-radius: 6px;
+
+  color: #7c7c7c;
+  background: transparent;
+
+  transition:
+    color 0.16s ease,
+    background 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.theme-toggle-option:hover:not(.active) {
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.theme-toggle-option.active {
+  color: #ffffff;
+
+  background: linear-gradient(180deg, #8b1514, #5d0c0c);
+
+  box-shadow:
+    0 4px 12px rgba(93, 12, 12, 0.42),
+    0 1px 0 rgba(255, 255, 255, 0.14) inset;
 }
 
 /* ------------------------------------------------------------- content */
@@ -289,6 +337,20 @@
 
 .admin-layout.light-mode .timezone-divider {
   background: rgba(60, 20, 20, 0.12);
+}
+
+.admin-layout.light-mode .theme-toggle {
+  border-color: rgba(60, 20, 20, 0.14);
+  background: rgba(60, 20, 20, 0.04);
+}
+
+.admin-layout.light-mode .theme-toggle-option {
+  color: #8a7a78;
+}
+
+.admin-layout.light-mode .theme-toggle-option:hover:not(.active) {
+  color: #241a19;
+  background: rgba(60, 20, 20, 0.07);
 }
 
 /* --------------------------------------------------------- responsive */
@@ -317,10 +379,6 @@
 
   /* the drawer replaces the rail here, so collapsing has nothing to do */
   .sidebar-collapse-toggle {
-    display: none;
-  }
-
-  .theme-switch span:not(.theme-switch-track) {
     display: none;
   }
 

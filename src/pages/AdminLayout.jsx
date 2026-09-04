@@ -86,8 +86,9 @@ export default function AdminProtectedLayout() {
     return () => window.removeEventListener('interview-board-settings-updated', loadTheme);
   }, []);
 
-  function toggleTheme() {
-    const nextLightMode = !lightMode;
+  function applyTheme(nextLightMode) {
+    if (nextLightMode === lightMode) return;
+
     setLightMode(nextLightMode);
 
     const storedSettings = window.localStorage.getItem('interview-board-settings');
@@ -276,19 +277,29 @@ export default function AdminProtectedLayout() {
 
           <div className="admin-header-right">
 
-            <button
-              type="button"
-              className={`theme-switch ${lightMode ? 'on' : ''}`}
-              onClick={toggleTheme}
-              aria-label={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
-              aria-pressed={lightMode}
-            >
-              {lightMode ? <Sun size={15} /> : <Moon size={15} />}
-              <span>{lightMode ? 'Light' : 'Dark'}</span>
-              <span className="theme-switch-track" aria-hidden="true">
-                <span className="theme-switch-thumb" />
-              </span>
-            </button>
+            <div className="theme-toggle" role="group" aria-label="Colour theme">
+              <button
+                type="button"
+                className={`theme-toggle-option ${lightMode ? 'active' : ''}`}
+                onClick={() => applyTheme(true)}
+                aria-pressed={lightMode}
+                aria-label="Light mode"
+                title="Light mode"
+              >
+                <Sun size={17} strokeWidth={2.1} />
+              </button>
+
+              <button
+                type="button"
+                className={`theme-toggle-option ${lightMode ? '' : 'active'}`}
+                onClick={() => applyTheme(false)}
+                aria-pressed={!lightMode}
+                aria-label="Dark mode"
+                title="Dark mode"
+              >
+                <Moon size={17} strokeWidth={2.1} />
+              </button>
+            </div>
 
             <div className="header-profile">
               <span className="profile-avatar profile-avatar-icon">
