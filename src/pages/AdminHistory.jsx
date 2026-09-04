@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { removeBackground } from '@imgly/background-removal';
 import {
   CalendarDays,

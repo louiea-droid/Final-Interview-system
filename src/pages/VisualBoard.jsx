@@ -542,24 +542,28 @@ export default function DisplayPage() {
                   style={{
                     animationDelay: `${index * 0.12}s`,
                   }}
-                  className="
+                  className={`
                     flex
                     flex-col
-                    bg-[#2e0505]
+                    ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}
                     animate-[skeleton-in_.5s_ease-out_both]
-                  "
+                  `}
                 >
 
                   {/* Photo placeholder */}
 
                   <div
-                    className="
+                    className={`
                       relative
                       aspect-[11/10]
                       overflow-hidden
 
-                      bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]
-                    "
+                      ${
+                        lightMode
+                          ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
+                          : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
+                      }
+                    `}
                   >
 
                     {/* breathing petal mark */}
@@ -670,16 +674,19 @@ export default function DisplayPage() {
 
           ) : visibleCandidates.length === 0 ? (
             <div
-              className="
+              className={`
                 col-span-full
                 flex
                 min-h-[400px]
                 items-center
                 justify-center
-                bg-[#2e0505]
                 text-center
-                text-[#f0d689]
-              "
+                ${
+                  lightMode
+                    ? "bg-[#fdf6f3] text-[#7a5a12]"
+                    : "bg-[#2e0505] text-[#f0d689]"
+                }
+              `}
             >
               No final interview applicants
               currently listed.
@@ -692,23 +699,27 @@ export default function DisplayPage() {
               (candidate) => (
                 <div
                   key={candidate.id}
-                  className="
+                  className={`
                     flex
                     flex-col
-                    bg-[#2e0505]
-                  "
+                    ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}
+                  `}
                 >
 
                   {/* Photo */}
 
                   <div
-                    className="
+                    className={`
                       relative
                       aspect-[11/10]
                       overflow-hidden
 
-                      bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]
-                    "
+                      ${
+                        lightMode
+                          ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
+                          : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
+                      }
+                    `}
                   >
 
                     {candidate.photo_url ? (

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, CircleUserRound, MonitorCog, Save, SlidersHorizontal } from 'lucide-react';
 
 const defaultSettings = {

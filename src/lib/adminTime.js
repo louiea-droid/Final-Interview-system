@@ -74,3 +74,34 @@ export function formatCurrentDate(date, timeZone) {
     year: 'numeric',
   }).format(date);
 }
+
+/**
+ * The Y-M-D of `value` as seen in `timeZone`, or null if it isn't a date.
+ *
+ * Accepts both a date-only string ('2026-09-04') and a full timestamp. A
+ * date-only string is deliberately read as-is rather than parsed, since
+ * parsing it would place it at UTC midnight and shift the day for anyone
+ * west of Greenwich.
+ */
+export function toDayKey(value, timeZone) {
+  if (!value) return null;
+
+  if (typeof value === 'string') {
+    const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) return value;
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = getTimeZoneParts(date, timeZone);
+  const pad = (n) => String(n).padStart(2, '0');
+
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
+}
+
+/** Whether `value` falls on the same day as `reference` in `timeZone`. */
+export function isSameDay(value, reference = new Date(), timeZone) {
+  const day = toDayKey(value, timeZone);
+  return day !== null && day === toDayKey(reference, timeZone);
+}

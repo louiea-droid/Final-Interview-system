@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { removeBackground } from '@imgly/background-removal';
 import {
   CalendarDays,
@@ -14,10 +14,21 @@ import {
 
 // local stand-in for the backend; same query API, no network
 import { localClient as supabase } from '../lib/localBackend';
-import { formatCurrentDate, getEasternBatchStart } from '../lib/adminTime';
+import {
+  formatCurrentDate,
+  getEasternBatchStart,
+  isSameDay,
+} from '../lib/adminTime';
 import { isShownOnBoard } from '../lib/candidateVisibility';
 import CandidateDetailsModal from '../components/CandidateDetailsModal';
+import TablePagination from '../components/TablePagination';
 import { useToast } from '../components/ToastProvider';
+
+/*
+ * The list is scoped to one day, in the same zone the interview batches are
+ * cut on, so "today" means the same thing here as it does everywhere else.
+ */
+const LIST_TIME_ZONE = 'America/New_York';
 
 const statuses = [
   'Scheduled',
@@ -29,6 +40,8 @@ export default function AdminPage() {
   const [candidates, setCandidates] = useState([]);
   const [totalCandidates, setTotalCandidates] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const showToast = useToast();
   const [editingId, setEditingId] = useState(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -316,6 +329,33 @@ async function saveCandidate(e) {
     setCandidateToDelete(null);
   }
 
+  /*
+   * The list shows only candidates being interviewed today. Rows without an
+   * interview date are left out rather than shown always, so the count in the
+   * panel header and the pagination range agree with what is on screen.
+   */
+  const todaysCandidates = useMemo(
+    () =>
+      candidates.filter((candidate) =>
+        isSameDay(candidate.interview_date, new Date(), LIST_TIME_ZONE)
+      ),
+    [candidates]
+  );
+
+  const pagedCandidates = useMemo(
+    () => todaysCandidates.slice((page - 1) * pageSize, page * pageSize),
+    [todaysCandidates, page, pageSize]
+  );
+
+  /*
+   * Deleting the last row of the final page, or narrowing the page size,
+   * would otherwise leave the view sitting past the end of the list.
+   */
+  useEffect(() => {
+    const pageCount = Math.max(1, Math.ceil(todaysCandidates.length / pageSize));
+    if (page > pageCount) setPage(pageCount);
+  }, [todaysCandidates.length, page, pageSize]);
+
   const stats = useMemo(() => {
     const total = totalCandidates;
 
@@ -504,15 +544,15 @@ async function saveCandidate(e) {
               </h2>
 
               <p className="panel-subtitle">
-                Manage candidates and their live interview status.
+                Today's interviews and their live status.
               </p>
             </div>
 
           </div>
 
           <div className="panel-count">
-            {candidates.length} candidate
-            {candidates.length === 1 ? '' : 's'}
+            {todaysCandidates.length} candidate
+            {todaysCandidates.length === 1 ? '' : 's'} today
           </div>
 
         </div>
@@ -539,7 +579,7 @@ async function saveCandidate(e) {
 
               <tbody>
 
-                {candidates.map((candidate) => (
+                {pagedCandidates.map((candidate) => (
 
                   <tr
                     key={candidate.id}
@@ -702,14 +742,14 @@ async function saveCandidate(e) {
 
                 ))}
 
-                {!candidates.length && (
+                {!pagedCandidates.length && (
 
                   <tr>
 
                     <td colSpan={6}>
 
                       <div className="empty-state">
-                        No candidates yet. Add one from the Records page.
+                        No interviews scheduled for today.
                       </div>
 
                     </td>
@@ -724,6 +764,19 @@ async function saveCandidate(e) {
           )}
 
         </div>
+
+        {!loading && (
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            totalItems={todaysCandidates.length}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        )}
 
       </section>
 
