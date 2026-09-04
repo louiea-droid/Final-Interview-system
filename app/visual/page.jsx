@@ -23,24 +23,9 @@ const styleFormal = localFont({
   display: "swap",
 });
 
-type Candidate = {
-  id: string;
-  name: string;
-  photo_url: string | null;
-  position: string | null;
-  status: string;
-  sort_order: number;
-  /*
-   * Set from the admin candidate list. Optional so the board
-   * keeps working on rows saved before the show_in_visual
-   * column existed; a missing value counts as shown.
-   */
-  show_in_visual?: boolean | null;
-};
-
 /* ---------------- ember field ---------------- */
 
-function mulberry32(seed: number) {
+function mulberry32(seed) {
   return () => {
     seed |= 0;
     seed = (seed + 0x6d2b79f5) | 0;
@@ -63,12 +48,12 @@ const SPARK_COLORS = [
 ];
 
 function sparkField(
-  seed: number,
-  count: number,
-  maxR: number
-): string {
+  seed,
+  count,
+  maxR
+) {
   const rand = mulberry32(seed);
-  const shadows: string[] = [];
+  const shadows = [];
 
   for (let i = 0; i < count; i++) {
     const x = Math.floor(rand() * 1600);
@@ -139,7 +124,7 @@ const SPARK_LAYERS = [
 
 export default function DisplayPage() {
   const [candidates, setCandidates] =
-    useState<Candidate[]>([]);
+    useState([]);
 
   const [loading, setLoading] =
     useState(true);
@@ -246,7 +231,7 @@ export default function DisplayPage() {
      */
 
     const shown = (data ?? []).filter(
-      (candidate: Candidate) =>
+      (candidate) =>
         isShownOnBoard(candidate)
     );
 
@@ -883,7 +868,7 @@ export default function DisplayPage() {
                           text-[#2e1604]/80
                         "
                       >
-              
+
                       </span>
                     )}
 
@@ -907,7 +892,7 @@ export default function DisplayPage() {
               text-[#f0d689]/50
             "
           >
-      
+
           </div>
         )}
 

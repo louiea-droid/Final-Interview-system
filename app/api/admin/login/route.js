@@ -7,7 +7,7 @@ import {
   createSessionToken,
 } from '../../../../lib/adminSession';
 
-function safeCompare(a: string, b: string) {
+function safeCompare(a, b) {
   const aBytes = Buffer.from(a);
   const bBytes = Buffer.from(b);
 
@@ -16,7 +16,7 @@ function safeCompare(a: string, b: string) {
   return timingSafeEqual(aBytes, bBytes);
 }
 
-export async function POST(request: Request) {
+export async function POST(request) {
   const adminUsername = process.env.ADMIN_USERNAME;
   const adminPassword = process.env.ADMIN_PASSWORD;
   const sessionSecret = process.env.ADMIN_SESSION_SECRET;

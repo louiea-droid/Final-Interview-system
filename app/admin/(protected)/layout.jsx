@@ -18,11 +18,9 @@ import { formatCurrentTime } from '../../../lib/adminTime';
 
 export default function AdminProtectedLayout({
   children,
-}: {
-  children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [currentTime, setCurrentTime] = useState(null);
   const [adminProfile, setAdminProfile] = useState({
     displayName: 'Admin',
     role: 'Administrator',

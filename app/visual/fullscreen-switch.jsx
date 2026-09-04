@@ -35,7 +35,7 @@ export default function FullscreenSwitch() {
       }
     };
 
-    const handleKeydown = (e: KeyboardEvent) => {
+    const handleKeydown = (e) => {
       // Escape is the browser's own "exit fullscreen" key — don't fight it
       if (e.key === 'Escape') return;
       enter();

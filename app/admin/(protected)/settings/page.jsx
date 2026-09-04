@@ -3,29 +3,14 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Check, CircleUserRound, MonitorCog, Save, SlidersHorizontal } from 'lucide-react';
 
-type Settings = {
-  boardTitle: string;
-  autoRotate: boolean;
-  compactCards: boolean;
-  lightMode: boolean;
-};
-
-type AdminProfile = {
-  displayName: string;
-  email: string;
-  role: string;
-  timezone: string;
-  avatarUrl: string;
-};
-
-const defaultSettings: Settings = {
+const defaultSettings = {
   boardTitle: 'Final Interview Applicants',
   autoRotate: true,
   compactCards: false,
   lightMode: false,
 };
 
-const defaultProfile: AdminProfile = {
+const defaultProfile = {
   displayName: 'Admin',
   email: '',
   role: 'Administrator',
@@ -34,8 +19,8 @@ const defaultProfile: AdminProfile = {
 };
 
 export default function SettingsPage() {
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
-  const [profile, setProfile] = useState<AdminProfile>(defaultProfile);
+  const [settings, setSettings] = useState(defaultSettings);
+  const [profile, setProfile] = useState(defaultProfile);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -59,12 +44,12 @@ export default function SettingsPage() {
     }
   }, []);
 
-  function updateSetting<Key extends keyof Settings>(key: Key, value: Settings[Key]) {
+  function updateSetting(key, value) {
     setSettings((current) => ({ ...current, [key]: value }));
     setSaved(false);
   }
 
-  function saveSettings(event: FormEvent) {
+  function saveSettings(event) {
     event.preventDefault();
     window.localStorage.setItem('interview-board-settings', JSON.stringify(settings));
     window.dispatchEvent(new Event('interview-board-settings-updated'));
@@ -73,14 +58,14 @@ export default function SettingsPage() {
     setSaved(true);
   }
 
-  function handleAvatarChange(file: File | null) {
+  function handleAvatarChange(file) {
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result !== 'string') return;
 
-      setProfile((current) => ({ ...current, avatarUrl: reader.result as string }));
+      setProfile((current) => ({ ...current, avatarUrl: reader.result}));
       setSaved(false);
     };
     reader.readAsDataURL(file);

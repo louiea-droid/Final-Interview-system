@@ -6,17 +6,7 @@ import { UserRound } from 'lucide-react';
 import { getStatusPillClass } from '../lib/candidateStatus';
 import { isShownOnBoard } from '../lib/candidateVisibility';
 
-type CandidateDetails = {
-  name: string;
-  photo_url: string | null;
-  position: string | null;
-  interview_date: string | null;
-  status: string;
-  created_at: string;
-  show_in_visual?: boolean | null;
-};
-
-function formatInterviewDate(date: string) {
+function formatInterviewDate(date) {
   const parsed = new Date(`${date}T00:00:00Z`);
 
   if (Number.isNaN(parsed.getTime())) return date;
@@ -29,7 +19,7 @@ function formatInterviewDate(date: string) {
   }).format(parsed);
 }
 
-function formatAddedDate(dateTime: string) {
+function formatAddedDate(dateTime) {
   const parsed = new Date(dateTime);
 
   if (Number.isNaN(parsed.getTime())) return dateTime;
@@ -45,16 +35,13 @@ function formatAddedDate(dateTime: string) {
 export default function CandidateDetailsModal({
   candidate,
   onClose,
-}: {
-  candidate: CandidateDetails;
-  onClose: () => void;
 }) {
   const [photoZoomed, setPhotoZoomed] = useState(false);
 
   useEffect(() => {
     if (!photoZoomed) return;
 
-    const closeOnEscape = (event: KeyboardEvent) => {
+    const closeOnEscape = (event) => {
       if (event.key === 'Escape') setPhotoZoomed(false);
     };
 

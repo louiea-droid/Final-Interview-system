@@ -15,7 +15,7 @@ function AdminLoginForm() {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event) {
     event.preventDefault();
     setSubmitting(true);
 

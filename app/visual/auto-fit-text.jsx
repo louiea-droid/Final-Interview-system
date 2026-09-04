@@ -15,13 +15,9 @@ export default function AutoFitText({
   children,
   className,
   minScale = 0.5,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  minScale?: number;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const textRef = useRef<HTMLSpanElement>(null);
+  const containerRef = useRef(null);
+  const textRef = useRef(null);
   const [scale, setScale] = useState(1);
 
   useLayoutEffect(() => {

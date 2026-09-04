@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { ADMIN_SESSION_COOKIE, verifySessionToken } from './lib/adminSession';
 
-export async function proxy(request: NextRequest) {
+export async function proxy(request) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
   const sessionSecret = process.env.ADMIN_SESSION_SECRET;

@@ -2,17 +2,15 @@
 
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
 
-type Toast = { id: number; text: string };
-
-const ToastContext = createContext<((text: string) => void) | null>(null);
+const ToastContext = createContext(null);
 
 const TOAST_DURATION_MS = 2000;
 
-export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
+export function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
   const nextId = useRef(0);
 
-  const showToast = useCallback((text: string) => {
+  const showToast = useCallback((text) => {
     if (!text) return;
 
     const id = nextId.current++;

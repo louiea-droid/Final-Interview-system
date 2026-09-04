@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useLayoutEffect, useRef, useState,} from 'react';
 import { CalendarDays } from 'lucide-react';
 
 const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
@@ -9,27 +9,25 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-type PlainDate = { year: number; month: number; day: number };
-
-function parseDateValue(value: string): PlainDate | null {
+function parseDateValue(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return null;
   return { year: Number(match[1]), month: Number(match[2]) - 1, day: Number(match[3]) };
 }
 
-function formatDateValue({ year, month, day }: PlainDate): string {
+function formatDateValue({ year, month, day }) {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-function sameDate(a: PlainDate | null, b: PlainDate | null): boolean {
+function sameDate(a, b) {
   return !!a && !!b && a.year === b.year && a.month === b.month && a.day === b.day;
 }
 
 // Always 6 full weeks so the grid height never jumps between months.
-function buildCalendarGrid(year: number, month: number): (PlainDate & { outside: boolean })[] {
+function buildCalendarGrid(year, month) {
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells: (PlainDate & { outside: boolean })[] = [];
+  const cells = [];
 
   for (let i = firstWeekday; i > 0; i--) {
     const d = new Date(year, month, 1 - i);
@@ -59,12 +57,6 @@ export default function DateField({
   onChange,
   placeholder = 'Select date',
   disabled = false,
-}: {
-  id?: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
 }) {
   const selected = parseDateValue(value);
   const today = new Date();
@@ -72,11 +64,11 @@ export default function DateField({
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(selected?.year ?? today.getFullYear());
   const [viewMonth, setViewMonth] = useState(selected?.month ?? today.getMonth());
-  const [draft, setDraft] = useState<PlainDate | null>(selected);
-  const [popoverStyle, setPopoverStyle] = useState<CSSProperties>({});
+  const [draft, setDraft] = useState(selected);
+  const [popoverStyle, setPopoverStyle] = useState({});
 
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef(null);
+  const popoverRef = useRef(null);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -109,13 +101,13 @@ export default function DateField({
 
     updatePosition();
 
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
+    const handlePointerDown = (event) => {
+      const target = event.target;
       if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
       setOpen(false);
     };
 
-    const handleKeydown = (event: KeyboardEvent) => {
+    const handleKeydown = (event) => {
       if (event.key === 'Escape') setOpen(false);
     };
 

@@ -23,10 +23,12 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "typescript": "latest"
+    "@types/react": "19.2.18"
   },
-  "browserslist": ["safari 14", "chrome 111", "edge 111", "firefox 111"]
+  "browserslist": [
+    "safari 14",
+    "chrome 111",
+    "edge 111",
+    "firefox 111"
+  ]
 }

@@ -20,25 +20,6 @@ import { isShownOnBoard } from '../../../lib/candidateVisibility';
 import CandidateDetailsModal from '../../../components/CandidateDetailsModal';
 import { useToast } from '../../../components/ToastProvider';
 
-type Candidate = {
-  id: string;
-  name: string;
-  photo_url: string | null;
-  position: string | null;
-  interview_type: string;
-  interview_date: string | null;
-  status: string;
-  sort_order: number;
-  created_at: string;
-  /*
-   * Whether the candidate appears on the /visual board.
-   *
-   * Optional so rows saved before the show_in_visual column
-   * existed still type-check; a missing value counts as shown.
-   */
-  show_in_visual?: boolean | null;
-};
-
 const statuses = [
   'Scheduled',
   'Completed',
@@ -46,21 +27,21 @@ const statuses = [
 ];
 
 export default function AdminPage() {
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidates, setCandidates] = useState([]);
   const [totalCandidates, setTotalCandidates] = useState(0);
   const [loading, setLoading] = useState(true);
   const showToast = useToast();
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
-  const [viewingCandidate, setViewingCandidate] = useState<Candidate | null>(null);
+  const [candidateToDelete, setCandidateToDelete] = useState(null);
+  const [viewingCandidate, setViewingCandidate] = useState(null);
   const [processingPhoto, setProcessingPhoto] = useState(false);
-  const [draggingCandidateId, setDraggingCandidateId] = useState<string | null>(null);
+  const [draggingCandidateId, setDraggingCandidateId] = useState(null);
   const batchStartKey = useRef(getEasternBatchStart().toISOString());
 
 const [form, setForm] = useState({
   name: '',
-  photo_file: null as File | null,
+  photo_file: null,
   no_photo: false,
   position: '',
   interview_date: '',
@@ -95,7 +76,7 @@ const [form, setForm] = useState({
     setLoading(false);
   }
 
-  async function moveCandidate(draggedId: string, targetId: string) {
+  async function moveCandidate(draggedId, targetId) {
     if (draggedId === targetId) return;
 
     const draggedIndex = candidates.findIndex((candidate) => candidate.id === draggedId);
@@ -147,7 +128,7 @@ const [form, setForm] = useState({
     return () => window.clearInterval(intervalId);
   }, []);
 
-  async function handlePhotoChange(file: File | null) {
+  async function handlePhotoChange(file) {
     if (!file) return;
 
     setProcessingPhoto(true);
@@ -179,14 +160,14 @@ const [form, setForm] = useState({
     }
   }
 
-async function saveCandidate(e: FormEvent) {
+async function saveCandidate(e) {
   e.preventDefault();
 
   if (processingPhoto || !editingId) return;
 
   const existingCandidate = candidates.find((candidate) => candidate.id === editingId);
 
-  let photoUrl: string | null = form.no_photo
+  let photoUrl = form.no_photo
     ? null
     : existingCandidate?.photo_url ?? null;
 
@@ -250,7 +231,7 @@ async function saveCandidate(e: FormEvent) {
   await loadCandidates();
 }
 
-  function startEditing(candidate: Candidate) {
+  function startEditing(candidate) {
     setEditingId(candidate.id);
     setEditModalOpen(true);
     setForm({
@@ -276,7 +257,7 @@ async function saveCandidate(e: FormEvent) {
     });
   }
 
-  async function updateStatus(id: string, status: string) {
+  async function updateStatus(id, status) {
     const { error } = await supabase
       .from('candidates')
       .update({ status })
@@ -297,8 +278,8 @@ async function saveCandidate(e: FormEvent) {
   }
 
   async function toggleShowOnBoard(
-    id: string,
-    nextValue: boolean
+    id,
+    nextValue
   ) {
     const { error } = await supabase
       .from('candidates')
@@ -319,7 +300,7 @@ async function saveCandidate(e: FormEvent) {
     );
   }
 
-  async function removeCandidate(id: string) {
+  async function removeCandidate(id) {
     const { error } = await supabase
       .from('candidates')
       .delete()
@@ -353,7 +334,7 @@ async function saveCandidate(e: FormEvent) {
   }, [candidates, totalCandidates]);
 
   const interviewDateBreakdown = useMemo(() => {
-    const counts = new Map<string, number>();
+    const counts = new Map();
 
     candidates.forEach((candidate) => {
       const key = candidate.interview_date || 'unscheduled';
@@ -910,12 +891,12 @@ async function saveCandidate(e: FormEvent) {
   );
 }
 
-function formatDateValue(date: string) {
+function formatDateValue(date) {
   const [year, month, day] = date.split('-');
   return `${month}/${day}/${year}`;
 }
 
-function formatShortDate(date: string) {
+function formatShortDate(date) {
   const [, month, day] = date.split('-');
   return `${Number(month)}/${Number(day)}`;
 }
@@ -925,7 +906,7 @@ function formatShortDate(date: string) {
  * bottom two corners stay sharp against the shared baseline while
  * the top two round off.
  */
-function roundedTopBarPath(x: number, y: number, width: number, height: number, radius: number) {
+function roundedTopBarPath(x, y, width, height, radius) {
   if (height <= 0) return '';
 
   const r = Math.min(radius, width / 2, height);
@@ -943,8 +924,6 @@ function roundedTopBarPath(x: number, y: number, width: number, height: number, 
 
 function InterviewDateChart({
   data,
-}: {
-  data: { date: string; count: number }[];
 }) {
   const barWidth = 28;
   const barGap = 16;
@@ -1017,7 +996,7 @@ function InterviewDateChart({
   );
 }
 
-function getStatusClass(status: string) {
+function getStatusClass(status) {
   switch (status) {
     case 'Scheduled':
       return 'status-scheduled';

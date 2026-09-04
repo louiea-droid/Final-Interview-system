@@ -18,35 +18,7 @@ import PhotoCropModal from '../../../../components/PhotoCropModal';
 import DateField from '../../../../components/DateField';
 import { useToast } from '../../../../components/ToastProvider';
 
-type Candidate = {
-  id: string;
-  name: string;
-  photo_url: string | null;
-  position: string | null;
-  interview_type: string;
-  interview_date: string | null;
-  status: string;
-  sort_order: number;
-  created_at: string;
-  /*
-   * Whether the candidate appears on the /visual board.
-   *
-   * Optional so rows saved before the show_in_visual column
-   * existed still type-check; a missing value counts as shown.
-   */
-  show_in_visual?: boolean | null;
-};
-
-type AddCandidateForm = {
-  localId: string;
-  name: string;
-  photo_file: File | null;
-  no_photo: boolean;
-  position: string;
-  interview_date: string;
-};
-
-function createEmptyAddForm(): AddCandidateForm {
+function createEmptyAddForm() {
   return {
     localId: crypto.randomUUID(),
     name: '',
@@ -57,17 +29,7 @@ function createEmptyAddForm(): AddCandidateForm {
   };
 }
 
-type CandidateEdit = {
-  id: string;
-  name: string;
-  position: string;
-  interview_date: string;
-  status: string;
-  photo_file: File | null;
-  no_photo: boolean;
-};
-
-const statusClasses: Record<string, string> = {
+const statusClasses = {
   Scheduled: 'candidate-status scheduled',
   Waiting: 'candidate-status waiting',
   'In Progress': 'candidate-status progress',
@@ -82,25 +44,22 @@ const statuses = [
 ];
 
 export default function CandidatesPage() {
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidates, setCandidates] = useState([]);
   const [selectedDate, setSelectedDate] = useState('all');
   const [loading, setLoading] = useState(true);
   const showToast = useToast();
-  const [editingDate, setEditingDate] = useState<string | null>(null);
-  const [editForms, setEditForms] = useState<CandidateEdit[]>([]);
+  const [editingDate, setEditingDate] = useState(null);
+  const [editForms, setEditForms] = useState([]);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
-  const [viewingCandidate, setViewingCandidate] = useState<Candidate | null>(null);
+  const [candidateToDelete, setCandidateToDelete] = useState(null);
+  const [viewingCandidate, setViewingCandidate] = useState(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [addForms, setAddForms] = useState<AddCandidateForm[]>([createEmptyAddForm()]);
-  const [addProcessingIds, setAddProcessingIds] = useState<Set<string>>(new Set());
-  const [addCropTarget, setAddCropTarget] = useState<{ localId: string; imageSrc: string } | null>(null);
+  const [addForms, setAddForms] = useState([createEmptyAddForm()]);
+  const [addProcessingIds, setAddProcessingIds] = useState(new Set());
+  const [addCropTarget, setAddCropTarget] = useState(null);
   const [processingPhoto, setProcessingPhoto] = useState(false);
-  const [cropTarget, setCropTarget] = useState<{
-    candidateId: string;
-    imageSrc: string;
-    isObjectUrl: boolean;
-  } | null>(null);
+  const [cropTarget, setCropTarget] = useState
+(null);
 
   async function loadCandidates() {
     const { data, error } = await supabase
@@ -127,7 +86,7 @@ export default function CandidatesPage() {
       new Set(
         candidates
           .map((candidate) => getInterviewDateKey(candidate.interview_date))
-          .filter((date): date is string => Boolean(date))
+          .filter((date) => Boolean(date))
       )
     );
   }, [candidates]);
@@ -138,7 +97,7 @@ export default function CandidatesPage() {
         selectedDate === 'all' ||
         getInterviewDateKey(candidate.interview_date) === selectedDate
     );
-    const groups = new Map<string, Candidate[]>();
+    const groups = new Map();
 
     filteredCandidates.forEach((candidate) => {
       const dateKey = getInterviewDateKey(candidate.interview_date);
@@ -150,7 +109,7 @@ export default function CandidatesPage() {
     return Array.from(groups.entries());
   }, [candidates, selectedDate]);
 
-  function startEditing(date: string, dateCandidates: Candidate[]) {
+  function startEditing(date, dateCandidates) {
     setEditingDate(date);
     setEditForms(
       dateCandidates.map((candidate) => ({
@@ -165,7 +124,7 @@ export default function CandidatesPage() {
     );
   }
 
-  async function saveEdit(event?: FormEvent) {
+  async function saveEdit(event) {
     event?.preventDefault();
     if (!editingDate || !editForms.length || processingPhoto) return;
 
@@ -212,7 +171,7 @@ export default function CandidatesPage() {
     } else {
       const updatedCandidates = results
         .map((result) => result.data)
-        .filter((candidate): candidate is Candidate => Boolean(candidate));
+        .filter((candidate) => Boolean(candidate));
       setCandidates((current) =>
         current.map((candidate) =>
           updatedCandidates.find((updated) => updated.id === candidate.id) ?? candidate
@@ -224,7 +183,7 @@ export default function CandidatesPage() {
     setSavingEdit(false);
   }
 
-  function updateEditForm(id: string, field: keyof CandidateEdit, value: string) {
+  function updateEditForm(id, field, value) {
     setEditForms((current) =>
       current.map((candidate) =>
         candidate.id === id ? { ...candidate, [field]: value } : candidate
@@ -232,7 +191,7 @@ export default function CandidatesPage() {
     );
   }
 
-  async function handleEditPhotoChange(id: string, file: File | null) {
+  async function handleEditPhotoChange(id, file) {
     if (!file) return;
 
     setProcessingPhoto(true);
@@ -267,7 +226,7 @@ export default function CandidatesPage() {
     }
   }
 
-  function openPhotoCrop(editForm: CandidateEdit) {
+  function openPhotoCrop(editForm) {
     // Crop whichever photo is actually current for this candidate: a
     // newly-selected file takes priority over the one already saved.
     if (editForm.photo_file) {
@@ -296,7 +255,7 @@ export default function CandidatesPage() {
     });
   }
 
-  function handleCroppedPhoto(file: File) {
+  function handleCroppedPhoto(file) {
     if (!cropTarget) return;
 
     setEditForms((current) =>
@@ -308,7 +267,7 @@ export default function CandidatesPage() {
     );
   }
 
-  async function removeCandidate(id: string) {
+  async function removeCandidate(id) {
     const { error } = await supabase
       .from('candidates')
       .delete()
@@ -331,8 +290,8 @@ export default function CandidatesPage() {
   }
 
   async function toggleGroupVisibility(
-    groupCandidates: Candidate[],
-    nextValue: boolean
+    groupCandidates,
+    nextValue
   ) {
     const ids = groupCandidates.map((candidate) => candidate.id);
 
@@ -370,23 +329,23 @@ export default function CandidatesPage() {
     setAddForms((current) => [...current, createEmptyAddForm()]);
   }
 
-  function removeAddCandidate(localId: string) {
+  function removeAddCandidate(localId) {
     setAddForms((current) =>
       current.length > 1 ? current.filter((form) => form.localId !== localId) : current
     );
   }
 
   function updateAddForm(
-    localId: string,
-    field: 'name' | 'position' | 'interview_date',
-    value: string
+    localId,
+    field,
+    value
   ) {
     setAddForms((current) =>
       current.map((form) => (form.localId === localId ? { ...form, [field]: value } : form))
     );
   }
 
-  function setAddFormNoPhoto(localId: string, noPhoto: boolean) {
+  function setAddFormNoPhoto(localId, noPhoto) {
     setAddForms((current) =>
       current.map((form) =>
         form.localId === localId
@@ -396,11 +355,11 @@ export default function CandidatesPage() {
     );
   }
 
-  function openAddPhotoCrop(localId: string, imageSrc: string) {
+  function openAddPhotoCrop(localId, imageSrc) {
     setAddCropTarget({ localId, imageSrc });
   }
 
-  function handleAddCroppedPhoto(file: File) {
+  function handleAddCroppedPhoto(file) {
     if (!addCropTarget) return;
     const { localId } = addCropTarget;
     setAddForms((current) =>
@@ -413,7 +372,7 @@ export default function CandidatesPage() {
   // Background removal runs independently per card (tracked by localId)
   // instead of blocking the whole modal, so filling out — or submitting —
   // the other candidates doesn't have to wait on one slow photo.
-  async function handleAddPhotoChange(localId: string, file: File | null) {
+  async function handleAddPhotoChange(localId, file) {
     if (!file) return;
 
     setAddProcessingIds((current) => new Set(current).add(localId));
@@ -448,7 +407,7 @@ export default function CandidatesPage() {
     }
   }
 
-  async function addCandidates(event: FormEvent) {
+  async function addCandidates(event) {
     event.preventDefault();
 
     if (addProcessingIds.size > 0) return;
@@ -463,7 +422,7 @@ export default function CandidatesPage() {
     const uploadResults = await Promise.all(
       addForms.map(async (form) => {
         if (form.no_photo || !form.photo_file) {
-          return { photoUrl: null as string | null, error: null };
+          return { photoUrl: null, error: null };
         }
 
         const file = form.photo_file;
@@ -983,18 +942,8 @@ function AddCandidateCard({
   onNoPhotoChange,
   onPhotoChange,
   onOpenCrop,
-}: {
-  form: AddCandidateForm;
-  index: number;
-  canRemove: boolean;
-  processing: boolean;
-  onChange: (localId: string, field: 'name' | 'position' | 'interview_date', value: string) => void;
-  onRemove: (localId: string) => void;
-  onNoPhotoChange: (localId: string, noPhoto: boolean) => void;
-  onPhotoChange: (localId: string, file: File | null) => void;
-  onOpenCrop: (localId: string, imageSrc: string) => void;
 }) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
 
   useEffect(() => {
     if (!form.photo_file) {
@@ -1113,7 +1062,7 @@ function AddCandidateCard({
   );
 }
 
-function formatInterviewDate(date: string) {
+function formatInterviewDate(date) {
   const parsedDate = new Date(`${date}T00:00:00Z`);
 
   if (Number.isNaN(parsedDate.getTime())) return 'Invalid date';
@@ -1126,15 +1075,15 @@ function formatInterviewDate(date: string) {
   }).format(parsedDate);
 }
 
-function formatInterviewGroup(date: string) {
+function formatInterviewGroup(date) {
   return date === 'unscheduled' ? 'Not scheduled' : formatInterviewDate(date);
 }
 
-function getInterviewDateKey(interviewDate: string | null) {
+function getInterviewDateKey(interviewDate) {
   return interviewDate || 'unscheduled';
 }
 
-function getAddedDateKey(createdAt: string) {
+function getAddedDateKey(createdAt) {
   const parsedDate = new Date(createdAt);
 
   if (Number.isNaN(parsedDate.getTime())) return 'unknown';

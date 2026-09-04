@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import Cropper, { type Area } from 'react-easy-crop';
+import Cropper, {} from 'react-easy-crop';
 
-import { getCroppedImageFile, type PixelCrop } from '../lib/cropImage';
+import { getCroppedImageFile,} from '../lib/cropImage';
 import { useToast } from './ToastProvider';
 
 export default function PhotoCropModal({
@@ -11,15 +11,10 @@ export default function PhotoCropModal({
   fileName,
   onSave,
   onClose,
-}: {
-  imageSrc: string;
-  fileName: string;
-  onSave: (file: File) => void;
-  onClose: () => void;
 }) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<PixelCrop | null>(null);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
   const [saving, setSaving] = useState(false);
   const showToast = useToast();
 
