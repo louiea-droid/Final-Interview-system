@@ -43,7 +43,7 @@ function Toast({ toast, onDismiss }) {
       role={toast.variant === 'error' ? 'alert' : 'status'}
     >
       <span className="toast-icon">
-        <Icon size={17} />
+        <Icon size={19} />
       </span>
 
       <p className="toast-message">{toast.message}</p>
@@ -54,7 +54,7 @@ function Toast({ toast, onDismiss }) {
         onClick={() => onDismiss(toast.id)}
         aria-label="Dismiss notification"
       >
-        <X size={14} />
+        <X size={15} />
       </button>
 
       {/*

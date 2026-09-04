@@ -2732,57 +2732,74 @@ svg {
 
   display: flex;
   align-items: flex-start;
-  gap: 11px;
+  gap: 13px;
 
   width: max-content;
-  min-width: 268px;
-  max-width: 380px;
+  min-width: 304px;
+  max-width: 424px;
 
-  padding: 13px 14px 14px;
+  padding: 17px 18px 18px;
 
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-left: 3px solid var(--toast-accent);
-  border-radius: 10px;
+  /*
+   * No border: the box is a solid surface, separated from the page by its
+   * shadow. The variant shows itself as a wash of accent from the left,
+   * where the accent rail used to be.
+   */
+  border: 0;
 
-  background: linear-gradient(180deg, #1d1717, #141010);
+  background-color: #1c1616;
+  background-image: linear-gradient(
+    90deg,
+    var(--toast-tint),
+    rgba(0, 0, 0, 0) 62%
+  );
+
   color: var(--text);
 
   box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.5),
-    0 1px 0 rgba(255, 255, 255, 0.05) inset;
+    0 22px 48px rgba(0, 0, 0, 0.58),
+    0 2px 8px rgba(0, 0, 0, 0.4);
 
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
-  line-height: 1.45;
+  line-height: 1.5;
 
   animation: toast-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* one accent colour per kind, used by the rail, the icon and the progress bar */
+/*
+ * One accent per kind, used by the icon, the wash and the progress bar -
+ * the tint is the same hue at low alpha.
+ */
 .toast-info {
-  --toast-accent: #7a8ba0;
+  --toast-accent: #8ea3bb;
+  --toast-tint: rgba(142, 163, 187, 0.13);
 }
 
 .toast-success {
   --toast-accent: #6bc58e;
+  --toast-tint: rgba(107, 197, 142, 0.13);
 }
 
 .toast-warning {
   --toast-accent: #d7b75b;
+  --toast-tint: rgba(215, 183, 91, 0.13);
 }
 
 .toast-error {
-  --toast-accent: #d45d59;
+  --toast-accent: #e2706c;
+  --toast-tint: rgba(226, 112, 108, 0.15);
 }
 
 .toast-loading {
-  --toast-accent: #9b9b9b;
+  --toast-accent: #a8a8a8;
+  --toast-tint: rgba(168, 168, 168, 0.1);
 }
 
 .toast-icon {
   display: flex;
   flex: 0 0 auto;
-  margin-top: 1px;
+  margin-top: 2px;
   color: var(--toast-accent);
 }
 
@@ -2804,13 +2821,13 @@ svg {
   justify-content: center;
   flex: 0 0 auto;
 
-  width: 22px;
-  height: 22px;
-  margin: -2px -3px 0 0;
+  width: 26px;
+  height: 26px;
+  margin: -3px -5px 0 0;
   padding: 0;
 
   border: 0;
-  border-radius: 6px;
+  border-radius: 0;
 
   background: transparent;
   color: #7c7c7c;
@@ -2831,11 +2848,11 @@ svg {
   bottom: 0;
   left: 0;
 
-  height: 2px;
+  height: 3px;
   width: 100%;
 
   background: var(--toast-accent);
-  opacity: 0.55;
+  opacity: 0.6;
   transform-origin: left center;
 
   animation: toast-progress linear forwards;
@@ -2891,11 +2908,12 @@ svg {
 }
 
 .admin-layout.light-mode .toast {
-  border-color: rgba(0, 0, 0, 0.1);
-  background: linear-gradient(180deg, #fffdfa, #f5edeb);
+  background-color: #fffdfa;
   color: #241a19;
 
-  box-shadow: 0 18px 40px rgba(60, 20, 20, 0.16);
+  box-shadow:
+    0 22px 48px rgba(60, 20, 20, 0.18),
+    0 2px 8px rgba(60, 20, 20, 0.1);
 }
 
 .admin-layout.light-mode .toast-close {
