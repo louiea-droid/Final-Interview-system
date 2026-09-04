@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Lock, User } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useToast } from '../components/ToastProvider';
@@ -55,21 +55,29 @@ export default function AdminLoginPage() {
           Enter your username and password to continue.
         </p>
 
+        <hr className="login-divider" />
+
         <div className="form-group">
           <label className="form-label" htmlFor="admin-username">
             Username
           </label>
 
-          <input
-            id="admin-username"
-            className="form-input"
-            type="text"
-            required
-            autoFocus
-            autoComplete="username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-          />
+          <div className="login-field">
+            <span className="login-field-icon">
+              <User size={15} />
+            </span>
+
+            <input
+              id="admin-username"
+              className="form-input"
+              type="text"
+              required
+              autoFocus
+              autoComplete="username"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+            />
+          </div>
         </div>
 
         <div className="form-group">
@@ -77,7 +85,11 @@ export default function AdminLoginPage() {
             Password
           </label>
 
-          <div className="password-input-wrapper">
+          <div className="login-field password-input-wrapper">
+            <span className="login-field-icon">
+              <Lock size={15} />
+            </span>
+
             <input
               id="admin-password"
               className="form-input"
