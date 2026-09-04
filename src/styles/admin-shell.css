@@ -559,3 +559,140 @@
     order: -1;
   }
 }
+
+/* =========================================
+   LAYERING
+
+   One scale for the whole app, so a dialog
+   can never come out under the chrome.
+   ========================================= */
+
+.admin-layout {
+  --z-header: 20;
+  --z-sidebar: 30;
+  --z-overlay: 100;
+  --z-popover: 110;
+}
+
+.admin-header {
+  z-index: var(--z-header);
+}
+
+.sidebar {
+  z-index: var(--z-sidebar);
+}
+
+/*
+ * Dialogs and their overlays. These were sitting at 20-50, which put the
+ * photo lightbox level with the header and under the sidebar, so the rail
+ * covered part of it. They now sit above both, and the toast stack (200)
+ * stays above everything.
+ */
+.confirmation-overlay,
+.photo-lightbox-overlay,
+.account-drawer-overlay {
+  z-index: var(--z-overlay);
+}
+
+/* a popover opened from inside a dialog has to clear the dialog */
+.date-field-popover {
+  z-index: var(--z-popover);
+}
+
+/* =========================================
+   NO STRAY SCROLLBARS
+   ========================================= */
+
+/*
+ * The candidate table forced a 760px floor, so the wrapper scrolled
+ * sideways at ordinary widths. With Status and Date added gone the columns
+ * fit, and the floor only applies where it genuinely cannot.
+ */
+.candidate-table {
+  min-width: 0;
+}
+
+.table-wrapper {
+  overflow-x: visible;
+}
+
+@media (max-width: 760px) {
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  .candidate-table {
+    min-width: 620px;
+  }
+}
+
+/* =========================================
+   BOXY CONTROLS
+
+   Square corners everywhere, matching the
+   sign-in screen.
+   ========================================= */
+
+.primary-button,
+.secondary-button,
+.edit-button,
+.delete-button,
+.confirm-delete-button,
+.modal-close-button,
+.pagination-button,
+.pagination-page,
+.sidebar-link,
+.sidebar-signout,
+.sidebar-theme-toggle,
+.sidebar-collapse-toggle,
+.mobile-menu-button,
+.status-select,
+.form-input,
+.form-select,
+.date-field-input,
+.pagination-size .form-select {
+  border-radius: 0;
+}
+
+/* the rail's rows keep a hair of rounding so the active fill isn't a slab */
+.sidebar-link {
+  border-radius: 2px;
+}
+
+/* =========================================
+   BUTTONS KEEP THEIR SIZE
+
+   In a row of inputs a button is content, not
+   filler - it must not be the thing that gives.
+   ========================================= */
+
+.primary-button,
+.secondary-button,
+.edit-button,
+.delete-button,
+.confirm-delete-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.record-edit-fieldset-header .edit-button,
+.record-edit-fieldset-header .delete-button,
+.date-heading-actions .edit-button,
+.date-heading-actions .delete-button {
+  min-width: 34px;
+  min-height: 34px;
+}
+
+/* an actions row wraps rather than squeezing its buttons thinner */
+.confirmation-actions,
+.record-edit-photo-controls,
+.date-heading-actions {
+  flex-wrap: wrap;
+}
+
+.confirmation-actions .primary-button,
+.confirmation-actions .secondary-button,
+.confirmation-actions .confirm-delete-button {
+  min-width: 104px;
+  min-height: 38px;
+}
