@@ -21,6 +21,12 @@ export const metadata = {
   description: 'Interview candidate management dashboard',
   icons: {
     icon: '/visual/HILLC-Petals.png',
+    apple: '/visual/HILLC-Petals.png',
+  },
+  openGraph: {
+    title: 'Interview Admin Panel',
+    description: 'Interview candidate management dashboard',
+    images: ['/visual/HILLC-Petals.png'],
   },
 };
 
