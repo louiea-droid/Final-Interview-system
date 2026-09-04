@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Poppins } from "next/font/google";
 import localFont from "next/font/local";
 import FullscreenSwitch from "./fullscreen-switch";
+import AutoFitText from "./auto-fit-text";
 import { supabase } from "../../lib/supabase";
 import { isShownOnBoard } from "../../lib/candidateVisibility";
 
@@ -202,7 +203,7 @@ export default function DisplayPage() {
    * 8000 = 8 seconds
    */
 
-  const SET_DURATION = 8000;
+  const SET_DURATION = 5000;
 
   const [currentSet, setCurrentSet] =
     useState(0);
@@ -731,13 +732,9 @@ export default function DisplayPage() {
                     "
                   >
 
-                    <span
+                    <AutoFitText
                       className={`
                         ${magneton.className}
-
-                        flex
-                        items-center
-                        justify-center
 
                         text-center
                         leading-[1.08]
@@ -751,7 +748,7 @@ export default function DisplayPage() {
                       `}
                     >
                       {candidate.name}
-                    </span>
+                    </AutoFitText>
 
                     {candidate.position && (
                       <span
