@@ -64,7 +64,7 @@ const [form, setForm] = useState({
     ]);
 
     if (batchResult.error || totalResult.error) {
-      showToast(
+      showToast.error(
         batchResult.error?.message ?? totalResult.error?.message ?? 'Unable to load candidates.'
       );
     } else {
@@ -105,7 +105,7 @@ const [form, setForm] = useState({
     const failedResult = results.find((result) => result.error);
 
     if (failedResult?.error) {
-      showToast(`Unable to save candidate order: ${failedResult.error.message}`);
+      showToast.error(`Unable to save candidate order: ${failedResult.error.message}`);
       loadCandidates();
     }
   }
@@ -131,7 +131,7 @@ const [form, setForm] = useState({
     if (!file) return;
 
     setProcessingPhoto(true);
-    showToast('Removing photo background...');
+    showToast.loading('Removing photo background...');
 
     try {
       const backgroundRemoved = await removeBackground(file);
@@ -146,14 +146,14 @@ const [form, setForm] = useState({
         photo_file: processedFile,
         no_photo: false,
       }));
-      showToast('Photo background removed.');
+      showToast.success('Photo background removed.');
     } catch {
       setForm((current) => ({
         ...current,
         photo_file: file,
         no_photo: false,
       }));
-      showToast('Background removal failed; using the original photo.');
+      showToast.error('Background removal failed; using the original photo.');
     } finally {
       setProcessingPhoto(false);
     }
@@ -185,7 +185,7 @@ async function saveCandidate(e) {
       });
 
     if (uploadError) {
-      showToast(`Photo upload failed: ${uploadError.message}`);
+      showToast.error(`Photo upload failed: ${uploadError.message}`);
       return;
     }
 
@@ -210,7 +210,7 @@ async function saveCandidate(e) {
     .eq('id', editingId);
 
   if (error) {
-    showToast(error.message);
+    showToast.error(error.message);
     return;
   }
 
@@ -225,7 +225,7 @@ async function saveCandidate(e) {
 
   setEditingId(null);
   setEditModalOpen(false);
-  showToast('Candidate updated successfully.');
+  showToast.success('Candidate updated successfully.');
 
   await loadCandidates();
 }
@@ -263,7 +263,7 @@ async function saveCandidate(e) {
       .eq('id', id);
 
     if (error) {
-      showToast(error.message);
+      showToast.error(error.message);
       return;
     }
 
@@ -286,7 +286,7 @@ async function saveCandidate(e) {
       .eq('id', id);
 
     if (error) {
-      showToast(error.message);
+      showToast.error(error.message);
       return;
     }
 
@@ -306,7 +306,7 @@ async function saveCandidate(e) {
       .eq('id', id);
 
     if (error) {
-      showToast(error.message);
+      showToast.error(error.message);
       return;
     }
 

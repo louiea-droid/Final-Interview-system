@@ -222,6 +222,27 @@
 }
 
 /* the icon gets its own gutter, divided from the text it labels */
+/* dimmed and inert while the sign-in is in flight */
+.login-field .form-input:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.login-field .form-input:disabled:hover {
+  border-color: rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.login-field .password-visibility-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.login-field .password-visibility-button:disabled:hover {
+  color: #7c7c7c;
+  background: transparent;
+}
+
 .login-field-icon {
   position: absolute;
   top: 8px;

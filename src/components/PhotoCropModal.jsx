@@ -28,7 +28,7 @@ export default function PhotoCropModal({
       onSave(file);
       onClose();
     } catch {
-      showToast('Cropping failed. Please try again.');
+      showToast.error('Cropping failed. Please try again.');
     } finally {
       setSaving(false);
     }

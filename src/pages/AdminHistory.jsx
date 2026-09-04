@@ -68,7 +68,7 @@ export default function CandidatesPage() {
       .order('name', { ascending: true });
 
     if (error) {
-      showToast(error.message);
+      showToast.error(error.message);
     } else {
       setCandidates(data ?? []);
     }
@@ -166,7 +166,7 @@ export default function CandidatesPage() {
     const failedResult = results.find((result) => result.error);
 
     if (failedResult?.error) {
-      showToast(failedResult.error.message);
+      showToast.error(failedResult.error.message);
     } else {
       const updatedCandidates = results
         .map((result) => result.data)
@@ -194,7 +194,7 @@ export default function CandidatesPage() {
     if (!file) return;
 
     setProcessingPhoto(true);
-    showToast('Removing photo background...');
+    showToast.loading('Removing photo background...');
 
     try {
       const backgroundRemoved = await removeBackground(file);
@@ -219,7 +219,7 @@ export default function CandidatesPage() {
             : candidate
         )
       );
-      showToast('Background removal failed; using the original photo.');
+      showToast.error('Background removal failed; using the original photo.');
     } finally {
       setProcessingPhoto(false);
     }
@@ -273,7 +273,7 @@ export default function CandidatesPage() {
       .eq('id', id);
 
     if (error) {
-      showToast(error.message);
+      showToast.error(error.message);
       return;
     }
 
@@ -300,7 +300,7 @@ export default function CandidatesPage() {
       .in('id', ids);
 
     if (error) {
-      showToast(error.message);
+      showToast.error(error.message);
       return;
     }
 
@@ -375,7 +375,7 @@ export default function CandidatesPage() {
     if (!file) return;
 
     setAddProcessingIds((current) => new Set(current).add(localId));
-    showToast('Removing photo background...');
+    showToast.loading('Removing photo background...');
 
     try {
       const backgroundRemoved = await removeBackground(file);
@@ -396,7 +396,7 @@ export default function CandidatesPage() {
           form.localId === localId ? { ...form, photo_file: file, no_photo: false } : form
         )
       );
-      showToast('Background removal failed; using the original photo.');
+      showToast.error('Background removal failed; using the original photo.');
     } finally {
       setAddProcessingIds((current) => {
         const next = new Set(current);
@@ -447,7 +447,7 @@ export default function CandidatesPage() {
 
     const failedUpload = uploadResults.find((result) => result.error);
     if (failedUpload?.error) {
-      showToast(`Photo upload failed: ${failedUpload.error.message}`);
+      showToast.error(`Photo upload failed: ${failedUpload.error.message}`);
       return;
     }
 
@@ -464,7 +464,7 @@ export default function CandidatesPage() {
     );
 
     if (error) {
-      showToast(error.message);
+      showToast.error(error.message);
       return;
     }
 

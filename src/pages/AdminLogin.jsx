@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Eye, EyeOff, Lock, User } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -17,8 +17,21 @@ export default function AdminLoginPage() {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  /*
+   * State lands on the next render, so several submits fired in one tick
+   * would all still see `submitting` as false. A ref flips immediately and
+   * is what actually keeps the sign-in from being spammed; the state is
+   * only there to drive the disabled styling.
+   */
+  const inFlight = useRef(false);
+
   async function handleSubmit(event) {
     event.preventDefault();
+
+    // a disabled button still leaves Enter able to resubmit the form
+    if (inFlight.current) return;
+
+    inFlight.current = true;
     setSubmitting(true);
 
     try {
@@ -29,7 +42,8 @@ export default function AdminLoginPage() {
        * message is shown as-is so a missing configuration reads as such
        * rather than as a rejected password.
        */
-      showToast(error.message);
+      showToast.error(error.message);
+      inFlight.current = false;
       setSubmitting(false);
       return;
     }
@@ -97,6 +111,7 @@ export default function AdminLoginPage() {
                 required
                 autoFocus
                 autoComplete="username"
+                disabled={submitting}
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
               />
@@ -119,6 +134,7 @@ export default function AdminLoginPage() {
                 type={passwordVisible ? 'text' : 'password'}
                 required
                 autoComplete="current-password"
+                disabled={submitting}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
@@ -126,6 +142,7 @@ export default function AdminLoginPage() {
               <button
                 type="button"
                 className="password-visibility-button"
+                disabled={submitting}
                 onClick={() => setPasswordVisible((current) => !current)}
                 aria-label={passwordVisible ? 'Hide password' : 'Show password'}
                 aria-pressed={passwordVisible}
