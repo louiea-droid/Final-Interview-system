@@ -12,6 +12,9 @@ import RequireAuth from './components/RequireAuth';
 import VisualBoard from './pages/VisualBoard';
 import AdminLogin from './pages/AdminLogin';
 import AdminLayout from './pages/AdminLayout';
+import AdminDashboard from './pages/AdminDashboard';
+import AdminHistory from './pages/AdminHistory';
+import AdminRecords from './pages/AdminRecords';
 import AdminSettings from './pages/AdminSettings';
 
 createRoot(document.getElementById('root')).render(
@@ -26,10 +29,9 @@ createRoot(document.getElementById('root')).render(
           <Route path="/admin/login" element={<AdminLogin />} />
 
           {/*
-            Replaces the old Next.js middleware guard. The redirect here is
-            only a convenience for the person using the app - what actually
-            protects the data is Firebase Auth plus Firestore security rules,
-            which the browser cannot talk its way around.
+            Replaces the old Next.js middleware guard. While we are running
+            on the local backend this is a convenience redirect only - see
+            the note in lib/localAuth.js.
           */}
           <Route
             path="/admin"
@@ -39,8 +41,9 @@ createRoot(document.getElementById('root')).render(
               </RequireAuth>
             }
           >
-            {/* TODO: the dashboard and history pages still read from Supabase;
-                porting their data layer to Firestore is the next step */}
+            <Route index element={<AdminDashboard />} />
+            <Route path="history" element={<AdminHistory />} />
+            <Route path="records" element={<AdminRecords />} />
             <Route path="settings" element={<AdminSettings />} />
           </Route>
 

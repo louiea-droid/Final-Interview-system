@@ -1,6 +1,7 @@
 {
   "name": "Hyacinth-Final-Interview",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "scripts": {
     "dev": "vite",
@@ -10,7 +11,6 @@
   "dependencies": {
     "@imgly/background-removal": "^1.7.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "firebase": "^12.18.0",
     "lucide-react": "^1.38.0",
     "postcss": "^8.5.26",
     "react": "latest",

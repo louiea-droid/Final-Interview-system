@@ -1,42 +1,65 @@
 # Final Interview System
 
-Live interview board plus an admin panel. React + Vite + Firebase.
+Live interview board plus an admin panel. React + Vite, running entirely
+locally while it is being built.
 
 ## Setup
 
 ```bash
 npm install
-cp .env.local.example .env.local   # then fill in your Firebase values
 npm run dev
 ```
 
-Firebase values come from the console under
-**Project settings -> General -> Your apps -> SDK setup and configuration**.
-They are public identifiers rather than secrets: what protects the data is
-Firebase Auth and your Firestore/Storage security rules.
+That is all - no accounts, no keys, no backend. Candidate data lives in your
+browser's localStorage and starts from four sample candidates, so the board
+has something to show the first time you open it.
+
+Sign in at `/admin/login` with:
+
+| Field | Value |
+| --- | --- |
+| Username | `admin@local` |
+| Password | `admin` |
+
+Override those with `VITE_LOCAL_ADMIN_EMAIL` / `VITE_LOCAL_ADMIN_PASSWORD`
+in `.env.local` if you like (see `.env.local.example`).
 
 ## Routes
 
 | Route | What it is |
 | --- | --- |
-| `/visual` | The public board. Updates live as candidates change. |
+| `/visual` | The public board. Updates live, including from another tab. |
 | `/admin` | Admin dashboard (requires sign-in). |
 | `/admin/history` | Past interview records. |
+| `/admin/records` | Same screen as history. |
 | `/admin/settings` | Board and profile settings. |
-| `/admin/login` | Firebase Auth sign-in. |
+| `/admin/login` | Sign-in. |
 
 ## Scripts
 
 | Command | Does |
 | --- | --- |
-| `npm run dev` | Vite dev server on port 3000. |
+| `npm run dev` | Vite dev server on port 5173. |
 | `npm run build` | Production build into `dist/`. |
 | `npm run preview` | Serve the built `dist/` locally. |
 
-## Firebase setup
+## Local data
 
-1. Create a project, then add a **Web app** to get the config values.
-2. Enable **Authentication -> Email/Password** and add your admin user.
-3. Create a **Firestore** database with a `candidates` collection.
-4. Enable **Cloud Storage** for candidate photos.
-5. Restrict writes to signed-in admins with security rules - see `AGENTS.md`.
+`src/lib/localBackend.js` holds candidates in localStorage and keeps uploaded
+photos as downscaled data URLs. `resetLocalData()` exported from that file
+clears everything and restores the sample candidates - handy from the
+browser console when testing.
+
+`src/lib/localAuth.js` is the matching sign-in stand-in.
+
+## Going to a real backend
+
+Both local modules exist to be replaced. `localBackend.js` exposes the same
+query shape the admin pages already call (`from(...).select(...).eq(...)`)
+plus `subscribeCandidates` for the live board, so swapping in a real service
+means rewriting those two files rather than touching the screens.
+
+**When you do, note that the local auth is not security**: its credentials
+sit in the browser bundle and its session is a localStorage flag, so anyone
+can sign themselves in. Real protection needs an identity provider that
+verifies credentials off-device, plus rules on the data itself.

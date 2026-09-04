@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signOut } from 'firebase/auth';
 import { LogOut } from 'lucide-react';
 
-import { auth } from '../lib/firebase';
+import { signOut } from '../lib/localAuth';
 
 export default function AdminSignOutButton() {
   const navigate = useNavigate();
@@ -11,7 +10,7 @@ export default function AdminSignOutButton() {
 
   async function handleSignOut() {
     setSigningOut(true);
-    await signOut(auth);
+    await signOut();
     navigate('/admin/login', { replace: true });
   }
 

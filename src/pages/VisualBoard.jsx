@@ -1,14 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-} from "firebase/firestore";
 
 import FullscreenSwitch from "../components/FullscreenSwitch";
 import AutoFitText from "../components/AutoFitText";
-import { CANDIDATES, db } from "../lib/firebase";
+import { subscribeCandidates } from "../lib/localBackend";
 import { isShownOnBoard } from "../lib/candidateVisibility";
 
 /* ---------------- ember field ---------------- */
@@ -184,50 +178,32 @@ export default function DisplayPage() {
   /* =========================================================
      LOAD CANDIDATES (live)
 
-     onSnapshot both fetches the candidates and keeps them in
-     step afterwards, so this one subscription replaces the
-     separate fetch and realtime channel the board used to run.
+     subscribeCandidates both delivers the current candidates
+     and keeps them in step afterwards, so this one
+     subscription covers the initial load and every later
+     change - including edits made in another tab.
   ========================================================= */
 
   useEffect(() => {
-    const candidatesQuery = query(
-      collection(db, CANDIDATES),
-      orderBy("sort_order", "asc")
-    );
+    return subscribeCandidates((rows) => {
+      /*
+       * Candidates hidden from the board in the admin panel are
+       * dropped here, before the sets are worked out, so a hidden
+       * candidate never leaves an empty slot behind.
+       */
 
-    const unsubscribe = onSnapshot(
-      candidatesQuery,
-      (snapshot) => {
-        const rows = snapshot.docs.map((entry) => ({
-          id: entry.id,
-          ...entry.data(),
-        }));
-
-        /*
-         * Candidates hidden from the board in the admin panel are
-         * dropped here, before the sets are worked out, so a hidden
-         * candidate never leaves an empty slot behind.
-         */
-
-        setCandidates(
-          rows.filter((candidate) =>
-            isShownOnBoard(candidate)
+      setCandidates(
+        rows
+          .filter((candidate) => isShownOnBoard(candidate))
+          .sort(
+            (a, b) =>
+              (Number(a.sort_order) || 0) -
+              (Number(b.sort_order) || 0)
           )
-        );
+      );
 
-        setLoading(false);
-      },
-      (error) => {
-        console.error(
-          "Failed to load candidates:",
-          error
-        );
-
-        setLoading(false);
-      }
-    );
-
-    return unsubscribe;
+      setLoading(false);
+    });
   }, []);
 
   useEffect(() => {

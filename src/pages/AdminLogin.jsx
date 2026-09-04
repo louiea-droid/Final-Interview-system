@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { signInWithEmailAndPassword } from 'firebase/auth';
 
 import { useToast } from '../components/ToastProvider';
-import { auth } from '../lib/firebase';
+import { signIn } from '../lib/localAuth';
 
 /*
- * Firebase Auth identifies admins by email address. The field is still
- * labelled "username" so the sign-in screen reads the same as before.
+ * Signs in against the local development credentials - admin@local / admin
+ * unless VITE_LOCAL_ADMIN_EMAIL and VITE_LOCAL_ADMIN_PASSWORD say otherwise.
  */
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -24,7 +23,7 @@ export default function AdminLoginPage() {
     setSubmitting(true);
 
     try {
-      await signInWithEmailAndPassword(auth, username, password);
+      await signIn(username, password);
     } catch {
       // deliberately not saying which of the two was wrong
       showToast('Incorrect username or password.');

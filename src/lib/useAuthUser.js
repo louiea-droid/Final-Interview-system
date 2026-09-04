@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
 
-import { auth } from './firebase';
+import { onAuthChange } from './localAuth';
 
 /*
- * The signed-in Firebase user, or null when signed out.
+ * The signed-in admin, or null when signed out.
  *
- * Starts as undefined to mean "not known yet": Firebase restores a persisted
- * session asynchronously, so treating that first moment as signed out would
- * sign the admin out on every page load.
+ * Starts as undefined for "not known yet", so a consumer can tell an
+ * unresolved session apart from a genuinely signed-out one.
  */
 export function useAuthUser() {
   const [user, setUser] = useState(undefined);
 
-  useEffect(() => onAuthStateChanged(auth, (next) => setUser(next ?? null)), []);
+  useEffect(() => onAuthChange((next) => setUser(next ?? null)), []);
 
   return user;
 }

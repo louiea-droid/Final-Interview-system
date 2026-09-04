@@ -1,5 +1,3 @@
-'use client';
-
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { removeBackground } from '@imgly/background-removal';
 import {
@@ -10,13 +8,14 @@ import {
   UserRound,
 } from 'lucide-react';
 
-import { supabase } from '../../../../lib/supabase';
-import { isShownOnBoard } from '../../../../lib/candidateVisibility';
-import { getStatusPillClass } from '../../../../lib/candidateStatus';
-import CandidateDetailsModal from '../../../../components/CandidateDetailsModal';
-import PhotoCropModal from '../../../../components/PhotoCropModal';
-import DateField from '../../../../components/DateField';
-import { useToast } from '../../../../components/ToastProvider';
+// local stand-in for the backend; same query API, no network
+import { localClient as supabase } from '../lib/localBackend';
+import { isShownOnBoard } from '../lib/candidateVisibility';
+import { getStatusPillClass } from '../lib/candidateStatus';
+import CandidateDetailsModal from '../components/CandidateDetailsModal';
+import PhotoCropModal from '../components/PhotoCropModal';
+import DateField from '../components/DateField';
+import { useToast } from '../components/ToastProvider';
 
 function createEmptyAddForm() {
   return {

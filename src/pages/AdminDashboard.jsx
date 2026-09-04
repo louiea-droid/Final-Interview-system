@@ -1,5 +1,3 @@
-'use client';
-
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { removeBackground } from '@imgly/background-removal';
 import {
@@ -14,11 +12,12 @@ import {
   UsersRound,
 } from 'lucide-react';
 
-import { supabase } from '../../../lib/supabase';
-import { formatCurrentDate, getEasternBatchStart } from '../../../lib/adminTime';
-import { isShownOnBoard } from '../../../lib/candidateVisibility';
-import CandidateDetailsModal from '../../../components/CandidateDetailsModal';
-import { useToast } from '../../../components/ToastProvider';
+// local stand-in for the backend; same query API, no network
+import { localClient as supabase } from '../lib/localBackend';
+import { formatCurrentDate, getEasternBatchStart } from '../lib/adminTime';
+import { isShownOnBoard } from '../lib/candidateVisibility';
+import CandidateDetailsModal from '../components/CandidateDetailsModal';
+import { useToast } from '../components/ToastProvider';
 
 const statuses = [
   'Scheduled',
