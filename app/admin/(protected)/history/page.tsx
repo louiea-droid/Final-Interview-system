@@ -15,6 +15,8 @@ import { isShownOnBoard } from '../../../../lib/candidateVisibility';
 import { getStatusPillClass } from '../../../../lib/candidateStatus';
 import CandidateDetailsModal from '../../../../components/CandidateDetailsModal';
 import PhotoCropModal from '../../../../components/PhotoCropModal';
+import DateField from '../../../../components/DateField';
+import { useToast } from '../../../../components/ToastProvider';
 
 type Candidate = {
   id: string;
@@ -35,13 +37,25 @@ type Candidate = {
   show_in_visual?: boolean | null;
 };
 
-const emptyAddForm = {
-  name: '',
-  photo_file: null as File | null,
-  no_photo: false,
-  position: '',
-  interview_date: '',
+type AddCandidateForm = {
+  localId: string;
+  name: string;
+  photo_file: File | null;
+  no_photo: boolean;
+  position: string;
+  interview_date: string;
 };
+
+function createEmptyAddForm(): AddCandidateForm {
+  return {
+    localId: crypto.randomUUID(),
+    name: '',
+    photo_file: null,
+    no_photo: false,
+    position: '',
+    interview_date: '',
+  };
+}
 
 type CandidateEdit = {
   id: string;
@@ -71,14 +85,16 @@ export default function CandidatesPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selectedDate, setSelectedDate] = useState('all');
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
+  const showToast = useToast();
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [editForms, setEditForms] = useState<CandidateEdit[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
   const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
   const [viewingCandidate, setViewingCandidate] = useState<Candidate | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [addForm, setAddForm] = useState(emptyAddForm);
+  const [addForms, setAddForms] = useState<AddCandidateForm[]>([createEmptyAddForm()]);
+  const [addProcessingIds, setAddProcessingIds] = useState<Set<string>>(new Set());
+  const [addCropTarget, setAddCropTarget] = useState<{ localId: string; imageSrc: string } | null>(null);
   const [processingPhoto, setProcessingPhoto] = useState(false);
   const [cropTarget, setCropTarget] = useState<{
     candidateId: string;
@@ -94,7 +110,7 @@ export default function CandidatesPage() {
       .order('name', { ascending: true });
 
     if (error) {
-      setErrorMessage(error.message);
+      showToast(error.message);
     } else {
       setCandidates(data ?? []);
     }
@@ -154,7 +170,6 @@ export default function CandidatesPage() {
     if (!editingDate || !editForms.length || processingPhoto) return;
 
     setSavingEdit(true);
-    setErrorMessage('');
 
     const results = await Promise.all(editForms.map(async (candidate) => {
       const existingCandidate = candidates.find((item) => item.id === candidate.id);
@@ -193,7 +208,7 @@ export default function CandidatesPage() {
     const failedResult = results.find((result) => result.error);
 
     if (failedResult?.error) {
-      setErrorMessage(failedResult.error.message);
+      showToast(failedResult.error.message);
     } else {
       const updatedCandidates = results
         .map((result) => result.data)
@@ -221,7 +236,7 @@ export default function CandidatesPage() {
     if (!file) return;
 
     setProcessingPhoto(true);
-    setErrorMessage('Removing photo background...');
+    showToast('Removing photo background...');
 
     try {
       const backgroundRemoved = await removeBackground(file);
@@ -238,7 +253,6 @@ export default function CandidatesPage() {
             : candidate
         )
       );
-      setErrorMessage('');
     } catch {
       setEditForms((current) =>
         current.map((candidate) =>
@@ -247,7 +261,7 @@ export default function CandidatesPage() {
             : candidate
         )
       );
-      setErrorMessage('Background removal failed; using the original photo.');
+      showToast('Background removal failed; using the original photo.');
     } finally {
       setProcessingPhoto(false);
     }
@@ -295,15 +309,13 @@ export default function CandidatesPage() {
   }
 
   async function removeCandidate(id: string) {
-    setErrorMessage('');
-
     const { error } = await supabase
       .from('candidates')
       .delete()
       .eq('id', id);
 
     if (error) {
-      setErrorMessage(error.message);
+      showToast(error.message);
       return;
     }
 
@@ -322,8 +334,6 @@ export default function CandidatesPage() {
     groupCandidates: Candidate[],
     nextValue: boolean
   ) {
-    setErrorMessage('');
-
     const ids = groupCandidates.map((candidate) => candidate.id);
 
     const { error } = await supabase
@@ -332,7 +342,7 @@ export default function CandidatesPage() {
       .in('id', ids);
 
     if (error) {
-      setErrorMessage(error.message);
+      showToast(error.message);
       return;
     }
 
@@ -346,22 +356,68 @@ export default function CandidatesPage() {
   }
 
   function openAddModal() {
-    setErrorMessage('');
-    setAddForm(emptyAddForm);
+    setAddForms([createEmptyAddForm()]);
     setAddModalOpen(true);
   }
 
   function closeAddModal() {
     setAddModalOpen(false);
-    setAddForm(emptyAddForm);
-    setErrorMessage('');
+    setAddForms([createEmptyAddForm()]);
+    setAddCropTarget(null);
   }
 
-  async function handleAddPhotoChange(file: File | null) {
+  function addAnotherCandidate() {
+    setAddForms((current) => [...current, createEmptyAddForm()]);
+  }
+
+  function removeAddCandidate(localId: string) {
+    setAddForms((current) =>
+      current.length > 1 ? current.filter((form) => form.localId !== localId) : current
+    );
+  }
+
+  function updateAddForm(
+    localId: string,
+    field: 'name' | 'position' | 'interview_date',
+    value: string
+  ) {
+    setAddForms((current) =>
+      current.map((form) => (form.localId === localId ? { ...form, [field]: value } : form))
+    );
+  }
+
+  function setAddFormNoPhoto(localId: string, noPhoto: boolean) {
+    setAddForms((current) =>
+      current.map((form) =>
+        form.localId === localId
+          ? { ...form, no_photo: noPhoto, photo_file: noPhoto ? null : form.photo_file }
+          : form
+      )
+    );
+  }
+
+  function openAddPhotoCrop(localId: string, imageSrc: string) {
+    setAddCropTarget({ localId, imageSrc });
+  }
+
+  function handleAddCroppedPhoto(file: File) {
+    if (!addCropTarget) return;
+    const { localId } = addCropTarget;
+    setAddForms((current) =>
+      current.map((form) =>
+        form.localId === localId ? { ...form, photo_file: file, no_photo: false } : form
+      )
+    );
+  }
+
+  // Background removal runs independently per card (tracked by localId)
+  // instead of blocking the whole modal, so filling out — or submitting —
+  // the other candidates doesn't have to wait on one slow photo.
+  async function handleAddPhotoChange(localId: string, file: File | null) {
     if (!file) return;
 
-    setProcessingPhoto(true);
-    setErrorMessage('Removing photo background...');
+    setAddProcessingIds((current) => new Set(current).add(localId));
+    showToast('Removing photo background...');
 
     try {
       const backgroundRemoved = await removeBackground(file);
@@ -371,79 +427,92 @@ export default function CandidatesPage() {
         { type: 'image/png' }
       );
 
-      setAddForm((current) => ({
-        ...current,
-        photo_file: processedFile,
-        no_photo: false,
-      }));
-      setErrorMessage('');
+      setAddForms((current) =>
+        current.map((form) =>
+          form.localId === localId ? { ...form, photo_file: processedFile, no_photo: false } : form
+        )
+      );
     } catch {
-      setAddForm((current) => ({
-        ...current,
-        photo_file: file,
-        no_photo: false,
-      }));
-      setErrorMessage('Background removal failed; using the original photo.');
+      setAddForms((current) =>
+        current.map((form) =>
+          form.localId === localId ? { ...form, photo_file: file, no_photo: false } : form
+        )
+      );
+      showToast('Background removal failed; using the original photo.');
     } finally {
-      setProcessingPhoto(false);
+      setAddProcessingIds((current) => {
+        const next = new Set(current);
+        next.delete(localId);
+        return next;
+      });
     }
   }
 
-  async function addCandidate(event: FormEvent) {
+  async function addCandidates(event: FormEvent) {
     event.preventDefault();
 
-    if (processingPhoto) return;
+    if (addProcessingIds.size > 0) return;
 
-    setErrorMessage('');
-
-    const nextOrder = candidates.length
+    const baseOrder = candidates.length
       ? Math.max(...candidates.map((candidate) => candidate.sort_order)) + 1
       : 1;
 
-    let photoUrl: string | null = null;
+    // Upload every candidate's photo in parallel rather than one at a
+    // time — with several candidates queued up, that's the difference
+    // between waiting on N uploads back-to-back and waiting on one.
+    const uploadResults = await Promise.all(
+      addForms.map(async (form) => {
+        if (form.no_photo || !form.photo_file) {
+          return { photoUrl: null as string | null, error: null };
+        }
 
-    if (!addForm.no_photo && addForm.photo_file) {
-      const file = addForm.photo_file;
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${crypto.randomUUID()}.${fileExt}`;
+        const file = form.photo_file;
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${crypto.randomUUID()}.${fileExt}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('Candidate-photos')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false,
-        });
+        const { error: uploadError } = await supabase.storage
+          .from('Candidate-photos')
+          .upload(fileName, file, {
+            cacheControl: '3600',
+            upsert: false,
+          });
 
-      if (uploadError) {
-        setErrorMessage(`Photo upload failed: ${uploadError.message}`);
-        return;
-      }
+        if (uploadError) return { photoUrl: null, error: uploadError };
 
-      const { data } = supabase.storage
-        .from('Candidate-photos')
-        .getPublicUrl(fileName);
+        const { data } = supabase.storage
+          .from('Candidate-photos')
+          .getPublicUrl(fileName);
 
-      photoUrl = data.publicUrl;
-    }
+        return { photoUrl: data.publicUrl, error: null };
+      })
+    );
 
-    const { error } = await supabase.from('candidates').insert({
-      name: addForm.name,
-      photo_url: photoUrl,
-      position: addForm.position || null,
-      interview_date: addForm.interview_date || null,
-      status: 'Scheduled',
-      interview_type: 'Final Interview',
-      sort_order: nextOrder,
-    });
-
-    if (error) {
-      setErrorMessage(error.message);
+    const failedUpload = uploadResults.find((result) => result.error);
+    if (failedUpload?.error) {
+      showToast(`Photo upload failed: ${failedUpload.error.message}`);
       return;
     }
 
-    // The new candidate may not fall under whichever date is
+    const { error } = await supabase.from('candidates').insert(
+      addForms.map((form, index) => ({
+        name: form.name,
+        photo_url: uploadResults[index].photoUrl,
+        position: form.position || null,
+        interview_date: form.interview_date || null,
+        status: 'Scheduled',
+        interview_type: 'Final Interview',
+        sort_order: baseOrder + index,
+      }))
+    );
+
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+
+    // The new candidates may not fall under whichever date is
     // currently filtered, so switch back to "All dates" to make
-    // sure it's actually visible once the modal closes.
+    // sure they're actually visible once the modal closes.
     setSelectedDate('all');
     closeAddModal();
     await loadCandidates();
@@ -488,8 +557,6 @@ export default function CandidatesPage() {
           ))}
         </select>
       </section>
-
-      {errorMessage && <div className="message-box">{errorMessage}</div>}
 
       {loading ? (
         <div className="candidate-list-state">Loading candidates...</div>
@@ -665,7 +732,7 @@ export default function CandidatesPage() {
                           />
                         </button>
                       ) : (
-                        <UserRound size={18} />
+                        <UserRound size={28} />
                       )}
                     </div>
                     <div className="record-edit-photo-controls">
@@ -751,12 +818,10 @@ export default function CandidatesPage() {
                     <label className="form-label" htmlFor={`record-date-${editForm.id}`}>
                       Interview schedule
                     </label>
-                    <input
+                    <DateField
                       id={`record-date-${editForm.id}`}
-                      className="form-input"
-                      type="date"
                       value={editForm.interview_date}
-                      onChange={(event) => updateEditForm(editForm.id, 'interview_date', event.target.value)}
+                      onChange={(next) => updateEditForm(editForm.id, 'interview_date', next)}
                     />
                   </div>
                 </div>
@@ -830,94 +895,46 @@ export default function CandidatesPage() {
       {addModalOpen && (
         <div className="confirmation-overlay">
           <form
-            className="candidate-edit-popup"
-            onSubmit={addCandidate}
+            className="candidate-edit-popup group-edit-popup"
+            onSubmit={addCandidates}
             aria-labelledby="records-add-candidate-title"
           >
-            <h2 id="records-add-candidate-title">Add Candidate</h2>
-
-            <label className="form-label" htmlFor="records-add-photo">
-              Candidate Photo
-            </label>
-            <div className="photo-upload">
-              <label
-                htmlFor="records-add-photo"
-                className={`photo-upload-box ${addForm.no_photo ? 'disabled' : ''}`}
+            <div className="modal-heading-row">
+              <div>
+                <h2 id="records-add-candidate-title">Add candidates</h2>
+                <p className="modal-subtitle">Fill out as many candidates as you need, then save them all at once.</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={closeAddModal}
+                aria-label="Close add candidates modal"
               >
-                <input
-                  id="records-add-photo"
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  disabled={addForm.no_photo}
-                  onChange={(event) => {
-                    void handleAddPhotoChange(event.target.files?.[0] ?? null);
-                  }}
-                />
-                <div className="photo-upload-content">
-                  <span className="photo-upload-title">
-                    {addForm.photo_file ? addForm.photo_file.name : 'Upload Photo'}
-                  </span>
-                  <span className="photo-upload-subtitle">PNG, JPG or WEBP</span>
-                </div>
-              </label>
-
-              <label className="none-photo-option">
-                <input
-                  type="checkbox"
-                  checked={addForm.no_photo}
-                  onChange={(event) =>
-                    setAddForm((current) => ({
-                      ...current,
-                      no_photo: event.target.checked,
-                      photo_file: event.target.checked ? null : current.photo_file,
-                    }))
-                  }
-                />
-                <span>None</span>
-              </label>
+                &times;
+              </button>
             </div>
 
-            <label className="form-label" htmlFor="records-add-name">
-              Candidate Name
-            </label>
-            <input
-              id="records-add-name"
-              className="form-input"
-              required
-              placeholder="Enter candidate name"
-              value={addForm.name}
-              onChange={(event) =>
-                setAddForm((current) => ({ ...current, name: event.target.value }))
-              }
-            />
+            <div className="group-edit-fields">
+              {addForms.map((form, index) => (
+                <AddCandidateCard
+                  key={form.localId}
+                  form={form}
+                  index={index}
+                  canRemove={addForms.length > 1}
+                  processing={addProcessingIds.has(form.localId)}
+                  onChange={updateAddForm}
+                  onRemove={removeAddCandidate}
+                  onNoPhotoChange={setAddFormNoPhoto}
+                  onPhotoChange={handleAddPhotoChange}
+                  onOpenCrop={openAddPhotoCrop}
+                />
+              ))}
+            </div>
 
-            <label className="form-label" htmlFor="records-add-position">
-              Position
-            </label>
-            <input
-              id="records-add-position"
-              className="form-input"
-              placeholder="Position"
-              value={addForm.position}
-              onChange={(event) =>
-                setAddForm((current) => ({ ...current, position: event.target.value }))
-              }
-            />
-
-            <label className="form-label" htmlFor="records-add-date">
-              Interview Date
-            </label>
-            <input
-              id="records-add-date"
-              className="form-input"
-              type="date"
-              value={addForm.interview_date}
-              onChange={(event) =>
-                setAddForm((current) => ({ ...current, interview_date: event.target.value }))
-              }
-            />
-
-            {errorMessage && <div className="message-box">{errorMessage}</div>}
+            <button type="button" className="secondary-button" onClick={addAnotherCandidate}>
+              <Plus size={12} />
+              Add another candidate
+            </button>
 
             <div className="confirmation-actions">
               <button
@@ -930,15 +947,168 @@ export default function CandidatesPage() {
               <button
                 type="submit"
                 className="confirm-delete-button"
-                disabled={processingPhoto}
+                disabled={addProcessingIds.size > 0}
               >
-                {processingPhoto ? 'Processing Photo...' : 'Add Candidate'}
+                {addProcessingIds.size > 0
+                  ? 'Processing photos...'
+                  : addForms.length > 1
+                    ? `Add ${addForms.length} Candidates`
+                    : 'Add Candidate'}
               </button>
             </div>
           </form>
         </div>
       )}
 
+      {addCropTarget && (
+        <PhotoCropModal
+          imageSrc={addCropTarget.imageSrc}
+          fileName="candidate-photo.png"
+          onSave={handleAddCroppedPhoto}
+          onClose={() => setAddCropTarget(null)}
+        />
+      )}
+
+    </div>
+  );
+}
+
+function AddCandidateCard({
+  form,
+  index,
+  canRemove,
+  processing,
+  onChange,
+  onRemove,
+  onNoPhotoChange,
+  onPhotoChange,
+  onOpenCrop,
+}: {
+  form: AddCandidateForm;
+  index: number;
+  canRemove: boolean;
+  processing: boolean;
+  onChange: (localId: string, field: 'name' | 'position' | 'interview_date', value: string) => void;
+  onRemove: (localId: string) => void;
+  onNoPhotoChange: (localId: string, noPhoto: boolean) => void;
+  onPhotoChange: (localId: string, file: File | null) => void;
+  onOpenCrop: (localId: string, imageSrc: string) => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!form.photo_file) {
+      setPreviewUrl(null);
+      return;
+    }
+
+    const url = URL.createObjectURL(form.photo_file);
+    setPreviewUrl(url);
+
+    return () => URL.revokeObjectURL(url);
+  }, [form.photo_file]);
+
+  const photoInputId = `add-photo-${form.localId}`;
+
+  return (
+    <div className="record-edit-fieldset" role="group" aria-label={`Candidate ${index + 1}`}>
+      <div className="record-edit-fieldset-header">
+        <span className="record-edit-fieldset-name">Candidate {index + 1}</span>
+        {canRemove && (
+          <button
+            type="button"
+            className="modal-close-button"
+            onClick={() => onRemove(form.localId)}
+            aria-label={`Remove candidate ${index + 1}`}
+          >
+            &times;
+          </button>
+        )}
+      </div>
+
+      <label className="form-label" htmlFor={photoInputId}>
+        Candidate photo
+      </label>
+      <div className="photo-upload">
+        {previewUrl && !form.no_photo && (
+          <div className="record-edit-photo-preview">
+            <button
+              type="button"
+              className="record-edit-photo-preview-button"
+              onClick={() => onOpenCrop(form.localId, previewUrl)}
+              aria-label="Preview and crop candidate photo"
+            >
+              <img src={previewUrl} alt="Candidate preview" />
+            </button>
+          </div>
+        )}
+
+        <label
+          htmlFor={photoInputId}
+          className={`photo-upload-box ${form.no_photo ? 'disabled' : ''}`}
+        >
+          <input
+            id={photoInputId}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            disabled={form.no_photo}
+            onChange={(event) => {
+              void onPhotoChange(form.localId, event.target.files?.[0] ?? null);
+            }}
+          />
+          <div className="photo-upload-content">
+            <span className="photo-upload-title">
+              {processing
+                ? 'Processing...'
+                : form.photo_file
+                  ? form.photo_file.name
+                  : 'Upload Photo'}
+            </span>
+            <span className="photo-upload-subtitle">PNG, JPG or WEBP</span>
+          </div>
+        </label>
+
+        <label className="none-photo-option">
+          <input
+            type="checkbox"
+            checked={form.no_photo}
+            onChange={(event) => onNoPhotoChange(form.localId, event.target.checked)}
+          />
+          <span>None</span>
+        </label>
+      </div>
+
+      <label className="form-label" htmlFor={`add-name-${form.localId}`}>
+        Candidate name
+      </label>
+      <input
+        id={`add-name-${form.localId}`}
+        className="form-input"
+        required
+        placeholder="Enter candidate name"
+        value={form.name}
+        onChange={(event) => onChange(form.localId, 'name', event.target.value)}
+      />
+
+      <label className="form-label" htmlFor={`add-position-${form.localId}`}>
+        Position
+      </label>
+      <input
+        id={`add-position-${form.localId}`}
+        className="form-input"
+        placeholder="Position"
+        value={form.position}
+        onChange={(event) => onChange(form.localId, 'position', event.target.value)}
+      />
+
+      <label className="form-label" htmlFor={`add-date-${form.localId}`}>
+        Interview date
+      </label>
+      <DateField
+        id={`add-date-${form.localId}`}
+        value={form.interview_date}
+        onChange={(next) => onChange(form.localId, 'interview_date', next)}
+      />
     </div>
   );
 }

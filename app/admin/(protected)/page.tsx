@@ -18,6 +18,7 @@ import { supabase } from '../../../lib/supabase';
 import { formatCurrentDate, getEasternBatchStart } from '../../../lib/adminTime';
 import { isShownOnBoard } from '../../../lib/candidateVisibility';
 import CandidateDetailsModal from '../../../components/CandidateDetailsModal';
+import { useToast } from '../../../components/ToastProvider';
 
 type Candidate = {
   id: string;
@@ -48,7 +49,7 @@ export default function AdminPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [totalCandidates, setTotalCandidates] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState('');
+  const showToast = useToast();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
@@ -83,7 +84,7 @@ const [form, setForm] = useState({
     ]);
 
     if (batchResult.error || totalResult.error) {
-      setMessage(
+      showToast(
         batchResult.error?.message ?? totalResult.error?.message ?? 'Unable to load candidates.'
       );
     } else {
@@ -112,7 +113,6 @@ const [form, setForm] = useState({
     }));
 
     setCandidates(orderedCandidates);
-    setMessage('');
 
     const results = await Promise.all(
       orderedCandidates.map((candidate) =>
@@ -125,7 +125,7 @@ const [form, setForm] = useState({
     const failedResult = results.find((result) => result.error);
 
     if (failedResult?.error) {
-      setMessage(`Unable to save candidate order: ${failedResult.error.message}`);
+      showToast(`Unable to save candidate order: ${failedResult.error.message}`);
       loadCandidates();
     }
   }
@@ -147,19 +147,11 @@ const [form, setForm] = useState({
     return () => window.clearInterval(intervalId);
   }, []);
 
-  useEffect(() => {
-    if (!message) return;
-
-    const timeoutId = window.setTimeout(() => setMessage(''), 5000);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [message]);
-
   async function handlePhotoChange(file: File | null) {
     if (!file) return;
 
     setProcessingPhoto(true);
-    setMessage('Removing photo background...');
+    showToast('Removing photo background...');
 
     try {
       const backgroundRemoved = await removeBackground(file);
@@ -174,14 +166,14 @@ const [form, setForm] = useState({
         photo_file: processedFile,
         no_photo: false,
       }));
-      setMessage('Photo background removed.');
+      showToast('Photo background removed.');
     } catch {
       setForm((current) => ({
         ...current,
         photo_file: file,
         no_photo: false,
       }));
-      setMessage('Background removal failed; using the original photo.');
+      showToast('Background removal failed; using the original photo.');
     } finally {
       setProcessingPhoto(false);
     }
@@ -191,8 +183,6 @@ async function saveCandidate(e: FormEvent) {
   e.preventDefault();
 
   if (processingPhoto || !editingId) return;
-
-  setMessage('');
 
   const existingCandidate = candidates.find((candidate) => candidate.id === editingId);
 
@@ -215,7 +205,7 @@ async function saveCandidate(e: FormEvent) {
       });
 
     if (uploadError) {
-      setMessage(`Photo upload failed: ${uploadError.message}`);
+      showToast(`Photo upload failed: ${uploadError.message}`);
       return;
     }
 
@@ -240,7 +230,7 @@ async function saveCandidate(e: FormEvent) {
     .eq('id', editingId);
 
   if (error) {
-    setMessage(error.message);
+    showToast(error.message);
     return;
   }
 
@@ -255,7 +245,7 @@ async function saveCandidate(e: FormEvent) {
 
   setEditingId(null);
   setEditModalOpen(false);
-  setMessage('Candidate updated successfully.');
+  showToast('Candidate updated successfully.');
 
   await loadCandidates();
 }
@@ -271,7 +261,6 @@ async function saveCandidate(e: FormEvent) {
       interview_date: candidate.interview_date ?? '',
       status: candidate.status,
     });
-    setMessage('');
   }
 
   function cancelEditing() {
@@ -285,19 +274,16 @@ async function saveCandidate(e: FormEvent) {
       interview_date: '',
       status: 'Scheduled',
     });
-    setMessage('');
   }
 
   async function updateStatus(id: string, status: string) {
-    setMessage('');
-
     const { error } = await supabase
       .from('candidates')
       .update({ status })
       .eq('id', id);
 
     if (error) {
-      setMessage(error.message);
+      showToast(error.message);
       return;
     }
 
@@ -314,15 +300,13 @@ async function saveCandidate(e: FormEvent) {
     id: string,
     nextValue: boolean
   ) {
-    setMessage('');
-
     const { error } = await supabase
       .from('candidates')
       .update({ show_in_visual: nextValue })
       .eq('id', id);
 
     if (error) {
-      setMessage(error.message);
+      showToast(error.message);
       return;
     }
 
@@ -336,15 +320,13 @@ async function saveCandidate(e: FormEvent) {
   }
 
   async function removeCandidate(id: string) {
-    setMessage('');
-
     const { error } = await supabase
       .from('candidates')
       .delete()
       .eq('id', id);
 
     if (error) {
-      setMessage(error.message);
+      showToast(error.message);
       return;
     }
 
@@ -521,16 +503,6 @@ async function saveCandidate(e: FormEvent) {
         </div>
 
       </section>
-
-      {/* =========================================
-          MESSAGE
-      ========================================= */}
-
-      {message && (
-        <div className="message-box">
-          {message}
-        </div>
-      )}
 
       {/* =========================================
           CANDIDATE LIST

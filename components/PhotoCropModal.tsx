@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Cropper, { type Area } from 'react-easy-crop';
 
 import { getCroppedImageFile, type PixelCrop } from '../lib/cropImage';
+import { useToast } from './ToastProvider';
 
 export default function PhotoCropModal({
   imageSrc,
@@ -20,20 +21,19 @@ export default function PhotoCropModal({
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<PixelCrop | null>(null);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const showToast = useToast();
 
   async function handleSave() {
     if (!croppedAreaPixels) return;
 
     setSaving(true);
-    setError('');
 
     try {
       const file = await getCroppedImageFile(imageSrc, croppedAreaPixels, fileName);
       onSave(file);
       onClose();
     } catch {
-      setError('Cropping failed. Please try again.');
+      showToast('Cropping failed. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -90,8 +90,6 @@ export default function PhotoCropModal({
           value={zoom}
           onChange={(event) => setZoom(Number(event.target.value))}
         />
-
-        {error && <div className="message-box">{error}</div>}
 
         <div className="confirmation-actions">
           <button type="button" className="secondary-button" onClick={onClose}>

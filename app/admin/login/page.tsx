@@ -4,18 +4,19 @@ import { FormEvent, Suspense, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+import { useToast } from '../../../components/ToastProvider';
+
 function AdminLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const showToast = useToast();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    setError('');
     setSubmitting(true);
 
     const response = await fetch('/api/admin/login', {
@@ -26,7 +27,7 @@ function AdminLoginForm() {
 
     if (!response.ok) {
       const body = await response.json().catch(() => null);
-      setError(body?.error ?? 'Incorrect username or password.');
+      showToast(body?.error ?? 'Incorrect username or password.');
       setSubmitting(false);
       return;
     }
@@ -90,8 +91,6 @@ function AdminLoginForm() {
             </button>
           </div>
         </div>
-
-        {error && <div className="message-box login-error">{error}</div>}
 
         <button type="submit" className="primary-button login-submit" disabled={submitting}>
           {submitting ? 'Signing in...' : 'Sign In'}

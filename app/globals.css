@@ -1302,26 +1302,6 @@ button {
 }
 
 /* =========================================
-   MESSAGE
-========================================= */
-
-.message-box {
-  margin-bottom: 10px;
-
-  padding: 10px 12px;
-
-  border-radius: 7px;
-
-  border: 1px solid rgba(111, 12, 11, 0.42);
-
-  background: rgba(111, 12, 11, 0.1);
-
-  color: #bcbcbc;
-
-  font-size: 12px;
-}
-
-/* =========================================
    CANDIDATE TABLE
 ========================================= */
 
@@ -2517,7 +2497,7 @@ svg {
 }
 
 .group-edit-popup {
-  width: min(100%, 460px);
+  width: min(100%, 820px);
 }
 
 .inline-group-editor {
@@ -2536,9 +2516,9 @@ svg {
 }
 
 .group-edit-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
   margin: 6px 0 0;
   padding: 12px;
 
@@ -2556,10 +2536,6 @@ svg {
   border: 1px solid var(--border-light);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.02);
-}
-
-.record-edit-fieldset + .record-edit-fieldset {
-  margin-top: 10px;
 }
 
 .record-edit-fieldset-header {
@@ -2598,18 +2574,18 @@ svg {
 .record-edit-photo {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .record-edit-photo-preview {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 72px;
+  height: 72px;
   flex-shrink: 0;
   overflow: hidden;
-  border-radius: 7px;
+  border-radius: 10px;
   color: var(--text-muted);
   background: rgba(255, 255, 255, 0.06);
 }
@@ -2688,12 +2664,37 @@ svg {
   font-size: 11px;
 }
 
+.record-edit-file-input::file-selector-button {
+  margin-right: 8px;
+  padding: 5px 9px;
+
+  border: 1px solid var(--border-light);
+  border-radius: 5px;
+
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.06);
+
+  font: inherit;
+  cursor: pointer;
+
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.record-edit-file-input::file-selector-button:hover {
+  border-color: rgba(98, 98, 98, 0.55);
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .record-edit-remove-photo {
   display: flex;
   align-items: center;
   gap: 5px;
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.record-edit-remove-photo input[type='checkbox'] {
+  accent-color: var(--red-bright);
 }
 
 .record-edit-file-name {
@@ -2703,6 +2704,220 @@ svg {
 
 .candidate-edit-popup .form-label:not(:first-of-type) {
   margin-top: 7px;
+}
+
+/* =========================================
+   TOASTS
+========================================= */
+
+.toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 100;
+
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  pointer-events: none;
+}
+
+.toast {
+  max-width: 320px;
+  padding: 10px 14px;
+
+  border: 1px solid var(--border);
+  border-radius: 8px;
+
+  background: #171717;
+  color: var(--text);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+
+  font-size: 13px;
+  font-weight: 500;
+
+  animation: toast-in 0.18s ease;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.admin-layout.light-mode .toast {
+  background: linear-gradient(180deg, #fffdfa, #f5edeb);
+}
+
+/* =========================================
+   CUSTOM DATE FIELD
+========================================= */
+
+.date-field {
+  position: relative;
+}
+
+.date-field-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.date-field-trigger:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.date-field-trigger svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.date-field-placeholder {
+  color: #5f5f5f;
+}
+
+.date-field-popover {
+  z-index: 60;
+  width: 272px;
+  padding: 14px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  border: 1px solid var(--border);
+  border-radius: 8px;
+
+  background: #171717;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+}
+
+.date-field-header {
+  display: flex;
+  gap: 6px;
+}
+
+.date-field-select {
+  height: 32px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.date-field-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.date-field-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.date-field-day {
+  aspect-ratio: 1;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid transparent;
+  border-radius: 50%;
+
+  color: var(--text-soft);
+  background: transparent;
+
+  font-size: 12px;
+  font-weight: 600;
+
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.date-field-day:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.date-field-day.outside {
+  color: #4a4a4a;
+}
+
+.date-field-day.today {
+  border-color: rgba(111, 12, 11, 0.6);
+}
+
+.date-field-day.selected {
+  color: white;
+  background: linear-gradient(90deg, #6f0c0b, #8b1716);
+}
+
+.date-field-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.date-field-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+.date-field-actions-right .secondary-button,
+.date-field-actions-right .primary-button {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.date-field-clear-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+.date-field-clear-button:hover {
+  color: var(--text);
+}
+
+.admin-layout.light-mode .date-field-popover {
+  background: linear-gradient(180deg, #fffdfa, #f5edeb);
+}
+
+.admin-layout.light-mode .date-field-day:hover {
+  background: rgba(91, 55, 55, 0.1);
+}
+
+.admin-layout.light-mode .date-field-day.outside {
+  color: rgba(91, 55, 55, 0.35);
+}
+
+.admin-layout.light-mode .date-field-day.selected {
+  color: white;
 }
 
 .candidate-list-state {
@@ -2863,11 +3078,6 @@ svg {
 .login-card .form-group {
   width: 100%;
   text-align: left;
-  margin-bottom: 14px;
-}
-
-.login-error {
-  width: 100%;
   margin-bottom: 14px;
 }
 
@@ -3052,7 +3262,6 @@ svg {
 .admin-layout.light-mode .photo-upload-title,
 .admin-layout.light-mode .photo-file-name,
 .admin-layout.light-mode .none-photo-option,
-.admin-layout.light-mode .message-box,
 .admin-layout.light-mode .candidate-table td,
 .admin-layout.light-mode .candidate-directory-type strong,
 .admin-layout.light-mode .inline-group-editor > h3,
