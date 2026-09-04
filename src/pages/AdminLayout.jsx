@@ -1,7 +1,5 @@
-'use client';
-
 import { useEffect, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { Outlet, useLocation } from 'react-router-dom';
 import {
   CircleUserRound,
   ClipboardList,
@@ -13,13 +11,12 @@ import {
   Sun,
 } from 'lucide-react';
 
-import AdminSignOutButton from '../../../components/AdminSignOutButton';
-import { formatCurrentTime } from '../../../lib/adminTime';
+import AdminSignOutButton from '../components/AdminSignOutButton';
+import { formatCurrentTime } from '../lib/adminTime';
 
-export default function AdminProtectedLayout({
-  children,
-}) {
-  const pathname = usePathname();
+export default function AdminProtectedLayout() {
+  // nested routes render through <Outlet /> where `children` used to go
+  const { pathname } = useLocation();
   const [currentTime, setCurrentTime] = useState(null);
   const [adminProfile, setAdminProfile] = useState({
     displayName: 'Admin',
@@ -238,7 +235,7 @@ export default function AdminProtectedLayout({
 
         </div>
 
-        {children}
+        <Outlet />
 
       </main>
     </div>

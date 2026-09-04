@@ -1,27 +1,15 @@
-"use client";
-
 import { useEffect, useMemo, useState } from "react";
-import { Poppins } from "next/font/google";
-import localFont from "next/font/local";
-import FullscreenSwitch from "./fullscreen-switch";
-import AutoFitText from "./auto-fit-text";
-import { supabase } from "../../lib/supabase";
-import { isShownOnBoard } from "../../lib/candidateVisibility";
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+} from "firebase/firestore";
 
-const poppins = Poppins({
-  subsets: ["latin"],
-  weight: "800",
-});
-
-const magneton = localFont({
-  src: "../fonts/magneton.ttf",
-  display: "swap",
-});
-
-const styleFormal = localFont({
-  src: "../fonts/StyleFormal.ttf",
-  display: "swap",
-});
+import FullscreenSwitch from "../components/FullscreenSwitch";
+import AutoFitText from "../components/AutoFitText";
+import { CANDIDATES, db } from "../lib/firebase";
+import { isShownOnBoard } from "../lib/candidateVisibility";
 
 /* ---------------- ember field ---------------- */
 
@@ -194,57 +182,52 @@ export default function DisplayPage() {
     useState(0);
 
   /* =========================================================
-     LOAD CANDIDATES
-  ========================================================= */
+     LOAD CANDIDATES (live)
 
-  async function loadCandidates() {
-    /*
-     * Selecting every column (instead of naming show_in_visual)
-     * keeps the board working even if that column has not been
-     * added to the table yet.
-     */
-
-    const {
-      data,
-      error,
-    } = await supabase
-      .from("candidates")
-      .select("*")
-      .order("sort_order", {
-        ascending: true,
-      });
-
-    if (error) {
-      console.error(
-        "Failed to load candidates:",
-        error
-      );
-
-      setLoading(false);
-      return;
-    }
-
-    /*
-     * Candidates hidden from the board in the admin panel are
-     * dropped here, before the sets are worked out, so a hidden
-     * candidate never leaves an empty slot behind.
-     */
-
-    const shown = (data ?? []).filter(
-      (candidate) =>
-        isShownOnBoard(candidate)
-    );
-
-    setCandidates(shown);
-    setLoading(false);
-  }
-
-  /* =========================================================
-     INITIAL LOAD
+     onSnapshot both fetches the candidates and keeps them in
+     step afterwards, so this one subscription replaces the
+     separate fetch and realtime channel the board used to run.
   ========================================================= */
 
   useEffect(() => {
-    loadCandidates();
+    const candidatesQuery = query(
+      collection(db, CANDIDATES),
+      orderBy("sort_order", "asc")
+    );
+
+    const unsubscribe = onSnapshot(
+      candidatesQuery,
+      (snapshot) => {
+        const rows = snapshot.docs.map((entry) => ({
+          id: entry.id,
+          ...entry.data(),
+        }));
+
+        /*
+         * Candidates hidden from the board in the admin panel are
+         * dropped here, before the sets are worked out, so a hidden
+         * candidate never leaves an empty slot behind.
+         */
+
+        setCandidates(
+          rows.filter((candidate) =>
+            isShownOnBoard(candidate)
+          )
+        );
+
+        setLoading(false);
+      },
+      (error) => {
+        console.error(
+          "Failed to load candidates:",
+          error
+        );
+
+        setLoading(false);
+      }
+    );
+
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -274,41 +257,6 @@ export default function DisplayPage() {
       window.removeEventListener("interview-board-settings-updated", loadTheme);
     };
   }, [isPreviewEmbed]);
-
-  /* =========================================================
-     SUPABASE REALTIME
-  ========================================================= */
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("visual-board")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "candidates",
-        },
-        (payload) => {
-          console.log(
-            "Realtime candidate update:",
-            payload
-          );
-
-          loadCandidates();
-        }
-      )
-      .subscribe((status) => {
-        console.log(
-          "Realtime status:",
-          status
-        );
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   /* =========================================================
      BALANCED SET SIZES
@@ -552,7 +500,7 @@ export default function DisplayPage() {
 
        <h1
   className={`
-    ${poppins.className}
+    font-display-heavy
     my-3
     w-fit
     max-w-full
@@ -841,7 +789,7 @@ export default function DisplayPage() {
 
                     <AutoFitText
                       className={`
-                        ${magneton.className}
+                        font-magneton
 
                         text-center
                         leading-[1.08]
@@ -900,7 +848,7 @@ export default function DisplayPage() {
 
         <div
           className={`
-            ${styleFormal.className}
+            font-style-formal
             mt-[2vh]
             px-[0.08em]
             pt-[0.22em]

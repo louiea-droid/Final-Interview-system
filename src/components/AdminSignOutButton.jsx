@@ -1,18 +1,18 @@
-'use client';
-
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
+import { signOut } from 'firebase/auth';
 import { LogOut } from 'lucide-react';
 
+import { auth } from '../lib/firebase';
+
 export default function AdminSignOutButton() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
 
   async function handleSignOut() {
     setSigningOut(true);
-    await fetch('/api/admin/logout', { method: 'POST' });
-    router.push('/admin/login');
-    router.refresh();
+    await signOut(auth);
+    navigate('/admin/login', { replace: true });
   }
 
   return (

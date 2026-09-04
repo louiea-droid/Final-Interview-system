@@ -1,14 +1,18 @@
-'use client';
-
-import { FormEvent, Suspense, useState } from 'react';
+import { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 
-import { useToast } from '../../../components/ToastProvider';
+import { useToast } from '../components/ToastProvider';
+import { auth } from '../lib/firebase';
 
-function AdminLoginForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+/*
+ * Firebase Auth identifies admins by email address. The field is still
+ * labelled "username" so the sign-in screen reads the same as before.
+ */
+export default function AdminLoginPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const showToast = useToast();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -19,23 +23,24 @@ function AdminLoginForm() {
     event.preventDefault();
     setSubmitting(true);
 
-    const response = await fetch('/api/admin/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      showToast(body?.error ?? 'Incorrect username or password.');
+    try {
+      await signInWithEmailAndPassword(auth, username, password);
+    } catch {
+      // deliberately not saying which of the two was wrong
+      showToast('Incorrect username or password.');
       setSubmitting(false);
       return;
     }
 
     await new Promise((resolve) => window.setTimeout(resolve, 650));
-    const destination = searchParams.get('from') || '/admin';
-    router.replace(destination);
-    router.refresh();
+
+    // RequireAuth records where the admin was headed before being bounced here
+    const destination =
+      location.state?.from ??
+      new URLSearchParams(location.search).get('from') ??
+      '/admin';
+
+    navigate(destination, { replace: true });
   }
 
   return (
@@ -108,13 +113,5 @@ function AdminLoginForm() {
         </div>
       )}
     </div>
-  );
-}
-
-export default function AdminLoginPage() {
-  return (
-    <Suspense fallback={null}>
-      <AdminLoginForm />
-    </Suspense>
   );
 }

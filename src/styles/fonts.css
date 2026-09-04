@@ -1,0 +1,44 @@
+/*
+ * Replaces next/font/local. The two display faces ship with the app and are
+ * fingerprinted by the bundler, so they are referenced through the imported
+ * URLs rather than a bare path.
+ */
+@font-face {
+  font-family: 'Magneton';
+  src: url('../fonts/magneton.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'StyleFormal';
+  src: url('../fonts/StyleFormal.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+
+/*
+ * next/font exposed these as CSS variables that globals.css already uses;
+ * the families themselves now come from the Google Fonts link in index.html.
+ */
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Poppins', var(--font-sans);
+}
+
+/*
+ * next/font handed each face back as a generated class name; these are the
+ * hand-written equivalents the components now use.
+ */
+.font-display-heavy {
+  font-family: 'Poppins', var(--font-sans);
+  font-weight: 800;
+}
+
+.font-magneton {
+  font-family: 'Magneton', 'Brush Script MT', cursive;
+}
+
+.font-style-formal {
+  font-family: 'StyleFormal', 'Brush Script MT', cursive;
+}

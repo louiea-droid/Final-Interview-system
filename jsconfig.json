@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ES2020",
     "lib": ["dom", "dom.iterable", "esnext"],
     "module": "esnext",
     "moduleResolution": "bundler",
@@ -8,5 +8,5 @@
     "jsx": "preserve",
     "checkJs": false
   },
-  "exclude": ["node_modules", ".next"]
+  "exclude": ["node_modules", "dist"]
 }

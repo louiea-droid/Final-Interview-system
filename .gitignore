@@ -6,3 +6,7 @@ next-env.d.ts
 
 # local env
 .env*.local
+
+# build output
+dist/
+dist-test/
