@@ -621,19 +621,141 @@ export default function DisplayPage() {
           {/* LOADING */}
 
           {loading ? (
-            <div
-              className="
-                col-span-full
-                flex
-                min-h-[400px]
-                items-center
-                justify-center
-                bg-[#2e0505]
-                text-[#f0d689]
-              "
-            >
-              Loading candidates...
-            </div>
+            /*
+             * Skeleton frames instead of a "Loading..." line: same grid,
+             * same photo/name-bar proportions as a real card, so the board
+             * keeps its shape and nothing jumps when the data lands.
+             */
+            Array.from({ length: MAX_CANDIDATES_PER_SET }).map(
+              (_, index) => (
+                <div
+                  key={`skeleton-${index}`}
+                  style={{
+                    animationDelay: `${index * 0.12}s`,
+                  }}
+                  className="
+                    flex
+                    flex-col
+                    bg-[#2e0505]
+                    animate-[skeleton-in_.5s_ease-out_both]
+                  "
+                >
+
+                  {/* Photo placeholder */}
+
+                  <div
+                    className="
+                      relative
+                      aspect-[11/10]
+                      overflow-hidden
+
+                      bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]
+                    "
+                  >
+
+                    {/* breathing petal mark */}
+
+                    <div
+                      style={{
+                        animationDelay: `${index * 0.3}s`,
+                      }}
+                      className="
+                        absolute
+                        inset-0
+                        flex
+                        items-center
+                        justify-center
+                        animate-[pulse-glow_1.8s_ease-in-out_infinite]
+                      "
+                    >
+                      <img
+                        src="/visual/HILLC-Petals.png"
+                        alt=""
+                        aria-hidden="true"
+                        className="
+                          w-[38%]
+                          max-w-[110px]
+                          opacity-30
+                          drop-shadow-[0_2px_10px_rgba(0,0,0,.45)]
+                        "
+                      />
+                    </div>
+
+                    {/* gold sheen sweeping across */}
+
+                    <div
+                      style={{
+                        animationDelay: `${index * 0.18}s`,
+                      }}
+                      className="
+                        absolute
+                        inset-y-0
+                        -left-1/3
+                        w-1/3
+                        skew-x-12
+
+                        bg-[linear-gradient(to_right,transparent_0%,rgba(255,229,160,.16)_50%,transparent_100%)]
+
+                        animate-[shimmer_2.2s_ease-in-out_infinite]
+                        motion-reduce:hidden
+                      "
+                    />
+
+                  </div>
+
+                  {/* Name bar placeholder */}
+
+                  <div
+                    className="
+                      relative
+                      flex
+                      min-h-[clamp(38px,4vw,58px)]
+                      items-center
+                      justify-center
+                      overflow-hidden
+
+                      bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
+
+                      px-3
+                    "
+                  >
+
+                    <div
+                      style={{
+                        animationDelay: `${index * 0.3}s`,
+                        width: `${58 + ((index * 13) % 26)}%`,
+                      }}
+                      className="
+                        h-[38%]
+                        rounded-full
+                        bg-[#560606]/25
+                        animate-[pulse-glow_1.8s_ease-in-out_infinite]
+                      "
+                    />
+
+                    <div
+                      style={{
+                        animationDelay: `${index * 0.18}s`,
+                      }}
+                      className="
+                        absolute
+                        inset-y-0
+                        -left-1/3
+                        w-1/3
+                        skew-x-12
+
+                        bg-[linear-gradient(to_right,transparent_0%,rgba(255,255,255,.35)_50%,transparent_100%)]
+
+                        animate-[shimmer_2.2s_ease-in-out_infinite]
+                        motion-reduce:hidden
+                      "
+                    />
+
+                  </div>
+
+                </div>
+              )
+            )
 
           /* EMPTY */
 

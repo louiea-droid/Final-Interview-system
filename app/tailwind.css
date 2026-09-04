@@ -89,3 +89,38 @@
     transform: translateY(-45%);
   }
 }
+
+/* ---- loading skeleton for the visual board ---- */
+
+/* gold sheen sweeping left to right across a placeholder */
+@keyframes shimmer {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(220%);
+  }
+}
+
+/* soft breathing glow so the empty frames don't sit dead still */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* each skeleton frame eases in slightly after the one before it */
+@keyframes skeleton-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
