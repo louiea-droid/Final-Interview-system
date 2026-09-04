@@ -6,8 +6,7 @@ import { useToast } from '../components/ToastProvider';
 import { signIn } from '../lib/localAuth';
 
 /*
- * Signs in against the local development credentials - admin@local / admin
- * unless VITE_LOCAL_ADMIN_EMAIL and VITE_LOCAL_ADMIN_PASSWORD say otherwise.
+ * Signs in against the ADMIN_USERNAME / ADMIN_PASSWORD in .env.local.
  */
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -24,9 +23,13 @@ export default function AdminLoginPage() {
 
     try {
       await signIn(username, password);
-    } catch {
-      // deliberately not saying which of the two was wrong
-      showToast('Incorrect username or password.');
+    } catch (error) {
+      /*
+       * signIn already declines to say which of the two was wrong; its
+       * message is shown as-is so a missing configuration reads as such
+       * rather than as a rejected password.
+       */
+      showToast(error.message);
       setSubmitting(false);
       return;
     }
