@@ -118,12 +118,11 @@
 }
 
 /*
- * With the mark gone from this side, the form carries its own panel so it
- * reads as an object rather than fields floating on the background.
+ * No panel on this side: the fields stand directly on the background, so
+ * the heading and the controls are the only structure.
  */
 .login-card {
   position: relative;
-  isolation: isolate;
 
   display: flex;
   flex-direction: column;
@@ -131,58 +130,9 @@
   text-align: left;
 
   width: 100%;
-  max-width: 416px;
-
-  padding: 42px 38px 38px;
-
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-
-  background: linear-gradient(
-    180deg,
-    rgba(35, 21, 21, 0.9),
-    rgba(15, 10, 10, 0.94)
-  );
-
-  box-shadow:
-    0 34px 74px rgba(0, 0, 0, 0.6),
-    0 0 40px rgba(162, 29, 27, 0.1),
-    0 1px 0 rgba(255, 255, 255, 0.05) inset;
+  max-width: 396px;
 
   animation: login-card-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-/* a bright filament across the top edge, fading to the corners */
-.login-card::before {
-  content: '';
-  position: absolute;
-  top: -1px;
-  left: 16%;
-  right: 16%;
-  height: 1px;
-
-  background: linear-gradient(
-    to right,
-    transparent,
-    rgba(255, 255, 255, 0.38) 50%,
-    transparent
-  );
-}
-
-/* faint sheen over the upper half so the panel is not one flat fill */
-.login-card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  border-radius: inherit;
-
-  background: linear-gradient(
-    162deg,
-    rgba(255, 255, 255, 0.045) 0%,
-    transparent 44%
-  );
 }
 
 @keyframes login-card-in {
@@ -206,17 +156,12 @@
   color: #ffffff;
 }
 
-.login-divider {
-  width: 54px;
-  height: 3px;
-  margin: 16px 0 32px;
+.login-subtitle {
+  margin: 10px 0 30px;
 
-  border: 0;
-  border-radius: 3px;
-
-  background: linear-gradient(to right, #6f0c0b, #d2312c, #6f0c0b);
-
-  box-shadow: 0 0 14px rgba(210, 49, 44, 0.5);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #979797;
 }
 
 .login-card .form-group {
@@ -245,7 +190,7 @@
   height: 54px;
   padding-left: 50px;
 
-  border-radius: 12px;
+  border-radius: 0;
   border-color: rgba(255, 255, 255, 0.11);
 
   /* lifted off the panel so it reads as a control, not a hole */
@@ -301,10 +246,10 @@
 }
 
 .login-field .password-visibility-button {
-  right: 12px;
+  right: 10px;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 0;
   color: #7c7c7c;
 }
 
@@ -315,7 +260,6 @@
 
 .login-submit {
   position: relative;
-  overflow: hidden;
 
   width: 100%;
   height: 54px;
@@ -324,7 +268,7 @@
   justify-content: center;
 
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
+  border-radius: 0;
 
   background: linear-gradient(180deg, #b62220 0%, #8b1514 52%, #630d0d 100%);
 
@@ -344,38 +288,14 @@
     filter 0.18s ease;
 }
 
-/* light sweeping across the button on hover */
-.login-submit::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -60%;
-  width: 45%;
-
-  transform: skewX(-18deg);
-
-  background: linear-gradient(
-    to right,
-    transparent,
-    rgba(255, 255, 255, 0.22),
-    transparent
-  );
-
-  transition: left 0.55s ease;
-}
-
 .login-submit:hover:not(:disabled) {
-  filter: brightness(1.1);
+  filter: brightness(1.18);
   transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.2);
 
   box-shadow:
     0 16px 32px rgba(93, 12, 12, 0.6),
     0 1px 0 rgba(255, 255, 255, 0.24) inset;
-}
-
-.login-submit:hover:not(:disabled)::after {
-  left: 115%;
 }
 
 .login-submit:active:not(:disabled) {
@@ -457,8 +377,7 @@
 
   /* keeps its shape on a tablet instead of stretching the full width */
   .login-card {
-    max-width: 420px;
-    padding: 34px 26px 30px;
+    max-width: 400px;
   }
 }
 
@@ -467,10 +386,6 @@
   .login-card,
   .login-loading-screen {
     animation: none;
-  }
-
-  .login-submit::after {
-    display: none;
   }
 
   .login-loading-logo {

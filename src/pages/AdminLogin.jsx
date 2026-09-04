@@ -76,7 +76,9 @@ export default function AdminLoginPage() {
         <form className="login-card" onSubmit={handleSubmit}>
           <h1 className="login-title">ADMIN LOGIN</h1>
 
-          <hr className="login-divider" />
+          <p className="login-subtitle">
+            Admin login for the announcement display.
+          </p>
 
           <div className="form-group">
             <label className="form-label" htmlFor="admin-username">
