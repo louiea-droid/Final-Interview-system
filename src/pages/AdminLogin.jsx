@@ -50,10 +50,7 @@ export default function AdminLoginPage() {
       <form className="login-card" onSubmit={handleSubmit}>
         <img className="login-logo" src="/visual/HILLC-Petals.png" alt="Hyacinth logo" />
 
-        <h1 className="login-title">Admin Log in</h1>
-        <p className="login-subtitle">
-          Enter your username and password to continue.
-        </p>
+        <h1 className="login-title">ADMIN LOGIN</h1>
 
         <hr className="login-divider" />
 
@@ -64,7 +61,7 @@ export default function AdminLoginPage() {
 
           <div className="login-field">
             <span className="login-field-icon">
-              <User size={15} />
+              <User size={17} />
             </span>
 
             <input
@@ -87,7 +84,7 @@ export default function AdminLoginPage() {
 
           <div className="login-field password-input-wrapper">
             <span className="login-field-icon">
-              <Lock size={15} />
+              <Lock size={17} />
             </span>
 
             <input
@@ -106,7 +103,7 @@ export default function AdminLoginPage() {
               aria-label={passwordVisible ? 'Hide password' : 'Show password'}
               aria-pressed={passwordVisible}
             >
-              {passwordVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+              {passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}
             </button>
           </div>
         </div>

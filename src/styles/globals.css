@@ -3023,12 +3023,12 @@ svg {
   z-index: 1;
 
   width: 100%;
-  max-width: 384px;
+  max-width: 448px;
 
-  padding: 38px 34px 34px;
+  padding: 46px 44px 42px;
 
-  border-radius: 16px;
-  border: 1px solid rgba(201, 160, 60, 0.2);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
 
   background:
     linear-gradient(180deg, rgba(32, 17, 16, 0.96), rgba(14, 9, 9, 0.98));
@@ -3074,11 +3074,11 @@ svg {
 }
 
 .login-logo {
-  width: 68px;
-  height: 68px;
+  width: 78px;
+  height: 78px;
   object-fit: contain;
 
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 
   filter: drop-shadow(0 3px 14px rgba(162, 29, 27, 0.55));
 }
@@ -3087,43 +3087,24 @@ svg {
   margin: 0;
 
   font-family: var(--font-display), inherit;
-  font-size: 25px;
+  font-size: 27px;
   font-weight: 800;
-  letter-spacing: -0.01em;
-
-  /* the same brushed gold as the board headline */
-  background: linear-gradient(
-    to bottom,
-    #fff6d9 0%,
-    #f2d888 38%,
-    #c99a34 78%,
-    #a97f22 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.login-subtitle {
-  margin: 7px 0 0;
-
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  color: var(--text);
 }
 
 /* hairline rule separating the heading from the form */
 .login-divider {
   width: 100%;
   height: 1px;
-  margin: 22px 0 24px;
+  margin: 26px 0 28px;
 
   border: 0;
 
   background: linear-gradient(
     to right,
     transparent,
-    rgba(201, 160, 60, 0.28) 50%,
+    rgba(255, 255, 255, 0.12) 50%,
     transparent
   );
 }
@@ -3131,18 +3112,18 @@ svg {
 .login-card .form-group {
   width: 100%;
   text-align: left;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .login-card .form-label {
   display: block;
   margin-bottom: 7px;
 
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.13em;
   text-transform: uppercase;
-  color: rgba(242, 216, 136, 0.62);
+  color: #8d8d8d;
 }
 
 /* wraps an input together with its leading icon */
@@ -3151,14 +3132,14 @@ svg {
 }
 
 .login-field .form-input {
-  height: 46px;
-  padding-left: 40px;
+  height: 52px;
+  padding-left: 46px;
 
-  border-radius: 10px;
-  border-color: rgba(201, 160, 60, 0.16);
+  border-radius: 11px;
+  border-color: rgba(255, 255, 255, 0.09);
   background: rgba(6, 3, 3, 0.72);
 
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text);
 
   transition:
@@ -3168,71 +3149,69 @@ svg {
 }
 
 .login-field .form-input:hover {
-  border-color: rgba(201, 160, 60, 0.3);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .login-field .form-input:focus {
-  border-color: rgba(201, 160, 60, 0.52);
+  border-color: rgba(162, 29, 27, 0.85);
   background: rgba(10, 5, 5, 0.85);
 
-  box-shadow:
-    0 0 0 3px rgba(162, 29, 27, 0.18),
-    0 0 22px rgba(201, 160, 60, 0.08);
+  box-shadow: 0 0 0 3px rgba(162, 29, 27, 0.2);
 }
 
 .login-field-icon {
   position: absolute;
   top: 50%;
-  left: 13px;
+  left: 15px;
 
   display: flex;
   pointer-events: none;
   transform: translateY(-50%);
 
-  color: rgba(201, 160, 60, 0.5);
+  color: #6e6e6e;
 
   transition: color 0.18s ease;
 }
 
 .login-field:focus-within .login-field-icon {
-  color: rgba(242, 216, 136, 0.9);
+  color: var(--text-soft);
 }
 
 /* the reveal toggle sits inside the same rounded field */
 .login-field .password-visibility-button {
-  right: 10px;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  color: rgba(201, 160, 60, 0.5);
+  right: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: #6e6e6e;
 }
 
 .login-field .password-visibility-button:hover {
-  color: rgba(242, 216, 136, 0.95);
-  background: rgba(201, 160, 60, 0.1);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .login-submit {
   width: 100%;
-  height: 46px;
-  margin-top: 8px;
+  height: 52px;
+  margin-top: 12px;
 
   justify-content: center;
 
-  border: 1px solid rgba(201, 160, 60, 0.3);
-  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 11px;
 
   background: linear-gradient(180deg, #a21d1b 0%, #7d1211 55%, #5d0c0c 100%);
 
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #ffeec4;
+  color: #ffffff;
 
   box-shadow:
     0 10px 24px rgba(93, 12, 12, 0.45),
-    0 1px 0 rgba(255, 232, 180, 0.22) inset;
+    0 1px 0 rgba(255, 255, 255, 0.14) inset;
 
   transition:
     transform 0.14s ease,
@@ -3246,7 +3225,7 @@ svg {
 
   box-shadow:
     0 14px 30px rgba(93, 12, 12, 0.55),
-    0 1px 0 rgba(255, 232, 180, 0.3) inset;
+    0 1px 0 rgba(255, 255, 255, 0.2) inset;
 }
 
 .login-submit:active:not(:disabled) {
@@ -3272,10 +3251,10 @@ svg {
   justify-content: center;
   gap: 16px;
 
-  color: #f0d689;
+  color: var(--text-soft);
   background: rgba(8, 3, 4, 0.96);
 
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
