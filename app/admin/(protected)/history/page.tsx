@@ -12,6 +12,8 @@ import {
 
 import { supabase } from '../../../../lib/supabase';
 import { isShownOnBoard } from '../../../../lib/candidateVisibility';
+import CandidateDetailsModal from '../../../../components/CandidateDetailsModal';
+import PhotoCropModal from '../../../../components/PhotoCropModal';
 
 type Candidate = {
   id: string;
@@ -73,9 +75,15 @@ export default function CandidatesPage() {
   const [editForms, setEditForms] = useState<CandidateEdit[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
   const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
+  const [viewingCandidate, setViewingCandidate] = useState<Candidate | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addForm, setAddForm] = useState(emptyAddForm);
   const [processingPhoto, setProcessingPhoto] = useState(false);
+  const [cropTarget, setCropTarget] = useState<{
+    candidateId: string;
+    imageSrc: string;
+    isObjectUrl: boolean;
+  } | null>(null);
 
   async function loadCandidates() {
     const { data, error } = await supabase
@@ -242,6 +250,47 @@ export default function CandidatesPage() {
     } finally {
       setProcessingPhoto(false);
     }
+  }
+
+  function openPhotoCrop(editForm: CandidateEdit) {
+    // Crop whichever photo is actually current for this candidate: a
+    // newly-selected file takes priority over the one already saved.
+    if (editForm.photo_file) {
+      setCropTarget({
+        candidateId: editForm.id,
+        imageSrc: URL.createObjectURL(editForm.photo_file),
+        isObjectUrl: true,
+      });
+      return;
+    }
+
+    const savedPhotoUrl = candidates.find((candidate) => candidate.id === editForm.id)?.photo_url;
+    if (!savedPhotoUrl) return;
+
+    setCropTarget({
+      candidateId: editForm.id,
+      imageSrc: savedPhotoUrl,
+      isObjectUrl: false,
+    });
+  }
+
+  function closePhotoCrop() {
+    setCropTarget((current) => {
+      if (current?.isObjectUrl) URL.revokeObjectURL(current.imageSrc);
+      return null;
+    });
+  }
+
+  function handleCroppedPhoto(file: File) {
+    if (!cropTarget) return;
+
+    setEditForms((current) =>
+      current.map((candidate) =>
+        candidate.id === cropTarget.candidateId
+          ? { ...candidate, photo_file: file, no_photo: false }
+          : candidate
+      )
+    );
   }
 
   async function removeCandidate(id: string) {
@@ -498,22 +547,34 @@ export default function CandidatesPage() {
               <div className="candidate-directory">
                 {dateCandidates.map((candidate) => (
                   <article className="candidate-directory-row" key={candidate.id}>
-                    {candidate.photo_url ? (
-                      <img
-                        className="candidate-directory-avatar"
-                        src={candidate.photo_url}
-                        alt={candidate.name}
-                      />
-                    ) : (
-                      <div className="candidate-directory-avatar no-photo-avatar">
-                        <UserRound size={16} />
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      className="candidate-directory-avatar-button"
+                      onClick={() => setViewingCandidate(candidate)}
+                      aria-label={`View ${candidate.name}'s details`}
+                    >
+                      {candidate.photo_url ? (
+                        <img
+                          className="candidate-directory-avatar"
+                          src={candidate.photo_url}
+                          alt={candidate.name}
+                        />
+                      ) : (
+                        <div className="candidate-directory-avatar no-photo-avatar">
+                          <UserRound size={16} />
+                        </div>
+                      )}
+                    </button>
 
-                    <div className="candidate-directory-details">
+                    <button
+                      type="button"
+                      className="candidate-directory-details"
+                      onClick={() => setViewingCandidate(candidate)}
+                      aria-label={`View ${candidate.name}'s details`}
+                    >
                       <h3>{candidate.name}</h3>
                       <span>{candidate.position || 'No position'}</span>
-                    </div>
+                    </button>
 
                     <div className="candidate-directory-type">
                       <small>Date added</small>
@@ -583,10 +644,17 @@ export default function CandidatesPage() {
                   <div className="record-edit-photo">
                     <div className="record-edit-photo-preview">
                       {candidates.find((candidate) => candidate.id === editForm.id)?.photo_url && !editForm.no_photo ? (
-                        <img
-                          src={candidates.find((candidate) => candidate.id === editForm.id)?.photo_url ?? ''}
-                          alt="Current candidate"
-                        />
+                        <button
+                          type="button"
+                          className="record-edit-photo-preview-button"
+                          onClick={() => openPhotoCrop(editForm)}
+                          aria-label="Preview and crop candidate photo"
+                        >
+                          <img
+                            src={candidates.find((candidate) => candidate.id === editForm.id)?.photo_url ?? ''}
+                            alt="Current candidate"
+                          />
+                        </button>
                       ) : (
                         <UserRound size={18} />
                       )}
@@ -722,6 +790,22 @@ export default function CandidatesPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {viewingCandidate && (
+        <CandidateDetailsModal
+          candidate={viewingCandidate}
+          onClose={() => setViewingCandidate(null)}
+        />
+      )}
+
+      {cropTarget && (
+        <PhotoCropModal
+          imageSrc={cropTarget.imageSrc}
+          fileName={`candidate-${cropTarget.candidateId}.png`}
+          onSave={handleCroppedPhoto}
+          onClose={closePhotoCrop}
+        />
       )}
 
       {addModalOpen && (

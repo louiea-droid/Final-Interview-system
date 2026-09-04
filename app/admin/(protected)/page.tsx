@@ -17,6 +17,7 @@ import {
 import { supabase } from '../../../lib/supabase';
 import { formatCurrentDate, getEasternBatchStart } from '../../../lib/adminTime';
 import { isShownOnBoard } from '../../../lib/candidateVisibility';
+import CandidateDetailsModal from '../../../components/CandidateDetailsModal';
 
 type Candidate = {
   id: string;
@@ -51,6 +52,7 @@ export default function AdminPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [candidateToDelete, setCandidateToDelete] = useState<Candidate | null>(null);
+  const [viewingCandidate, setViewingCandidate] = useState<Candidate | null>(null);
   const [processingPhoto, setProcessingPhoto] = useState(false);
   const [draggingCandidateId, setDraggingCandidateId] = useState<string | null>(null);
   const batchStartKey = useRef(getEasternBatchStart().toISOString());
@@ -607,7 +609,12 @@ async function saveCandidate(e: FormEvent) {
 
                     <td>
 
-                     <div className="candidate-info">
+                     <button
+                       type="button"
+                       className="candidate-info"
+                       onClick={() => setViewingCandidate(candidate)}
+                       aria-label={`View ${candidate.name}'s details`}
+                     >
 
                        <span className="candidate-drag-handle" aria-label="Drag to reorder">
                          <GripVertical size={14} />
@@ -636,7 +643,7 @@ async function saveCandidate(e: FormEvent) {
 
                         </div>
 
-                      </div>
+                      </button>
 
                     </td>
 
@@ -918,6 +925,13 @@ async function saveCandidate(e: FormEvent) {
             </div>
           </div>
         </div>
+      )}
+
+      {viewingCandidate && (
+        <CandidateDetailsModal
+          candidate={viewingCandidate}
+          onClose={() => setViewingCandidate(null)}
+        />
       )}
 
     </>
