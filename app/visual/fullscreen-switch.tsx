@@ -13,7 +13,15 @@ import { useEffect } from 'react';
  */
 export default function FullscreenSwitch() {
   useEffect(() => {
+    // Phones don't get the tap-to-fullscreen behavior at all — it's meant
+    // for kiosk/TV displays, and on a phone a tap-anywhere fullscreen
+    // toggle just gets in the way. This also sidesteps iPhone Safari
+    // having no Fullscreen API for regular elements in the first place
+    // (document.documentElement.requestFullscreen is undefined there).
+    if (/Android|iPhone|iPod|Mobi/i.test(navigator.userAgent)) return;
+
     const enter = () => {
+      if (!document.documentElement.requestFullscreen) return;
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {});
       }
@@ -21,7 +29,7 @@ export default function FullscreenSwitch() {
 
     const toggle = () => {
       if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+        document.exitFullscreen?.().catch(() => {});
       } else {
         enter();
       }
