@@ -1668,7 +1668,7 @@ button {
 .confirmation-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: 40;
 
   display: flex;
   align-items: center;
@@ -2546,32 +2546,59 @@ svg {
   border-radius: 6px;
 }
 
-.group-edit-fields legend {
-  padding: 0 5px;
-  color: #cfcfcf;
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .record-edit-fieldset {
-  display: grid;
-  gap: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   min-width: 0;
   margin: 0;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid var(--border-light);
-  border-radius: 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .record-edit-fieldset + .record-edit-fieldset {
   margin-top: 10px;
 }
 
+.record-edit-fieldset-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.record-edit-fieldset-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-edit-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.record-edit-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-width: 0;
+}
+
 .record-edit-photo {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 4px;
 }
 
 .record-edit-photo-preview {
@@ -2706,6 +2733,10 @@ svg {
   .candidate-date-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .record-edit-field-row {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -3005,7 +3036,7 @@ svg {
 .admin-layout.light-mode .candidate-name,
 .admin-layout.light-mode .candidate-edit-popup h2,
 .admin-layout.light-mode .inline-group-editor > h3,
-.admin-layout.light-mode .group-edit-fields legend {
+.admin-layout.light-mode .record-edit-fieldset-name {
   color: #241616;
 }
 
@@ -3025,7 +3056,7 @@ svg {
 .admin-layout.light-mode .candidate-table td,
 .admin-layout.light-mode .candidate-directory-type strong,
 .admin-layout.light-mode .inline-group-editor > h3,
-.admin-layout.light-mode .group-edit-fields legend {
+.admin-layout.light-mode .record-edit-fieldset-name {
   color: #4d3737;
 }
 

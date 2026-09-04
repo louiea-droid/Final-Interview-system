@@ -12,6 +12,7 @@ import {
 
 import { supabase } from '../../../../lib/supabase';
 import { isShownOnBoard } from '../../../../lib/candidateVisibility';
+import { getStatusPillClass } from '../../../../lib/candidateStatus';
 import CandidateDetailsModal from '../../../../components/CandidateDetailsModal';
 import PhotoCropModal from '../../../../components/PhotoCropModal';
 
@@ -636,10 +637,18 @@ export default function CandidatesPage() {
 
             <div className="group-edit-fields">
               {editForms.map((editForm) => (
-                <fieldset className="record-edit-fieldset" key={editForm.id}>
-                  <legend>
-                    {candidates.find((candidate) => candidate.id === editForm.id)?.name ?? 'Candidate'}
-                  </legend>
+                <div
+                  className="record-edit-fieldset"
+                  role="group"
+                  aria-label={`Edit ${candidates.find((candidate) => candidate.id === editForm.id)?.name ?? 'candidate'}`}
+                  key={editForm.id}
+                >
+                  <div className="record-edit-fieldset-header">
+                    <span className="record-edit-fieldset-name">
+                      {candidates.find((candidate) => candidate.id === editForm.id)?.name ?? 'Candidate'}
+                    </span>
+                    <span className={getStatusPillClass(editForm.status)}>{editForm.status}</span>
+                  </div>
 
                   <div className="record-edit-photo">
                     <div className="record-edit-photo-preview">
@@ -695,52 +704,62 @@ export default function CandidatesPage() {
                     </div>
                   </div>
 
-                  <label className="form-label" htmlFor={`record-name-${editForm.id}`}>
-                    Candidate name
-                  </label>
-                  <input
-                    id={`record-name-${editForm.id}`}
-                    className="form-input"
-                    required
-                    value={editForm.name}
-                    onChange={(event) => updateEditForm(editForm.id, 'name', event.target.value)}
-                  />
+                  <div className="record-edit-field">
+                    <label className="form-label" htmlFor={`record-name-${editForm.id}`}>
+                      Candidate name
+                    </label>
+                    <input
+                      id={`record-name-${editForm.id}`}
+                      className="form-input"
+                      required
+                      value={editForm.name}
+                      onChange={(event) => updateEditForm(editForm.id, 'name', event.target.value)}
+                    />
+                  </div>
 
-                  <label className="form-label" htmlFor={`record-position-${editForm.id}`}>
-                    Position
-                  </label>
-                  <input
-                    id={`record-position-${editForm.id}`}
-                    className="form-input"
-                    value={editForm.position}
-                    onChange={(event) => updateEditForm(editForm.id, 'position', event.target.value)}
-                  />
+                  <div className="record-edit-field-row">
+                    <div className="record-edit-field">
+                      <label className="form-label" htmlFor={`record-position-${editForm.id}`}>
+                        Position
+                      </label>
+                      <input
+                        id={`record-position-${editForm.id}`}
+                        className="form-input"
+                        value={editForm.position}
+                        onChange={(event) => updateEditForm(editForm.id, 'position', event.target.value)}
+                      />
+                    </div>
 
-                  <label className="form-label" htmlFor={`record-date-${editForm.id}`}>
-                    Interview schedule
-                  </label>
-                  <input
-                    id={`record-date-${editForm.id}`}
-                    className="form-input"
-                    type="date"
-                    value={editForm.interview_date}
-                    onChange={(event) => updateEditForm(editForm.id, 'interview_date', event.target.value)}
-                  />
+                    <div className="record-edit-field">
+                      <label className="form-label" htmlFor={`record-status-${editForm.id}`}>
+                        Status
+                      </label>
+                      <select
+                        id={`record-status-${editForm.id}`}
+                        className="form-select"
+                        value={editForm.status}
+                        onChange={(event) => updateEditForm(editForm.id, 'status', event.target.value)}
+                      >
+                        {statuses.map((status) => (
+                          <option key={status}>{status}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
 
-                  <label className="form-label" htmlFor={`record-status-${editForm.id}`}>
-                    Status
-                  </label>
-                  <select
-                    id={`record-status-${editForm.id}`}
-                    className="form-select"
-                    value={editForm.status}
-                    onChange={(event) => updateEditForm(editForm.id, 'status', event.target.value)}
-                  >
-                    {statuses.map((status) => (
-                      <option key={status}>{status}</option>
-                    ))}
-                  </select>
-                </fieldset>
+                  <div className="record-edit-field">
+                    <label className="form-label" htmlFor={`record-date-${editForm.id}`}>
+                      Interview schedule
+                    </label>
+                    <input
+                      id={`record-date-${editForm.id}`}
+                      className="form-input"
+                      type="date"
+                      value={editForm.interview_date}
+                      onChange={(event) => updateEditForm(editForm.id, 'interview_date', event.target.value)}
+                    />
+                  </div>
+                </div>
               ))}
             </div>
 

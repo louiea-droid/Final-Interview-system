@@ -27,5 +27,6 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "typescript": "latest"
-  }
+  },
+  "browserslist": ["safari 14", "chrome 111", "edge 111", "firefox 111"]
 }

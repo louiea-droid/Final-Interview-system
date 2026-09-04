@@ -796,15 +796,16 @@ export default function DisplayPage() {
             ${styleFormal.className}
             mt-[2vh]
             px-[0.08em]
-            pb-[0.12em]
+            pt-[0.22em]
+            pb-[0.22em]
             text-center
             text-[clamp(24px,5vw,48px)]
-            leading-[1.12]
+            leading-[1.4]
             bg-[radial-gradient(ellipse_at_center,#fff5b8_0%,#f4ca5d_24%,#c68b22_45%,#e4b84d_65%,#ffe89a_84%,#fff3bc_100%)]
             bg-clip-text
             text-transparent
             drop-shadow-[0_2px_8px_rgba(244,194,74,.6)]
-        
+
           `}
         >
           Best of Luck!
