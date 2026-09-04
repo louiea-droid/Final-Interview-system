@@ -1,0 +1,424 @@
+/* =========================================
+   ADMIN LOGIN
+   ========================================= */
+
+.login-page {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 100%;
+  min-height: 100vh;
+  padding: 24px;
+
+  overflow: hidden;
+
+  background:
+    radial-gradient(
+      ellipse 34% 22% at 50% -10%,
+      rgba(162, 29, 27, 0.2),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 80% 60% at 50% 45%,
+      rgba(18, 5, 6, 0.7),
+      #050203 72%
+    ),
+    #050203;
+}
+
+/* a pool of warm light for the card to sit in */
+.login-page::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 760px;
+  height: 620px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+
+  background: radial-gradient(
+    ellipse at center,
+    rgba(162, 29, 27, 0.16),
+    transparent 62%
+  );
+}
+
+.login-card {
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+
+  width: 100%;
+  max-width: 452px;
+
+  padding: 44px 44px 40px;
+
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+
+  background: linear-gradient(
+    180deg,
+    rgba(41, 24, 23, 0.97),
+    rgba(17, 11, 11, 0.98)
+  );
+
+  box-shadow:
+    0 36px 80px rgba(0, 0, 0, 0.66),
+    0 0 44px rgba(162, 29, 27, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+
+  animation: login-card-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* a bright filament across the top edge, fading out to the corners */
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 14%;
+  right: 14%;
+  height: 1px;
+
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent
+  );
+}
+
+/* faint sheen over the upper half, so the panel is not one flat fill */
+.login-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    transparent 42%
+  );
+}
+
+@keyframes login-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* the mark sits in a lit badge rather than floating on the panel */
+.login-logo-badge {
+  position: relative;
+
+  display: grid;
+  place-items: center;
+
+  width: 96px;
+  height: 96px;
+  margin-bottom: 22px;
+
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+
+  background: radial-gradient(
+    circle at 50% 38%,
+    rgba(162, 29, 27, 0.42),
+    rgba(24, 12, 12, 0.9) 70%
+  );
+
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.45),
+    0 0 26px rgba(162, 29, 27, 0.22),
+    0 1px 0 rgba(255, 255, 255, 0.08) inset;
+}
+
+/* a soft ring blooming just outside the badge */
+.login-logo-badge::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  border: 1px solid rgba(162, 29, 27, 0.28);
+}
+
+.login-logo {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+}
+
+.login-title {
+  margin: 0;
+
+  font-family: var(--font-display), inherit;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  color: #ffffff;
+
+  text-shadow: 0 2px 18px rgba(162, 29, 27, 0.45);
+}
+
+/* short red rule under the heading, in place of a full-width divider */
+.login-divider {
+  width: 56px;
+  height: 3px;
+  margin: 16px 0 30px;
+
+  border: 0;
+  border-radius: 3px;
+
+  background: linear-gradient(to right, #6f0c0b, #d2312c, #6f0c0b);
+
+  box-shadow: 0 0 14px rgba(210, 49, 44, 0.5);
+}
+
+.login-card .form-group {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 18px;
+}
+
+.login-card .form-label {
+  display: block;
+  margin-bottom: 8px;
+
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #9b9b9b;
+}
+
+/* wraps an input together with its leading icon */
+.login-field {
+  position: relative;
+}
+
+.login-field .form-input {
+  height: 52px;
+  padding-left: 48px;
+
+  border-radius: 11px;
+  border-color: rgba(255, 255, 255, 0.11);
+
+  /* lifted off the panel so it reads as a control, not a hole */
+  background: rgba(255, 255, 255, 0.035);
+
+  font-size: 15px;
+  color: var(--text);
+
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.login-field .form-input:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.login-field .form-input:focus {
+  border-color: rgba(210, 49, 44, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+
+  box-shadow:
+    0 0 0 3px rgba(162, 29, 27, 0.22),
+    0 0 20px rgba(162, 29, 27, 0.14);
+}
+
+/* the icon gets its own gutter, divided from the text it labels */
+.login-field-icon {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+
+  pointer-events: none;
+
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  color: #7c7c7c;
+
+  transition: color 0.18s ease;
+}
+
+.login-field:focus-within .login-field-icon {
+  color: #ffffff;
+}
+
+.login-field .password-visibility-button {
+  right: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: #7c7c7c;
+}
+
+.login-field .password-visibility-button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.login-submit {
+  position: relative;
+  overflow: hidden;
+
+  width: 100%;
+  height: 52px;
+  margin-top: 14px;
+
+  justify-content: center;
+
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+
+  background: linear-gradient(180deg, #b62220 0%, #8b1514 52%, #630d0d 100%);
+
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: #ffffff;
+
+  box-shadow:
+    0 12px 26px rgba(93, 12, 12, 0.5),
+    0 1px 0 rgba(255, 255, 255, 0.17) inset;
+
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.18s ease,
+    filter 0.18s ease;
+}
+
+/* light sweeping across the button on hover */
+.login-submit::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -60%;
+  width: 45%;
+
+  transform: skewX(-18deg);
+
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(255, 255, 255, 0.22),
+    transparent
+  );
+
+  transition: left 0.55s ease;
+}
+
+.login-submit:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+
+  box-shadow:
+    0 16px 32px rgba(93, 12, 12, 0.6),
+    0 1px 0 rgba(255, 255, 255, 0.24) inset;
+}
+
+.login-submit:hover:not(:disabled)::after {
+  left: 115%;
+}
+
+.login-submit:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.96);
+}
+
+.login-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+/* full-screen cover while the sign-in settles */
+.login-loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+
+  color: var(--text-soft);
+  background: rgba(8, 3, 4, 0.96);
+
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+
+  animation: login-card-in 0.28s ease both;
+}
+
+.login-loading-logo {
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+
+  filter: drop-shadow(0 0 18px rgba(162, 29, 27, 0.6));
+  animation: login-logo-spin 0.9s linear infinite;
+}
+
+@keyframes login-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 520px) {
+  .login-card {
+    padding: 34px 24px 30px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-card,
+  .login-loading-screen {
+    animation: none;
+  }
+
+  .login-submit::after {
+    display: none;
+  }
+
+  .login-loading-logo {
+    animation-duration: 2.4s;
+  }
+}

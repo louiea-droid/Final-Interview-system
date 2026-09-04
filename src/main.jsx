@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import './styles/globals.css';
 import './styles/tailwind.css';
 import './styles/fonts.css';
+import './styles/login.css';
 
 import { ToastProvider } from './components/ToastProvider';
 import RequireAuth from './components/RequireAuth';

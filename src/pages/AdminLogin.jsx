@@ -48,7 +48,13 @@ export default function AdminLoginPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={handleSubmit}>
-        <img className="login-logo" src="/visual/HILLC-Petals.png" alt="Hyacinth logo" />
+        <div className="login-logo-badge">
+          <img
+            className="login-logo"
+            src="/visual/HILLC-Petals.png"
+            alt="Hyacinth logo"
+          />
+        </div>
 
         <h1 className="login-title">ADMIN LOGIN</h1>
 
