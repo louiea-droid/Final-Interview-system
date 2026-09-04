@@ -205,37 +205,6 @@ button {
   border-top: 1px solid rgba(255, 255, 255, 0.055);
 }
 
-.sidebar-profile {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 7px 10px;
-}
-
-.sidebar-profile-details {
-  min-width: 0;
-}
-
-.sidebar-profile-details strong,
-.sidebar-profile-details span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-profile-details strong {
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.sidebar-profile-details span {
-  margin-top: 2px;
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
 .mode-toggle {
   margin-left: auto;
 
@@ -310,16 +279,6 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.admin-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 10px;
-
-  margin-bottom: 12px;
 }
 
 .mobile-menu-button,
@@ -1810,13 +1769,6 @@ button {
     width: 100%;
     border: 0;
     background: rgba(0, 0, 0, 0.58);
-  }
-
-  .admin-topbar {
-    position: relative;
-    z-index: 25;
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .mobile-menu-button {
