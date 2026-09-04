@@ -47,77 +47,101 @@ export default function AdminLoginPage() {
 
   return (
     <div className="login-page">
-      <form className="login-card" onSubmit={handleSubmit}>
-        <div className="login-logo-badge">
+      {/* ---------------- left: what the system is for ---------------- */}
+
+      <aside className="login-hero" aria-hidden="true">
+        <video
+          className="login-hero-video"
+          src="/visual/bg.mp4"
+          autoPlay
+          muted
+          loop
+          playsInline
+        />
+
+        <div className="login-hero-veil" />
+
+        <div className="login-hero-content">
           <img
-            className="login-logo"
-            src="/visual/HILLC-Petals.png"
-            alt="Hyacinth logo"
+            className="login-hero-logo"
+            src="/visual/logo.png"
+            alt="Hyacinth Holdings"
           />
         </div>
+      </aside>
 
-        <h1 className="login-title">ADMIN LOGIN</h1>
+      {/* ---------------- right: the sign-in ---------------- */}
 
-        <hr className="login-divider" />
+      <main className="login-panel">
+        <form className="login-card" onSubmit={handleSubmit}>
+          <h1 className="login-title">ADMIN LOGIN</h1>
 
-        <div className="form-group">
-          <label className="form-label" htmlFor="admin-username">
-            Username
-          </label>
+          <hr className="login-divider" />
 
-          <div className="login-field">
-            <span className="login-field-icon">
-              <User size={17} />
-            </span>
+          <div className="form-group">
+            <label className="form-label" htmlFor="admin-username">
+              Username
+            </label>
 
-            <input
-              id="admin-username"
-              className="form-input"
-              type="text"
-              required
-              autoFocus
-              autoComplete="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-            />
+            <div className="login-field">
+              <span className="login-field-icon">
+                <User size={17} />
+              </span>
+
+              <input
+                id="admin-username"
+                className="form-input"
+                type="text"
+                required
+                autoFocus
+                autoComplete="username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+              />
+            </div>
           </div>
-        </div>
 
-        <div className="form-group">
-          <label className="form-label" htmlFor="admin-password">
-            Password
-          </label>
+          <div className="form-group">
+            <label className="form-label" htmlFor="admin-password">
+              Password
+            </label>
 
-          <div className="login-field password-input-wrapper">
-            <span className="login-field-icon">
-              <Lock size={17} />
-            </span>
+            <div className="login-field password-input-wrapper">
+              <span className="login-field-icon">
+                <Lock size={17} />
+              </span>
 
-            <input
-              id="admin-password"
-              className="form-input"
-              type={passwordVisible ? 'text' : 'password'}
-              required
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-            <button
-              type="button"
-              className="password-visibility-button"
-              onClick={() => setPasswordVisible((current) => !current)}
-              aria-label={passwordVisible ? 'Hide password' : 'Show password'}
-              aria-pressed={passwordVisible}
-            >
-              {passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}
-            </button>
+              <input
+                id="admin-password"
+                className="form-input"
+                type={passwordVisible ? 'text' : 'password'}
+                required
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+
+              <button
+                type="button"
+                className="password-visibility-button"
+                onClick={() => setPasswordVisible((current) => !current)}
+                aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+                aria-pressed={passwordVisible}
+              >
+                {passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
           </div>
-        </div>
 
-        <button type="submit" className="primary-button login-submit" disabled={submitting}>
-          {submitting ? 'Signing in...' : 'Sign In'}
-        </button>
-      </form>
+          <button
+            type="submit"
+            className="primary-button login-submit"
+            disabled={submitting}
+          >
+            {submitting ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
+      </main>
 
       {submitting && (
         <div className="login-loading-screen" role="status" aria-live="polite">

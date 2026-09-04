@@ -1,101 +1,175 @@
 /* =========================================
    ADMIN LOGIN
+
+   Split screen: the left panel says what the
+   system is for, the right one signs you in.
    ========================================= */
 
 .login-page {
   position: relative;
+
+  display: grid;
+  grid-template-columns: 1.08fr 1fr;
+
+  width: 100%;
+  min-height: 100vh;
+
+  background: #060304;
+}
+
+/* ---------------------------------------------- left: the announcement side */
+
+.login-hero {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 56px 48px;
+
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* the board's own ember footage, running behind everything */
+.login-hero-video {
+  position: absolute;
+  inset: 0;
+
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+
+  opacity: 0.6;
+}
+
+/* darkens the footage and gathers a warm glow behind the mark */
+.login-hero-veil {
+  position: absolute;
+  inset: 0;
+
+  background:
+    radial-gradient(
+      ellipse 58% 50% at 50% 50%,
+      rgba(162, 29, 27, 0.3),
+      transparent 72%
+    ),
+    linear-gradient(
+      100deg,
+      rgba(6, 3, 4, 0.6) 0%,
+      rgba(6, 3, 4, 0.62) 55%,
+      rgba(6, 3, 4, 0.9) 100%
+    );
+}
+
+.login-hero-content {
+  position: relative;
+  z-index: 1;
+
   display: flex;
   align-items: center;
   justify-content: center;
 
   width: 100%;
-  min-height: 100vh;
-  padding: 24px;
 
-  overflow: hidden;
+  animation: login-hero-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes login-hero-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.login-hero-logo {
+  width: 74%;
+  max-width: 420px;
+  height: auto;
+
+  filter: drop-shadow(0 6px 30px rgba(0, 0, 0, 0.7));
+}
+
+/* --------------------------------------------------- right: the sign-in side */
+
+.login-panel {
+  position: relative;
+  min-width: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 56px 48px;
 
   background:
     radial-gradient(
-      ellipse 34% 22% at 50% -10%,
-      rgba(162, 29, 27, 0.2),
+      ellipse 70% 46% at 50% 0%,
+      rgba(162, 29, 27, 0.15),
       transparent 72%
     ),
-    radial-gradient(
-      ellipse 80% 60% at 50% 45%,
-      rgba(18, 5, 6, 0.7),
-      #050203 72%
-    ),
-    #050203;
+    #0a0506;
 }
 
-/* a pool of warm light for the card to sit in */
-.login-page::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 760px;
-  height: 620px;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-
-  background: radial-gradient(
-    ellipse at center,
-    rgba(162, 29, 27, 0.16),
-    transparent 62%
-  );
-}
-
+/*
+ * With the mark gone from this side, the form carries its own panel so it
+ * reads as an object rather than fields floating on the background.
+ */
 .login-card {
   position: relative;
-  z-index: 1;
   isolation: isolate;
-
-  width: 100%;
-  max-width: 452px;
-
-  padding: 44px 44px 40px;
-
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-
-  background: linear-gradient(
-    180deg,
-    rgba(41, 24, 23, 0.97),
-    rgba(17, 11, 11, 0.98)
-  );
-
-  box-shadow:
-    0 36px 80px rgba(0, 0, 0, 0.66),
-    0 0 44px rgba(162, 29, 27, 0.12),
-    0 1px 0 rgba(255, 255, 255, 0.06) inset;
 
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: stretch;
+  text-align: left;
 
-  animation: login-card-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+  width: 100%;
+  max-width: 416px;
+
+  padding: 42px 38px 38px;
+
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  background: linear-gradient(
+    180deg,
+    rgba(35, 21, 21, 0.9),
+    rgba(15, 10, 10, 0.94)
+  );
+
+  box-shadow:
+    0 34px 74px rgba(0, 0, 0, 0.6),
+    0 0 40px rgba(162, 29, 27, 0.1),
+    0 1px 0 rgba(255, 255, 255, 0.05) inset;
+
+  animation: login-card-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* a bright filament across the top edge, fading out to the corners */
+/* a bright filament across the top edge, fading to the corners */
 .login-card::before {
   content: '';
   position: absolute;
   top: -1px;
-  left: 14%;
-  right: 14%;
+  left: 16%;
+  right: 16%;
   height: 1px;
 
   background: linear-gradient(
     to right,
     transparent,
-    rgba(255, 255, 255, 0.4) 50%,
+    rgba(255, 255, 255, 0.38) 50%,
     transparent
   );
 }
 
-/* faint sheen over the upper half, so the panel is not one flat fill */
+/* faint sheen over the upper half so the panel is not one flat fill */
 .login-card::after {
   content: '';
   position: absolute;
@@ -105,83 +179,37 @@
   border-radius: inherit;
 
   background: linear-gradient(
-    160deg,
-    rgba(255, 255, 255, 0.05) 0%,
-    transparent 42%
+    162deg,
+    rgba(255, 255, 255, 0.045) 0%,
+    transparent 44%
   );
 }
 
 @keyframes login-card-in {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.985);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
-}
-
-/* the mark sits in a lit badge rather than floating on the panel */
-.login-logo-badge {
-  position: relative;
-
-  display: grid;
-  place-items: center;
-
-  width: 96px;
-  height: 96px;
-  margin-bottom: 22px;
-
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-
-  background: radial-gradient(
-    circle at 50% 38%,
-    rgba(162, 29, 27, 0.42),
-    rgba(24, 12, 12, 0.9) 70%
-  );
-
-  box-shadow:
-    0 12px 30px rgba(0, 0, 0, 0.45),
-    0 0 26px rgba(162, 29, 27, 0.22),
-    0 1px 0 rgba(255, 255, 255, 0.08) inset;
-}
-
-/* a soft ring blooming just outside the badge */
-.login-logo-badge::before {
-  content: '';
-  position: absolute;
-  inset: -7px;
-  border-radius: 50%;
-  border: 1px solid rgba(162, 29, 27, 0.28);
-}
-
-.login-logo {
-  width: 54px;
-  height: 54px;
-  object-fit: contain;
-
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
 }
 
 .login-title {
   margin: 0;
 
   font-family: var(--font-display), inherit;
-  font-size: 26px;
+  font-size: 29px;
   font-weight: 800;
-  letter-spacing: 0.11em;
+  letter-spacing: 0.12em;
   color: #ffffff;
-
-  text-shadow: 0 2px 18px rgba(162, 29, 27, 0.45);
 }
 
-/* short red rule under the heading, in place of a full-width divider */
 .login-divider {
-  width: 56px;
+  width: 54px;
   height: 3px;
-  margin: 16px 0 30px;
+  margin: 16px 0 32px;
 
   border: 0;
   border-radius: 3px;
@@ -194,12 +222,12 @@
 .login-card .form-group {
   width: 100%;
   text-align: left;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .login-card .form-label {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 9px;
 
   font-size: 11px;
   font-weight: 700;
@@ -214,10 +242,10 @@
 }
 
 .login-field .form-input {
-  height: 52px;
-  padding-left: 48px;
+  height: 54px;
+  padding-left: 50px;
 
-  border-radius: 11px;
+  border-radius: 12px;
   border-color: rgba(255, 255, 255, 0.11);
 
   /* lifted off the panel so it reads as a control, not a hole */
@@ -258,7 +286,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
+  width: 44px;
 
   pointer-events: none;
 
@@ -274,8 +302,8 @@
 
 .login-field .password-visibility-button {
   right: 12px;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 8px;
   color: #7c7c7c;
 }
@@ -290,19 +318,19 @@
   overflow: hidden;
 
   width: 100%;
-  height: 52px;
-  margin-top: 14px;
+  height: 54px;
+  margin-top: 16px;
 
   justify-content: center;
 
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 11px;
+  border-radius: 12px;
 
   background: linear-gradient(180deg, #b62220 0%, #8b1514 52%, #630d0d 100%);
 
   font-size: 13.5px;
   font-weight: 700;
-  letter-spacing: 0.13em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #ffffff;
 
@@ -361,7 +389,8 @@
   box-shadow: none;
 }
 
-/* full-screen cover while the sign-in settles */
+/* ------------------------------------------------------------ signing in */
+
 .login-loading-screen {
   position: fixed;
   inset: 0;
@@ -374,7 +403,7 @@
   gap: 16px;
 
   color: var(--text-soft);
-  background: rgba(8, 3, 4, 0.96);
+  background: rgba(6, 3, 4, 0.96);
 
   font-size: 11px;
   font-weight: 700;
@@ -402,13 +431,39 @@
   }
 }
 
-@media (max-width: 520px) {
+/* ------------------------------------------------------------- responsive */
+
+/* narrower desktops: keep both sides, give the form a little less room */
+@media (max-width: 1180px) {
+  .login-hero,
+  .login-panel {
+    padding: 44px 34px;
+  }
+}
+
+/* tablets and phones: the sign-in is the job, so the hero steps aside */
+@media (max-width: 900px) {
+  .login-page {
+    grid-template-columns: 1fr;
+  }
+
+  .login-hero {
+    display: none;
+  }
+
+  .login-panel {
+    padding: 40px 24px;
+  }
+
+  /* keeps its shape on a tablet instead of stretching the full width */
   .login-card {
-    padding: 34px 24px 30px;
+    max-width: 420px;
+    padding: 34px 26px 30px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .login-hero-content,
   .login-card,
   .login-loading-screen {
     animation: none;
