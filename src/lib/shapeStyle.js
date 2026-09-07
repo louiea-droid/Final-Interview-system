@@ -24,16 +24,6 @@ export const FIT_OPTIONS = [
   { value: 'contain', label: 'Fit' },
 ];
 
-/*
- * Where a shape sits in the stack. 'back' puts it behind the candidate board
- * and everything else - the usual place for decoration - and 'front' paints
- * it over the candidates, but still under the headline and photos.
- */
-export const LAYER_OPTIONS = [
-  { value: 'back', label: 'Behind' },
-  { value: 'front', label: 'In front' },
-];
-
 const BASE_SHAPE = {
   kind: 'rectangle',
   x: 50,
@@ -42,7 +32,6 @@ const BASE_SHAPE = {
   height: 14,
   rotation: 0,
   radius: 6,
-  layer: 'back',
   stroke: { color: '#c9a03c', width: 0 },
   visible: true,
 };
@@ -107,7 +96,6 @@ export function normalizeShapes(shapes) {
         height: clamp(shape.height, 0.2, 200),
         rotation: clamp(shape.rotation ?? 0, -180, 180),
         radius: clamp(shape.radius ?? 0, 0, 999),
-        layer: shape.layer === 'front' ? 'front' : 'back',
         stroke: {
           color: shape.stroke?.color ?? BASE_SHAPE.stroke.color,
           width: clamp(shape.stroke?.width ?? 0, 0, 40),

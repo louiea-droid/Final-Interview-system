@@ -19,6 +19,17 @@
   }
 }
 
+/* candidate carousel scrolling upward; the list is rendered twice back to
+   back, so -50% always lands exactly on the seam for a seamless loop */
+@keyframes carousel-scroll {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+
 /* two stacked photos per frame; only opacity/scale animate */
 @keyframes swap-a {
   0%,

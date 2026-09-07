@@ -24,7 +24,7 @@ function createEmptyAddForm() {
     name: '',
     photo_file: null,
     no_photo: false,
-    position: '',
+    course: '',
     interview_date: '',
   };
 }
@@ -140,7 +140,7 @@ export default function CandidatesPage() {
       dateCandidates.map((candidate) => ({
         id: candidate.id,
         name: candidate.name,
-        position: candidate.position ?? '',
+        course: candidate.course ?? '',
         interview_date: candidate.interview_date ?? '',
         status: candidate.status,
         photo_file: null,
@@ -181,7 +181,7 @@ export default function CandidatesPage() {
         .update({
           name: candidate.name,
           photo_url: photoUrl,
-          position: candidate.position || null,
+          course: candidate.course || null,
           interview_date: candidate.interview_date || null,
           status: candidate.status,
         })
@@ -481,7 +481,7 @@ export default function CandidatesPage() {
       addForms.map((form, index) => ({
         name: form.name,
         photo_url: uploadResults[index].photoUrl,
-        position: form.position || null,
+        course: form.course || null,
         interview_date: form.interview_date || null,
         status: 'Scheduled',
         interview_type: 'Final Interview',
@@ -634,7 +634,7 @@ export default function CandidatesPage() {
                         aria-label={`View ${candidate.name}'s details`}
                       >
                         <h3>{candidate.name}</h3>
-                        <span>{candidate.position || 'No position'}</span>
+                        <span>{candidate.course || 'No course'}</span>
                       </button>
 
                       <div className="candidate-directory-edit">
@@ -792,14 +792,14 @@ export default function CandidatesPage() {
 
                   <div className="record-edit-field-row">
                     <div className="record-edit-field">
-                      <label className="form-label" htmlFor={`record-position-${editForm.id}`}>
-                        Position
+                      <label className="form-label" htmlFor={`record-course-${editForm.id}`}>
+                        Course
                       </label>
                       <input
-                        id={`record-position-${editForm.id}`}
+                        id={`record-course-${editForm.id}`}
                         className="form-input"
-                        value={editForm.position}
-                        onChange={(event) => updateEditForm(editForm.id, 'position', event.target.value)}
+                        value={editForm.course}
+                        onChange={(event) => updateEditForm(editForm.id, 'course', event.target.value)}
                       />
                     </div>
 
@@ -1086,15 +1086,15 @@ function AddCandidateCard({
         onChange={(event) => onChange(form.localId, 'name', event.target.value)}
       />
 
-      <label className="form-label" htmlFor={`add-position-${form.localId}`}>
-        Position
+      <label className="form-label" htmlFor={`add-course-${form.localId}`}>
+        Course
       </label>
       <input
-        id={`add-position-${form.localId}`}
+        id={`add-course-${form.localId}`}
         className="form-input"
-        placeholder="Position"
-        value={form.position}
-        onChange={(event) => onChange(form.localId, 'position', event.target.value)}
+        placeholder="Course"
+        value={form.course}
+        onChange={(event) => onChange(form.localId, 'course', event.target.value)}
       />
 
       <label className="form-label" htmlFor={`add-date-${form.localId}`}>

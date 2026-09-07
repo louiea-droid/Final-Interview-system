@@ -29,7 +29,7 @@ function pageTitle(pathname) {
   if (pathname.startsWith('/admin/visual-board')) return 'Visual Board';
   if (pathname.startsWith('/admin/records')) return 'Records';
   if (pathname.startsWith('/admin/history')) return 'Records';
-  return 'Final Interview Applicants';
+  return 'Dashboard';
 }
 
 export default function AdminProtectedLayout() {

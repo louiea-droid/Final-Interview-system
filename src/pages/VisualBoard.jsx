@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Megaphone } from "lucide-react";
 
 import FullscreenSwitch from "../components/FullscreenSwitch";
@@ -141,47 +141,12 @@ export default function DisplayPage() {
    * DISPLAY SETTINGS
    * =========================================================
    *
-   * At most 4 candidates are shown at one time, and the
-   * candidates are spread evenly over the sets so that a set
-   * is never left with one or two lonely boxes.
-   *
-   *   4 candidates  -> one set of 4
-   *   6 candidates  -> two sets of 3
-   *   8 candidates  -> two sets of 4
-   *   9 candidates  -> three sets of 3
-   *  12 candidates  -> three sets of 4
+   * The candidate carousel (right column) shows about 4 cards
+   * in its viewport at once, scrolling upward continuously
+   * rather than swapping discrete sets.
    */
 
-  const MAX_CANDIDATES_PER_SET = 4;
-
-  /*
-   * Board size relative to the full-width layout.
-   *
-   * 0.8 = 80%
-   */
-
-  const BOARD_SCALE = 0.8;
-
-  /*
-   * Width of a single candidate box at full size.
-   */
-
-  const FULL_BOX_WIDTH = 295;
-
-  const BOX_WIDTH = Math.round(
-    FULL_BOX_WIDTH * BOARD_SCALE
-  );
-
-  /*
-   * Time before switching to the next set.
-   *
-   * 8000 = 8 seconds
-   */
-
-  const SET_DURATION = 5000;
-
-  const [currentSet, setCurrentSet] =
-    useState(0);
+  const CAROUSEL_VISIBLE_COUNT = 4;
 
   /* =========================================================
      LOAD CANDIDATES (live)
@@ -305,143 +270,293 @@ export default function DisplayPage() {
     };
   }, [isPreviewEmbed]);
 
-  /* =========================================================
-     BALANCED SET SIZES
+  /*
+   * =========================================================
+   * CAROUSEL SCROLL SPEED
+   *
+   * A constant pace regardless of how many candidates there are -
+   * more candidates means a longer loop, not a faster one. The
+   * card list is rendered twice back to back and this animates it
+   * from 0 to -50%, i.e. exactly one copy's height, so it loops
+   * seamlessly no matter how tall a "copy" actually is.
+   * =========================================================
+   */
 
-     Use as few sets as possible (max 4 per set), then spread
-     the candidates evenly so no set is left with a single
-     lonely box.
+  const CAROUSEL_SECONDS_PER_CARD = 4;
 
-     e.g.  6 -> [3, 3]      8 -> [4, 4]
-          10 -> [4, 3, 3]  13 -> [4, 3, 3, 3]
-  ========================================================= */
-
-  const setSizes = useMemo(() => {
-    const count = candidates.length;
-
-    if (count === 0) {
-      return [];
-    }
-
-    const setCount = Math.ceil(
-      count / MAX_CANDIDATES_PER_SET
-    );
-
-    const base = Math.floor(
-      count / setCount
-    );
-
-    const remainder = count % setCount;
-
-    return Array.from(
-      { length: setCount },
-      (_, index) =>
-        base +
-        (index < remainder ? 1 : 0)
-    );
-  }, [candidates.length]);
-
-  /* =========================================================
-     TOTAL NUMBER OF SETS
-  ========================================================= */
-
-  const totalSets = Math.max(
-    1,
-    setSizes.length
+  const carouselDuration = Math.max(
+    16,
+    candidates.length * CAROUSEL_SECONDS_PER_CARD
   );
 
-  /* =========================================================
-     RESET SET WHEN CANDIDATES CHANGE
-  ========================================================= */
+  /* Everything paints in the admin editor's layerOrder; the candidate board
+     splits it into what sits behind it and what sits in front. The headline
+     is pulled out of that free-form flow entirely - it now has a fixed spot
+     above the candidate carousel, in the right column, rather than wherever
+     its own x/y happens to place it in the middle column. */
+  const headingText = layout.texts.find((item) => item.id === "heading");
+  const isFreeFormLayer = (entry) => !(entry.kind === "text" && entry.id === "heading");
 
-  useEffect(() => {
-    if (currentSet >= totalSets) {
-      setCurrentSet(0);
-    }
-  }, [currentSet, totalSets]);
+  const candidatesIndex = layout.layerOrder.findIndex((entry) => entry.kind === "candidates");
+  const layersBehind = layout.layerOrder.slice(0, candidatesIndex).filter(isFreeFormLayer);
+  const layersInFront = layout.layerOrder.slice(candidatesIndex + 1).filter(isFreeFormLayer);
 
-  /* =========================================================
-     AUTOMATIC SET TRANSITION
-  ========================================================= */
-
-  useEffect(() => {
-    /*
-     * Don't rotate if there is only one set.
-     */
-
-    if (totalSets <= 1) {
-      setCurrentSet(0);
-      return;
+  function renderLayer(entry) {
+    if (entry.kind === "shape") {
+      const shape = layout.shapes.find((item) => item.id === entry.id);
+      if (!shape || !isVisible(shape)) return null;
+      return <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)} />;
     }
 
-    const timer =
-      window.setInterval(() => {
-        setCurrentSet(
-          (previousSet) =>
-            (previousSet + 1) %
-            totalSets
-        );
-      }, SET_DURATION);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [totalSets]);
-
-  /* =========================================================
-     GET CURRENT SET
-  ========================================================= */
-
-  const visibleCandidates =
-    useMemo(() => {
-      if (setSizes.length === 0) {
-        return [];
-      }
-
-      const safeSet = Math.min(
-        currentSet,
-        setSizes.length - 1
+    if (entry.kind === "logo") {
+      if (!isVisible(layout.logo)) return null;
+      return (
+        <img
+          key="logo"
+          src={layout.logo.url || "/visual/logo.png"}
+          alt="Hyacinth"
+          style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
+          className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.55)]"
+        />
       );
+    }
 
-      const start = setSizes
-        .slice(0, safeSet)
-        .reduce(
-          (total, size) => total + size,
-          0
-        );
-
-      return candidates.slice(
-        start,
-        start + setSizes[safeSet]
+    if (entry.kind === "image") {
+      const image = layout.images.find((item) => item.id === entry.id);
+      if (!image || !isVisible(image)) return null;
+      return (
+        <img
+          key={image.id}
+          src={image.url}
+          alt=""
+          style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
+          className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
+        />
       );
-    }, [
-      candidates,
-      currentSet,
-      setSizes,
-    ]);
+    }
 
-  /* =========================================================
-     ADAPT NUMBER OF COLUMNS
+    if (entry.kind === "text") {
+      const text = layout.texts.find((item) => item.id === entry.id);
+      if (!text || !isVisible(text)) return null;
+      return (
+        <p
+          key={text.id}
+          style={{ ...positionStyle(text), ...resolveTextStyle(text) }}
+          className="absolute w-max"
+        >
+          {text.text}
+        </p>
+      );
+    }
 
-     One column per visible candidate, so a set of 3 renders
-     as 3 boxes side by side and a set of 4 as 4.
-  ========================================================= */
+    return null;
+  }
 
-  const columns =
-    visibleCandidates.length > 0
-      ? visibleCandidates.length
-      : MAX_CANDIDATES_PER_SET;
+  /* A soft gold line between columns - fading top and bottom with a gentle
+     glow, rather than a flat CSS border, at a column's own right edge. */
+  function renderColumnDivider() {
+    return (
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-0 right-0 w-px"
+        style={{
+          background: lightMode
+            ? "linear-gradient(to bottom, transparent 0%, rgba(201,160,60,.65) 18%, rgba(201,160,60,.85) 50%, rgba(201,160,60,.65) 82%, transparent 100%)"
+            : "linear-gradient(to bottom, transparent 0%, rgba(244,202,93,.55) 18%, rgba(244,202,93,.9) 50%, rgba(244,202,93,.55) 82%, transparent 100%)",
+          boxShadow: lightMode
+            ? "0 0 10px 1px rgba(201,160,60,.35)"
+            : "0 0 14px 1px rgba(244,202,93,.4)",
+        }}
+      />
+    );
+  }
 
-  const boardStyle = {
-    gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-    width: `min(${
-      BOARD_SCALE * 100
-    }%, ${columns * BOX_WIDTH}px)`,
-  };
+  /* Groups a flat list into rows of `size` - unlike a flat grid, a lone
+     last candidate is marked to span the full row instead of leaving an
+     empty cell next to it. */
+  function chunkIntoRows(list, size) {
+    const rows = [];
+    for (let i = 0; i < list.length; i += size) {
+      rows.push(list.slice(i, i + size));
+    }
+    return rows;
+  }
+
+  /* One candidate box for the carousel - photo on top, gold name bar below,
+     the board's original card look, just sized to sit two across.
+     `full` spans both grid columns, for a lone candidate closing out a row. */
+  function renderCandidateCard(candidate, key, full = false) {
+    return (
+      <div
+        key={key}
+        className={`flex flex-col overflow-hidden rounded-[3px] ${full ? "col-span-2" : ""} ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}`}
+      >
+        <div
+          className={`
+            relative
+            aspect-[11/10]
+            overflow-hidden
+            ${
+              lightMode
+                ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
+                : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
+            }
+          `}
+        >
+          {candidate.photo_url && (
+            <div
+              className="absolute inset-0 bg-cover bg-top bg-no-repeat"
+              style={{ backgroundImage: `url("${candidate.photo_url}")` }}
+            />
+          )}
+        </div>
+
+        <div
+          className={`
+            relative
+            flex
+            min-h-[clamp(48px,16cqh,84px)]
+            flex-col
+            items-center
+            justify-center
+            gap-0.5
+            px-2
+            py-1.5
+
+            bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
+          `}
+        >
+          <AutoFitText
+            minScale={0.55}
+            className="
+              font-magneton
+              text-center
+              leading-[1.1]
+              tracking-[0.01em]
+              text-[clamp(17px,4.6cqh,28px)]
+              text-[#560606]
+              [text-shadow:1px_1px_1px_rgba(63,39,10,.3)]
+            "
+          >
+            {candidate.name}
+          </AutoFitText>
+
+          {candidate.course && (
+            <span
+              className="
+                truncate
+                text-[clamp(8px,1.7cqh,13px)]
+                font-bold
+                uppercase
+                tracking-wider
+                text-[#2e1604]/80
+              "
+            >
+              {candidate.course}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* The right column's whole candidate board: a loading skeleton, an empty
+     message, or the looping carousel - two rows of two copies stacked so
+     translateY(-50%) always lands exactly on the seam between them. */
+  function renderCandidateCarousel() {
+    if (loading) {
+      return (
+        <div className="grid h-full w-full auto-rows-[minmax(0,1fr)] grid-cols-2 gap-[2cqw] overflow-hidden [container-type:size]">
+          {Array.from({ length: CAROUSEL_VISIBLE_COUNT }).map((_, index) => (
+            <div
+              key={`skeleton-${index}`}
+              style={{ animationDelay: `${index * 0.12}s` }}
+              className={`
+                flex
+                flex-col
+                overflow-hidden
+                animate-[skeleton-in_.5s_ease-out_both]
+                ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}
+              `}
+            >
+              <div
+                className={`
+                  relative
+                  aspect-[11/10]
+                  animate-[pulse-glow_1.8s_ease-in-out_infinite]
+                  ${
+                    lightMode
+                      ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
+                      : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
+                  }
+                `}
+                style={{ animationDelay: `${index * 0.3}s` }}
+              />
+              <div
+                className={`
+                  min-h-[clamp(48px,16cqh,84px)]
+                  bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
+                `}
+              />
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if (candidates.length === 0) {
+      return (
+        <div
+          className={`
+            flex
+            h-full
+            w-full
+            items-center
+            justify-center
+            px-2
+            text-center
+            text-[clamp(11px,1.3vw,14px)]
+            ${lightMode ? "text-[#7a5a12]" : "text-[#f0d689]"}
+          `}
+        >
+          No final interview applicants currently listed.
+        </div>
+      );
+    }
+
+    const rows = chunkIntoRows(candidates, 2);
+
+    return (
+      <div className="relative h-full w-full overflow-hidden [container-type:size]">
+        <div
+          className="absolute inset-x-0 top-0 flex flex-col gap-[2cqh]"
+          style={{ animation: `carousel-scroll ${carouselDuration}s linear infinite` }}
+        >
+          {[0, 1].map((copy) => (
+            <div key={copy} className="flex flex-col gap-[2cqh]">
+              {rows.map((row, rowIndex) => (
+                <div
+                  key={rowIndex}
+                  className="grid shrink-0 grid-cols-2 gap-[2cqw]"
+                >
+                  {row.map((candidate, cellIndex) =>
+                    renderCandidateCard(
+                      candidate,
+                      `${copy}-${rowIndex}-${cellIndex}`,
+                      row.length === 1
+                    )
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main
-      style={{ containerType: "size" }}
       className={`
         relative
         grid
@@ -484,70 +599,6 @@ export default function DisplayPage() {
 
       <FullscreenSwitch />
 
-      {/* =====================================================
-          FREE-FORM LAYOUT (logo, text, photos)
-
-          Positioned from admin-configured percentages so the
-          /admin/visual-board editor can move and show/hide each
-          of these independently of the centered candidate board
-          below.
-      ===================================================== */}
-
-      {/*
-        Shapes set to "Behind" sit here, above the background wash but under
-        the candidate board (z-[2]) - the layer decoration belongs on. The
-        rest are drawn with the free-form elements below.
-      */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1]">
-        {layout.shapes
-          .filter((shape) => isVisible(shape) && shape.layer !== 'front')
-          .map((shape) => (
-            <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)} />
-          ))}
-      </div>
-
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[3]">
-        {/* front shapes paint first here, so text and photos stay on top of them */}
-        {layout.shapes
-          .filter((shape) => isVisible(shape) && shape.layer === 'front')
-          .map((shape) => (
-            <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)} />
-          ))}
-
-        {isVisible(layout.logo) && (
-          <img
-            src={layout.logo.url || "/visual/logo.png"}
-            alt="Hyacinth"
-            style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
-            className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.55)]"
-          />
-        )}
-
-        {layout.images
-          .filter((image) => isVisible(image))
-          .map((image) => (
-            <img
-              key={image.id}
-              src={image.url}
-              alt=""
-              style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
-              className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
-            />
-          ))}
-
-        {layout.texts
-          .filter((text) => isVisible(text))
-          .map((text) => (
-            <p
-              key={text.id}
-              style={{ ...positionStyle(text), ...resolveTextStyle(text) }}
-              className="absolute w-max"
-            >
-              {text.text}
-            </p>
-          ))}
-      </div>
-
       {/* Falling embers */}
 
       {SPARK_LAYERS.map(
@@ -576,384 +627,134 @@ export default function DisplayPage() {
           ))
       )}
 
-      {/* Main content */}
+      {/* Main content: three columns - a small reserved column on the
+          left, the branding/announcements in the middle (biggest), and
+          the candidate carousel on the right. */}
 
       <div
         className="
-          relative
+          absolute
+          inset-0
           z-[2]
           grid
-          w-full
-          place-items-center
-          gap-[clamp(6px,1.4vh,18px)]
-          px-[clamp(10px,3vw,28px)]
-          py-[clamp(10px,2vh,28px)]
+          grid-cols-[0.8fr_2.2fr_1.3fr]
         "
       >
 
-        {/* =====================================================
-            ANNOUNCEMENTS
-        ===================================================== */}
+        {/* LEFT COLUMN - reserved */}
 
-        {announcements.length > 0 && (
-          <div
-            key={announcements[currentAnnouncement]?.id}
-            className={`
-              flex
-              max-w-[min(88vw,900px)]
-              items-center
-              justify-center
-              gap-2
-              rounded-[2px]
-              border
-              border-[#c9a03c]
-              px-[clamp(12px,2.4vw,22px)]
-              py-[clamp(6px,1.2vw,12px)]
-              text-center
-              animate-[fadeIn_.7s_ease-in-out]
-              ${lightMode ? "bg-[#fdf6f3] text-[#7a5a12]" : "bg-[#2e0505] text-[#f0d689]"}
-            `}
-          >
-            <Megaphone
-              size={18}
-              className="shrink-0"
-              aria-hidden="true"
-            />
+        <div className="relative">{renderColumnDivider()}</div>
 
-            <p
-              className="
-                text-[clamp(13px,1.6vw,18px)]
-                font-semibold
-                leading-snug
-              "
-            >
-              {announcements[currentAnnouncement]?.message}
-            </p>
-          </div>
-        )}
+        {/* MIDDLE COLUMN
 
-        {/* =====================================================
-            CANDIDATE BOARD
-        ===================================================== */}
+            The admin editor's free-form layout (logo, headline, closing
+            line, and anything else the admin adds) is scoped to this
+            column specifically - containerType: size makes it the cqw/cqh
+            basis for scaledPositionStyle, and overflow-hidden clips
+            anything that would otherwise spill into the side columns. */}
 
         <div
-          key={currentSet}
-          style={boardStyle}
-          className={`
-            grid
-            gap-px
-            border
-            border-[#c9a03c]
-            bg-[#c9a03c]
+          style={{ containerType: "size" }}
+          className="
+            relative
+            flex
+            flex-col
+            items-center
+            justify-center
+            gap-[clamp(6px,1.4vh,18px)]
             overflow-hidden
-            rounded-[2px]
-            animate-[fadeIn_.7s_ease-in-out]
-          `}
+            px-[clamp(10px,2vw,24px)]
+            py-[clamp(10px,2vh,28px)]
+          "
         >
 
-          {/* LOADING */}
+          {renderColumnDivider()}
 
-          {loading ? (
-            /*
-             * Skeleton frames instead of a "Loading..." line: same grid,
-             * same photo/name-bar proportions as a real card, so the board
-             * keeps its shape and nothing jumps when the data lands.
-             */
-            Array.from({ length: MAX_CANDIDATES_PER_SET }).map(
-              (_, index) => (
-                <div
-                  key={`skeleton-${index}`}
-                  style={{
-                    animationDelay: `${index * 0.12}s`,
-                  }}
-                  className={`
-                    flex
-                    flex-col
-                    ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}
-                    animate-[skeleton-in_.5s_ease-out_both]
-                  `}
-                >
+          {/*
+            Everything paints in the admin editor's layerOrder; whatever
+            sits before the candidate board in that order goes here, above
+            the background wash but under the announcement.
+          */}
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+            {layersBehind.map(renderLayer)}
+          </div>
 
-                  {/* Photo placeholder */}
+          {/* =====================================================
+              ANNOUNCEMENTS
+          ===================================================== */}
 
-                  <div
-                    className={`
-                      relative
-                      aspect-[11/10]
-                      overflow-hidden
-
-                      ${
-                        lightMode
-                          ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
-                          : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
-                      }
-                    `}
-                  >
-
-                    {/* breathing petal mark */}
-
-                    <div
-                      style={{
-                        animationDelay: `${index * 0.3}s`,
-                      }}
-                      className="
-                        absolute
-                        inset-0
-                        flex
-                        items-center
-                        justify-center
-                        animate-[pulse-glow_1.8s_ease-in-out_infinite]
-                      "
-                    >
-                      <img
-                        src="/visual/HILLC-Petals.png"
-                        alt=""
-                        aria-hidden="true"
-                        className="
-                          w-[38%]
-                          max-w-[110px]
-                          opacity-30
-                          drop-shadow-[0_2px_10px_rgba(0,0,0,.45)]
-                        "
-                      />
-                    </div>
-
-                    {/* gold sheen sweeping across */}
-
-                    <div
-                      style={{
-                        animationDelay: `${index * 0.18}s`,
-                      }}
-                      className="
-                        absolute
-                        inset-y-0
-                        -left-1/3
-                        w-1/3
-                        skew-x-12
-
-                        bg-[linear-gradient(to_right,transparent_0%,rgba(255,229,160,.16)_50%,transparent_100%)]
-
-                        animate-[shimmer_2.2s_ease-in-out_infinite]
-                        motion-reduce:hidden
-                      "
-                    />
-
-                  </div>
-
-                  {/* Name bar placeholder */}
-
-                  <div
-                    className="
-                      relative
-                      flex
-                      min-h-[clamp(38px,4vw,58px)]
-                      items-center
-                      justify-center
-                      overflow-hidden
-
-                      bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
-
-                      px-3
-                    "
-                  >
-
-                    <div
-                      style={{
-                        animationDelay: `${index * 0.3}s`,
-                        width: `${58 + ((index * 13) % 26)}%`,
-                      }}
-                      className="
-                        h-[38%]
-                        rounded-full
-                        bg-[#560606]/25
-                        animate-[pulse-glow_1.8s_ease-in-out_infinite]
-                      "
-                    />
-
-                    <div
-                      style={{
-                        animationDelay: `${index * 0.18}s`,
-                      }}
-                      className="
-                        absolute
-                        inset-y-0
-                        -left-1/3
-                        w-1/3
-                        skew-x-12
-
-                        bg-[linear-gradient(to_right,transparent_0%,rgba(255,255,255,.35)_50%,transparent_100%)]
-
-                        animate-[shimmer_2.2s_ease-in-out_infinite]
-                        motion-reduce:hidden
-                      "
-                    />
-
-                  </div>
-
-                </div>
-              )
-            )
-
-          /* EMPTY */
-
-          ) : visibleCandidates.length === 0 ? (
+          {announcements.length > 0 && (
             <div
+              key={announcements[currentAnnouncement]?.id}
               className={`
-                col-span-full
                 flex
-                min-h-[400px]
+                max-w-full
                 items-center
                 justify-center
+                gap-2
+                rounded-[2px]
+                border
+                border-[#c9a03c]
+                px-[clamp(12px,2.4vw,22px)]
+                py-[clamp(6px,1.2vw,12px)]
                 text-center
-                ${
-                  lightMode
-                    ? "bg-[#fdf6f3] text-[#7a5a12]"
-                    : "bg-[#2e0505] text-[#f0d689]"
-                }
+                animate-[fadeIn_.7s_ease-in-out]
+                ${lightMode ? "bg-[#fdf6f3] text-[#7a5a12]" : "bg-[#2e0505] text-[#f0d689]"}
               `}
             >
-              No final interview applicants
-              currently listed.
+              <Megaphone
+                size={18}
+                className="shrink-0"
+                aria-hidden="true"
+              />
+
+              <p
+                className="
+                  text-[clamp(13px,1.6vw,18px)]
+                  font-semibold
+                  leading-snug
+                "
+              >
+                {announcements[currentAnnouncement]?.message}
+              </p>
             </div>
-
-          /* CURRENT SET */
-
-          ) : (
-            visibleCandidates.map(
-              (candidate) => (
-                <div
-                  key={candidate.id}
-                  className={`
-                    flex
-                    flex-col
-                    ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}
-                  `}
-                >
-
-                  {/* Photo */}
-
-                  <div
-                    className={`
-                      relative
-                      aspect-[11/10]
-                      overflow-hidden
-
-                      ${
-                        lightMode
-                          ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
-                          : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
-                      }
-                    `}
-                  >
-
-                    {candidate.photo_url ? (
-                      <div
-                        className="
-                          absolute
-                          inset-0
-                          bg-cover
-                          bg-top
-                          bg-no-repeat
-                        "
-                        style={{
-                          backgroundImage:
-                            `url("${candidate.photo_url}")`,
-                        }}
-                      />
-                    ) : (
-                      <div
-                        className="
-                          absolute
-                          inset-0
-                          flex
-                          items-center
-                          justify-center
-                          text-sm
-                          uppercase
-                          tracking-widest
-                          text-white/40
-                        "
-                      >
-                        {/* No Photo */}
-                      </div>
-                    )}
-
-                  </div>
-
-                  {/* Name */}
-
-                  <div
-                    className="
-                      relative
-                      flex
-                      min-h-[clamp(38px,4vw,58px)]
-                      flex-col
-                      items-center
-                      justify-center
-
-                      bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
-
-                      px-2
-                      py-1
-                    "
-                  >
-
-                    <AutoFitText
-                      className={`
-                        font-magneton
-
-                        text-center
-                        leading-[1.08]
-                        tracking-[0.01em]
-
-                        text-[clamp(16.8px,2.1vw,29.4px)]
-
-                        text-[#560606]
-
-                        [text-shadow:1px_1px_1px_rgba(63,39,10,.3)]
-                      `}
-                    >
-                      {candidate.name}
-                    </AutoFitText>
-
-                    {candidate.position && (
-                      <span
-                        className="
-                          mt-1
-                          text-[clamp(8px,0.7vw,12px)]
-                          font-bold
-                          uppercase
-                          tracking-wider
-                          text-[#2e1604]/80
-                        "
-                      >
-
-                      </span>
-                    )}
-
-                  </div>
-
-                </div>
-              )
-            )
           )}
+
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+            {layersInFront.map(renderLayer)}
+          </div>
 
         </div>
 
-        {/* Set indicator */}
+        {/* =====================================================
+            RIGHT COLUMN - HEADLINE + CANDIDATE CAROUSEL
+        ===================================================== */}
 
-        {totalSets > 1 && (
-          <div
-            className="
-              text-[11px]
-              uppercase
-              tracking-[0.18em]
-              text-[#f0d689]/50
-            "
-          >
+        <div
+          style={{ containerType: "size" }}
+          className="
+            relative
+            flex
+            h-full
+            flex-col
+            items-center
+            gap-[clamp(6px,1.2vh,14px)]
+            overflow-hidden
+            px-[clamp(8px,1.4vw,20px)]
+            py-[clamp(10px,2vh,24px)]
+          "
+        >
+          {headingText && isVisible(headingText) && (
+            <p
+              className="w-full shrink-0 text-center"
+              style={resolveTextStyle(headingText)}
+            >
+              {headingText.text}
+            </p>
+          )}
 
-          </div>
-        )}
+          <div className="relative min-h-0 w-full flex-1">{renderCandidateCarousel()}</div>
+        </div>
 
       </div>
     </main>

@@ -29,10 +29,11 @@ import { normalizeShapes } from './shapeStyle';
 export const LAYOUT_KEY = 'interview-board-layout';
 export const DRAFT_KEY = 'interview-board-layout:draft';
 export const LAYOUT_EVENT = 'interview-board-layout-updated';
+export const TEMPLATES_KEY = 'interview-board-templates';
 
 export const DEFAULT_LAYOUT = {
   logo: { visible: true, url: null, x: 50, y: 12, scale: 1 },
-  // { id, text, x, y, fontSize, visible, style }
+  // { id, text, x, y, fontSize, visible, style, locked?, groupId? }
   texts: [
     {
       id: 'heading',
@@ -53,8 +54,20 @@ export const DEFAULT_LAYOUT = {
       style: DEFAULT_CLOSING_STYLE,
     },
   ],
-  images: [], // { id, url, x, y, scale, visible }
-  shapes: [], // { id, kind, x, y, width, height, rotation, radius, layer, fill, stroke, visible }
+  images: [], // { id, url, x, y, scale, visible, locked?, groupId? }
+  shapes: [], // { id, kind, x, y, width, height, rotation, radius, layer, fill, stroke, visible, locked?, groupId? }
+  /*
+   * Paint order, back to front, across every kind at once - the layers
+   * panel lists it in reverse (front first) and reorders it directly. The
+   * logo and the candidate board are always present; every other entry
+   * names a real element by (kind, id).
+   */
+  layerOrder: [
+    { kind: 'logo', id: null },
+    { kind: 'candidates', id: null },
+    { kind: 'text', id: 'heading' },
+    { kind: 'text', id: 'closing' },
+  ],
 };
 
 function clamp(value, min, max) {
@@ -74,6 +87,43 @@ function normalizeText(text, base = DEFAULT_EXTRA_TEXT_STYLE, baseSize = DEFAULT
     visible: text.visible !== false,
     style: normalizeTextStyle(text.style, base),
   };
+}
+
+function layerKey(entry) {
+  return `${entry.kind}:${entry.id ?? ''}`;
+}
+
+/*
+ * Rebuilds the paint order against the elements that actually exist: drops
+ * any entry naming something that was deleted, then appends the logo, the
+ * candidate board, and any element (old data, or one added after the saved
+ * order) that isn't in it yet - new things paint on top, which is where
+ * they'd have landed had layerOrder always existed.
+ */
+function normalizeLayerOrder(saved, layout) {
+  const real = [
+    { kind: 'logo', id: null },
+    { kind: 'candidates', id: null },
+    ...layout.texts.map((item) => ({ kind: 'text', id: item.id })),
+    ...layout.images.map((item) => ({ kind: 'image', id: item.id })),
+    ...layout.shapes.map((item) => ({ kind: 'shape', id: item.id })),
+  ];
+  const realKeys = new Set(real.map(layerKey));
+
+  const ordered = Array.isArray(saved)
+    ? saved.filter((entry) => entry && realKeys.has(layerKey(entry)))
+    : [];
+
+  const seen = new Set(ordered.map(layerKey));
+
+  for (const entry of real) {
+    if (!seen.has(layerKey(entry))) {
+      ordered.push(entry);
+      seen.add(layerKey(entry));
+    }
+  }
+
+  return ordered;
 }
 
 function normalizeLayout(parsed) {
@@ -113,12 +163,16 @@ function normalizeLayout(parsed) {
   // an admin who removed every text keeps an empty board, rather than the defaults
   const hasTextData = Boolean(parsed.heading || parsed.closing || Array.isArray(parsed.texts));
 
-  return {
+  const layout = {
     logo: { ...DEFAULT_LAYOUT.logo, ...(parsed.logo ?? {}) },
     texts: hasTextData ? texts : DEFAULT_LAYOUT.texts,
     images: Array.isArray(parsed.images) ? parsed.images : [],
     shapes: normalizeShapes(parsed.shapes),
   };
+
+  layout.layerOrder = normalizeLayerOrder(parsed.layerOrder, layout);
+
+  return layout;
 }
 
 function readLayout(key) {
@@ -178,4 +232,58 @@ export function saveBoardLayout(layout) {
 export function publishBoardLayout(layout) {
   saveDraftLayout(layout);
   return saveBoardLayout(layout);
+}
+
+/*
+ * Named snapshots of a layout, saved on the side so an admin can come back
+ * to a look they liked without it living on the live board or the draft -
+ * saving one doesn't touch either, and applying one only replaces the draft.
+ */
+
+function readTemplates() {
+  try {
+    const raw = window.localStorage.getItem(TEMPLATES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeTemplates(templates) {
+  try {
+    window.localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
+    return true;
+  } catch (error) {
+    console.warn('Could not save templates:', error);
+    return false;
+  }
+}
+
+/** Every saved template, newest first. */
+export function loadTemplates() {
+  return readTemplates();
+}
+
+/** Saves `layout` as a new named template; returns it. */
+export function saveTemplate(name, layout) {
+  const template = {
+    id: crypto.randomUUID(),
+    name: name.trim() || 'Untitled template',
+    savedAt: new Date().toISOString(),
+    layout,
+  };
+
+  writeTemplates([template, ...readTemplates()]);
+  return template;
+}
+
+/** The normalized layout of a saved template, or null if it's gone. */
+export function applyTemplate(id) {
+  const template = readTemplates().find((item) => item.id === id);
+  return template ? normalizeLayout(template.layout) : null;
+}
+
+export function deleteTemplate(id) {
+  writeTemplates(readTemplates().filter((template) => template.id !== id));
 }

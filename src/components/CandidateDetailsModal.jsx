@@ -99,9 +99,9 @@ export default function CandidateDetailsModal({
 
         <div className="candidate-details-grid">
           <div className="candidate-details-field">
-            <span className="candidate-details-label">Position</span>
+            <span className="candidate-details-label">Course</span>
             <span className="candidate-details-value">
-              {candidate.position || 'Not specified'}
+              {candidate.course || 'Not specified'}
             </span>
           </div>
 

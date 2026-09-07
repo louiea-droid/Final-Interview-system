@@ -412,29 +412,31 @@ button {
 .metric-grid {
   display: grid;
 
-  grid-template-columns: 2.6fr 2.35fr;
+  grid-template-columns: repeat(4, 1fr);
 
   gap: 9px;
 
-  margin-bottom: 10px;
+  margin-bottom: 9px;
 }
 
-.metric-group {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
+@media (max-width: 1180px) {
+  .metric-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
-.metric-group-top {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
+@media (max-width: 620px) {
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .metric-card--chart {
-  flex: 1;
-  min-height: 0;
   justify-content: flex-start;
+}
+
+.metric-card--schedule {
+  margin-bottom: 9px;
 }
 
 .metric-card {
@@ -548,12 +550,12 @@ button {
   flex-direction: column;
 
   /*
-   * The embedded /visual page needs roughly 345-355px of height
-   * at this card's typical width before its own content (logo,
-   * title, candidate row, "Best of Luck!") stops clipping — this
-   * min-height keeps a safety margin above that measured need.
+   * The embedded page sizes itself in container-query units against its own
+   * box (containerType: size, h-dvh), so it scales cleanly at any height
+   * here rather than clipping - this just keeps the card in a metric-card's
+   * usual proportions.
    */
-  min-height: 410px;
+  min-height: 160px;
 
   border-radius: 9px;
 
@@ -586,7 +588,7 @@ button {
   justify-content: space-between;
   gap: 8px;
 
-  padding: 14px 14px 0;
+  padding: 10px 12px 0;
 }
 
 .visual-preview-title {
@@ -658,7 +660,7 @@ button {
   flex: 1;
   min-height: 0;
 
-  margin: 10px 14px 14px;
+  margin: 8px 12px 12px;
 
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1400,7 +1402,7 @@ button {
   transition: color 0.15s ease;
 }
 
-.candidate-position {
+.candidate-course {
   margin-top: 3px;
 
   color: #707070;
@@ -3356,7 +3358,7 @@ svg {
 
 .admin-layout.light-mode .photo-upload-subtitle,
 .admin-layout.light-mode .candidate-table th,
-.admin-layout.light-mode .candidate-position,
+.admin-layout.light-mode .candidate-course,
 .admin-layout.light-mode .candidate-directory-type small {
   color: #806f6f;
 }
@@ -3477,6 +3479,142 @@ svg {
 
 .vb-unpublished {
   color: #f4ca5d;
+}
+
+/* ---------------- toolbar ---------------- */
+
+.vb-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  row-gap: 6px;
+
+  padding: 8px 18px;
+
+  border-top: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
+
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.vb-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.vb-toolbar-divider {
+  width: 1px;
+  height: 20px;
+  flex: 0 0 auto;
+  background: var(--border-light);
+}
+
+.vb-toolbar-spacer {
+  flex: 1;
+}
+
+.vb-toolbar-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  height: 28px;
+  padding: 0 9px;
+
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+
+  color: #a4a4a4;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.vb-toolbar-button span {
+  white-space: nowrap;
+}
+
+.vb-toolbar-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.vb-toolbar-button.active {
+  background: rgba(212, 93, 89, 0.16);
+  color: var(--red-status);
+}
+
+.vb-toolbar-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.vb-toolbar-zoom {
+  width: auto;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ---------------- templates ---------------- */
+
+.vb-template-popup {
+  width: min(100%, 440px);
+}
+
+.vb-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.vb-template-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  padding: 9px 11px;
+
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+}
+
+.vb-template-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vb-template-row-info strong {
+  color: #eeeeee;
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vb-template-row-info span {
+  color: #8b8b8b;
+  font-size: 11px;
+}
+
+.vb-template-row-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ---------------- elements column: rail + panel ---------------- */
@@ -3659,6 +3797,94 @@ svg {
   color: #d5d5d5;
 }
 
+/* ---------------- layers panel ---------------- */
+
+.vb-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+
+  border-radius: 7px;
+}
+
+.vb-layer-row.active {
+  background: rgba(212, 93, 89, 0.16);
+}
+
+.vb-layer-row.active .vb-layer-name {
+  color: var(--red-status);
+}
+
+.vb-layer-icon-button {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+
+  width: 22px;
+  height: 26px;
+
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+
+  color: #8b8b8b;
+  cursor: pointer;
+}
+
+.vb-layer-icon-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: #d5d5d5;
+}
+
+.vb-layer-icon-button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.vb-layer-name {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+
+  height: 26px;
+  padding: 0 4px;
+
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+
+  color: #d5d5d5;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+
+  cursor: pointer;
+}
+
+.vb-layer-name span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vb-layer-name:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.vb-layer-move {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+}
+
+.vb-layer-move .vb-layer-icon-button {
+  width: 18px;
+  height: 13px;
+}
+
 .vb-shape-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3699,9 +3925,28 @@ svg {
   min-width: 0;
 }
 
+/* Centres the canvas when zoom shrinks it narrower than the column, and
+   becomes the fullscreen element when the toolbar's Fullscreen is toggled. */
+.vb-canvas-stage {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.vb-canvas-stage:fullscreen {
+  align-items: center;
+  width: 100vw;
+  height: 100vh;
+  padding: 32px;
+  background: #0b0102;
+}
+
 .vb-canvas {
   position: relative;
   container-type: size;
+
+  display: grid;
+  grid-template-columns: 0.8fr 2.2fr 1.3fr;
 
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -3711,6 +3956,91 @@ svg {
   border: 1px solid var(--border-light);
 
   background: radial-gradient(ellipse at 50% 20%, #2a0606 0%, #12010a 55%, #0b0102 100%);
+
+  transition: width 0.15s ease;
+}
+
+/*
+ * Mirrors the live board's three columns - the fractions here must match
+ * VisualBoard.jsx's own grid-cols-[0.8fr_2.2fr_1.3fr] exactly, since that
+ * file is never imported from here (and isn't touched by this admin page).
+ */
+.vb-canvas-col-left {
+  position: relative;
+}
+
+.vb-canvas-col-middle {
+  position: relative;
+  container-type: size;
+  overflow: hidden;
+}
+
+.vb-canvas-col-right {
+  position: relative;
+  container-type: size;
+  overflow: hidden;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+
+  padding: 6% 5%;
+}
+
+/* the same soft gold line the live board uses between its columns */
+.vb-canvas-divider {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 1px;
+  pointer-events: none;
+
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(244, 202, 93, 0.55) 18%,
+    rgba(244, 202, 93, 0.9) 50%,
+    rgba(244, 202, 93, 0.55) 82%,
+    transparent 100%
+  );
+  box-shadow: 0 0 14px 1px rgba(244, 202, 93, 0.4);
+}
+
+.vb-canvas-heading-preview {
+  margin: 0;
+  width: 100%;
+  flex-shrink: 0;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.vb-canvas-heading-preview:hover {
+  outline: 1px dashed rgba(244, 202, 93, 0.5);
+}
+
+.vb-canvas-heading-preview.selected {
+  outline: 1.5px dashed #f4ca5d;
+  outline-offset: 2px;
+}
+
+/* A light alignment grid, purely visual - it never intercepts clicks. */
+.vb-canvas.show-grid::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+
+  /* .vb-canvas is now a 3-column grid itself - without this the overlay,
+     as a grid item, would only cover the first column instead of spanning
+     the whole board. */
+  grid-column: 1 / -1;
+  grid-row: 1;
+
+  background-image:
+    linear-gradient(rgba(244, 202, 93, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(244, 202, 93, 0.16) 1px, transparent 1px);
+  background-size: 5% 5%;
 }
 
 .vb-canvas-hint {
@@ -3749,6 +4079,11 @@ svg {
   outline-offset: 2px;
 }
 
+.vb-element.multi-selected {
+  outline: 1.5px solid #6ea8fe;
+  outline-offset: 2px;
+}
+
 /*
  * The logo and photo buttons are sized by scaledPositionStyle's inline
  * `width` (in cqw, against the canvas/board container) - the image inside
@@ -3765,25 +4100,51 @@ svg {
   border-radius: 2px;
 }
 
+/*
+ * A compact preview of the live board's candidate carousel - two boxes per
+ * row, photo over a gold name bar, same look as VisualBoard.jsx's cards
+ * (duplicated here on purpose, since this admin page can't import from a
+ * file it isn't allowed to touch).
+ */
 .vb-candidates {
-  border-radius: 6px;
-  padding: 6px;
+  display: flex;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  align-items: flex-start;
+  justify-content: center;
+
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+
+  cursor: pointer;
 }
 
-.vb-candidate-grid {
-  display: flex;
-  gap: 4px;
+.vb-candidates:hover {
+  outline: 1px dashed rgba(244, 202, 93, 0.5);
 }
 
-.vb-candidate-chip {
+.vb-candidates.selected {
+  outline: 1.5px dashed #f4ca5d;
+  outline-offset: 2px;
+}
+
+.vb-candidate-preview-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  gap: 4%;
+}
+
+.vb-candidate-preview-card {
   display: flex;
-  width: clamp(34px, 6vw, 54px);
   flex-direction: column;
-  align-items: center;
-  gap: 3px;
+  overflow: hidden;
+  border-radius: 2px;
 }
 
-.vb-candidate-photo {
+.vb-candidate-preview-photo {
   display: flex;
   width: 100%;
   aspect-ratio: 11 / 10;
@@ -3791,24 +4152,28 @@ svg {
   justify-content: center;
   overflow: hidden;
 
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.06);
+  background: radial-gradient(ellipse 70% 70% at 50% 45%, #a51d1d 0%, #6d1010 45%, #2e0505 100%);
   color: #8b8b8b;
 }
 
-.vb-candidate-photo img {
+.vb-candidate-preview-photo img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.vb-candidate-chip span {
-  max-width: 100%;
+.vb-candidate-preview-name {
   overflow: hidden;
-  color: #d8bc6c;
-  font-size: 8px;
   white-space: nowrap;
   text-overflow: ellipsis;
+
+  padding: 3% 6%;
+
+  background: linear-gradient(to bottom, #f2d888 0%, #dbb14b 38%, #b0821c 74%, #8b6615 100%);
+  color: #560606;
+  font-size: 8px;
+  font-weight: 700;
+  text-align: center;
 }
 
 .vb-candidates-empty {
@@ -3847,6 +4212,35 @@ svg {
   outline: 1.5px dashed #f4ca5d;
   outline-offset: 2px;
   z-index: 5;
+}
+
+.vb-shape.multi-selected {
+  outline: 1.5px solid #6ea8fe;
+  outline-offset: 2px;
+}
+
+/* center alignment guides, shown while a drag lands exactly on 50% */
+.vb-guide {
+  position: absolute;
+  pointer-events: none;
+  z-index: 6;
+  background: #6ea8fe;
+}
+
+.vb-guide-vertical {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.vb-guide-horizontal {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-50%);
 }
 
 /* an empty photo frame reads as a placeholder here, but paints nothing live */
@@ -3898,6 +4292,36 @@ svg {
   color: #767676;
   font-size: 12px;
   text-align: center;
+}
+
+.vb-properties-hint {
+  margin: 0;
+  color: #8b8b8b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.vb-group-button {
+  width: 100%;
+  gap: 6px;
+}
+
+.vb-group-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  padding: 8px 10px;
+
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+  background: rgba(110, 168, 254, 0.08);
+}
+
+.vb-group-note p {
+  margin: 0;
+  color: #a8bfe0;
+  font-size: 11.5px;
 }
 
 .vb-properties-title {
@@ -4230,12 +4654,55 @@ svg {
   color: #3a2a2a;
 }
 
+.admin-layout.light-mode .vb-toolbar {
+  border-color: rgba(91, 55, 55, 0.14);
+  background: rgba(91, 55, 55, 0.02);
+}
+
+.admin-layout.light-mode .vb-toolbar-divider {
+  background: rgba(91, 55, 55, 0.16);
+}
+
+.admin-layout.light-mode .vb-toolbar-button {
+  color: #7a6a6a;
+}
+
+.admin-layout.light-mode .vb-toolbar-button:hover:not(:disabled) {
+  background: rgba(91, 55, 55, 0.06);
+  color: #2a2a2a;
+}
+
 .admin-layout.light-mode .vb-canvas {
   border-color: rgba(91, 55, 55, 0.2);
 }
 
 .admin-layout.light-mode .vb-canvas-hint {
   color: #806f6f;
+}
+
+.admin-layout.light-mode .vb-layer-icon-button,
+.admin-layout.light-mode .vb-layer-name {
+  color: #5a4a4a;
+}
+
+.admin-layout.light-mode .vb-layer-name:hover {
+  background: rgba(91, 55, 55, 0.06);
+}
+
+.admin-layout.light-mode .vb-properties-hint {
+  color: #7a6a6a;
+}
+
+.admin-layout.light-mode .vb-group-note {
+  border-color: rgba(91, 55, 55, 0.18);
+}
+
+.admin-layout.light-mode .vb-template-row {
+  border-color: rgba(91, 55, 55, 0.18);
+}
+
+.admin-layout.light-mode .vb-template-row-info strong {
+  color: #2a2a2a;
 }
 
 .admin-layout.light-mode .vb-properties-title {

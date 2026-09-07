@@ -3,27 +3,53 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  ChevronDown,
+  ChevronUp,
   Circle,
   Crown,
   ExternalLink,
+  Eye,
+  EyeOff,
+  FolderOpen,
   Frame,
+  Grid3x3,
+  Group,
   Image as ImageIcon,
   ImagePlus,
+  Layers,
   LayoutTemplate,
+  Lock,
+  LockOpen,
+  Magnet,
+  Maximize,
+  Minimize,
   Minus,
   Plus,
+  Redo2,
   RotateCcw,
+  Save,
   Shapes,
   Square,
   Trash2,
   Triangle,
   Type,
+  Undo2,
+  Ungroup,
   UploadCloud,
   UsersRound,
   X,
 } from 'lucide-react';
 
-import { isVisible, loadBoardLayout, loadDraftLayout, publishBoardLayout } from '../lib/boardLayout';
+import {
+  applyTemplate,
+  deleteTemplate,
+  isVisible,
+  loadBoardLayout,
+  loadDraftLayout,
+  loadTemplates,
+  publishBoardLayout,
+  saveTemplate,
+} from '../lib/boardLayout';
 import { useBoardLayoutEditor } from '../lib/useBoardLayoutEditor';
 import {
   ALIGN_OPTIONS,
@@ -33,7 +59,7 @@ import {
   WEIGHT_OPTIONS,
   resolveTextStyle,
 } from '../lib/textStyle';
-import { LAYER_OPTIONS, SHAPE_KINDS, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
+import { SHAPE_KINDS, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
 import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from '../lib/boardGeometry';
 import FillEditor from '../components/FillEditor';
 import { subscribeCandidates } from '../lib/localBackend';
@@ -56,6 +82,7 @@ const RAIL_TABS = [
   { id: 'text', label: 'Text', icon: Type },
   { id: 'brand', label: 'Brand', icon: Crown },
   { id: 'uploads', label: 'Uploads', icon: UploadCloud },
+  { id: 'layers', label: 'Layers', icon: Layers },
 ];
 
 /* Which rail tab owns a given kind of element, so selecting one on the
@@ -67,6 +94,14 @@ const PANEL_BY_KIND = {
   image: 'uploads',
   shape: 'elements',
 };
+
+/* The zoom toolbar's fixed presets; 'fit' is computed instead of literal. */
+const ZOOM_OPTIONS = [
+  { value: '0.5', label: '50%' },
+  { value: '0.75', label: '75%' },
+  { value: '1', label: '100%' },
+  { value: 'fit', label: 'Fit to screen' },
+];
 
 function propertiesTitle(kind, shape) {
   switch (kind) {
@@ -96,17 +131,37 @@ function labelShapes(shapes) {
 export default function AdminVisualBoard() {
   const [layout, setLayout] = useState(() => loadDraftLayout());
   const [selected, setSelected] = useState(null); // { kind, id? } | null
+  const [multiSelected, setMultiSelected] = useState([]); // [{ kind, id }] - shift-click grouping
   const [activePanel, setActivePanel] = useState('elements');
   const [candidates, setCandidates] = useState([]);
   const [isDirty, setIsDirty] = useState(false);
 
+  const [zoom, setZoom] = useState('1'); // '0.5' | '0.75' | '1' | 'fit'
+  const [showGrid, setShowGrid] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fitPercent, setFitPercent] = useState(100);
+
+  const [templateModal, setTemplateModal] = useState(null); // null | 'save' | 'apply'
+  const [templateName, setTemplateName] = useState('');
+  const [templates, setTemplates] = useState(() => loadTemplates());
+
   const canvasRef = useRef(null);
+  const middleColumnRef = useRef(null);
+  const stageRef = useRef(null);
   const publishedSnapshotRef = useRef(JSON.stringify(loadBoardLayout()));
   const showToast = useToast();
 
-  const editor = useBoardLayoutEditor(layout, setLayout, canvasRef, {
+  /*
+   * Free-form elements (logo, text, shapes) are bounded by the middle
+   * column specifically, not the whole canvas - it's the column they
+   * actually render within on the live board, so dragging one to x:50
+   * centers it in that column, not the full three-column width.
+   */
+  const editor = useBoardLayoutEditor(layout, setLayout, middleColumnRef, {
     onError: (error) => showToast.error(error.message),
     onSuccess: (message) => showToast.success(message),
+    snapEnabled,
   });
 
   useEffect(() => {
@@ -119,14 +174,147 @@ export default function AdminVisualBoard() {
     setIsDirty(JSON.stringify(layout) !== publishedSnapshotRef.current);
   }, [layout]);
 
+  /*
+   * "Fit to screen" only has real work to do in fullscreen, where the stage
+   * is a fixed, known-size viewport - outside it the stage's height simply
+   * follows the canvas, so there is nothing independent to fit against and
+   * 100% width is already the fit.
+   */
+  useEffect(() => {
+    function recomputeFit() {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+
+      if (!document.fullscreenElement) {
+        setFitPercent(100);
+        return;
+      }
+
+      const ratio = (window.innerHeight * 16) / (9 * window.innerWidth);
+      setFitPercent(Math.min(100, ratio * 100));
+    }
+
+    recomputeFit();
+    window.addEventListener('resize', recomputeFit);
+    document.addEventListener('fullscreenchange', recomputeFit);
+
+    return () => {
+      window.removeEventListener('resize', recomputeFit);
+      document.removeEventListener('fullscreenchange', recomputeFit);
+    };
+  }, []);
+
+  /* Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y to redo - but not
+     while the user is typing in a field. */
+  useEffect(() => {
+    function handleKeydown(event) {
+      const isMeta = event.ctrlKey || event.metaKey;
+      if (!isMeta) return;
+
+      const isEditing = event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]');
+      if (isEditing) return;
+
+      const key = event.key.toLowerCase();
+      if (key === 'z' && event.shiftKey) {
+        event.preventDefault();
+        editor.redo();
+      } else if (key === 'z') {
+        event.preventDefault();
+        editor.undo();
+      } else if (key === 'y') {
+        event.preventDefault();
+        editor.redo();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [editor]);
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      stageRef.current?.requestFullscreen();
+    }
+  }
+
   function select(kind, id) {
     setSelected({ kind, id });
+    setMultiSelected([]);
     if (PANEL_BY_KIND[kind]) setActivePanel(PANEL_BY_KIND[kind]);
   }
 
   function isSelected(kind, id) {
     if (!selected || selected.kind !== kind) return false;
     return id === undefined || selected.id === id;
+  }
+
+  function isMultiSelected(kind, id) {
+    return multiSelected.some((item) => item.kind === kind && item.id === id);
+  }
+
+  /*
+   * A shift-click toggles an element into the multi-selection instead of
+   * replacing the single selection - a plain click clears it and drags as
+   * usual. The first shift-click folds whatever was already singly selected
+   * into the group too, so "click A, shift-click B" ends with both selected
+   * rather than just B.
+   */
+  function handlePointerDown(kind, id) {
+    return (event) => {
+      if (event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        setMultiSelected((current) => {
+          const base = current.length > 0 ? current : selected ? [selected] : [];
+          const exists = base.some((item) => item.kind === kind && item.id === id);
+          return exists
+            ? base.filter((item) => !(item.kind === kind && item.id === id))
+            : [...base, { kind, id }];
+        });
+        setSelected(null);
+        return;
+      }
+
+      if (multiSelected.length > 0) setMultiSelected([]);
+      grab(kind, id)(event);
+    };
+  }
+
+  function handleGroup() {
+    if (multiSelected.length < 2) return;
+    editor.groupElements(multiSelected);
+    setMultiSelected([]);
+  }
+
+  function handleSaveTemplate(event) {
+    event.preventDefault();
+    if (!templateName.trim()) return;
+
+    saveTemplate(templateName, layout);
+    setTemplates(loadTemplates());
+    setTemplateName('');
+    setTemplateModal(null);
+    showToast.success('Template saved.');
+  }
+
+  function handleApplyTemplate(id) {
+    const nextLayout = applyTemplate(id);
+    if (!nextLayout) {
+      showToast.error('That template is gone.');
+      return;
+    }
+
+    editor.replaceLayout(nextLayout);
+    setSelected(null);
+    setMultiSelected([]);
+    setTemplateModal(null);
+    showToast.success('Template applied to your draft.');
+  }
+
+  function handleDeleteTemplate(id) {
+    deleteTemplate(id);
+    setTemplates(loadTemplates());
   }
 
   /* Deselects first if the removed element was the one being edited. */
@@ -184,41 +372,130 @@ export default function AdminVisualBoard() {
     };
   }
 
+  /* The layers panel's label, icon, and underlying data object for one
+     layerOrder entry - null if it names something that no longer exists. */
+  function layerInfo(entry) {
+    if (entry.kind === 'logo') {
+      return { label: 'Logo', Icon: ImageIcon, element: layout.logo };
+    }
+
+    if (entry.kind === 'candidates') {
+      return { label: 'Candidate Board', Icon: UsersRound, element: null };
+    }
+
+    if (entry.kind === 'text') {
+      const index = layout.texts.findIndex((item) => item.id === entry.id);
+      if (index < 0) return null;
+      return { label: `Text ${index + 1}`, Icon: Type, element: layout.texts[index] };
+    }
+
+    if (entry.kind === 'image') {
+      const index = layout.images.findIndex((item) => item.id === entry.id);
+      if (index < 0) return null;
+      return { label: `Photo ${index + 1}`, Icon: ImagePlus, element: layout.images[index] };
+    }
+
+    if (entry.kind === 'shape') {
+      const index = layout.shapes.findIndex((item) => item.id === entry.id);
+      if (index < 0) return null;
+      const shape = layout.shapes[index];
+      return { label: shapeLabels[index], Icon: SHAPE_ICONS[shape.kind] ?? Square, element: shape };
+    }
+
+    return null;
+  }
+
   /*
-   * The canvas draws shapes in two passes, matching the live board: the ones
-   * set to sit behind the candidate board, then - after it - the ones in front.
+   * One entry of layerOrder, drawn on the canvas - 'candidates' is handled
+   * separately inline, since its markup is a fixed, non-draggable block.
    */
-  function renderShapes(layer) {
-    return layout.shapes
-      .filter(
-        (shape) =>
-          isVisible(shape) && (layer === 'front' ? shape.layer === 'front' : shape.layer !== 'front')
-      )
-      .map((shape) => {
-        const isEmptyFrame = shape.fill.type === 'image' && !shape.fill.url;
-        const selectedOnCanvas = isSelected('shape', shape.id);
+  function renderLayerEntry(entry) {
+    if (entry.kind === 'logo') {
+      if (!isVisible(layout.logo)) return null;
 
-        return (
-          <div
-            key={shape.id}
-            className={`vb-shape ${selectedOnCanvas ? 'selected' : ''} ${
-              isEmptyFrame ? 'is-empty-frame' : ''
-            }`}
-            style={resolveShapeStyle(shape)}
-            onPointerDown={grab('shape', shape.id)}
-          >
-            {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
+      return (
+        <button
+          key="logo"
+          type="button"
+          className={`vb-element ${isSelected('logo') ? 'selected' : ''} ${
+            isMultiSelected('logo') ? 'multi-selected' : ''
+          }`}
+          style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
+          onPointerDown={handlePointerDown('logo')}
+        >
+          <img src={layout.logo.url || '/visual/logo.png'} alt="" className="vb-logo-img" />
+        </button>
+      );
+    }
 
-            {selectedOnCanvas && (
-              <span
-                className="vb-shape-resize"
-                title="Drag to resize"
-                onPointerDown={editor.beginResize(shape.id)}
-              />
-            )}
-          </div>
-        );
-      });
+    if (entry.kind === 'text') {
+      const text = layout.texts.find((item) => item.id === entry.id);
+      if (!text || !isVisible(text)) return null;
+
+      return (
+        <button
+          key={text.id}
+          type="button"
+          className={`vb-element ${isSelected('text', text.id) ? 'selected' : ''} ${
+            isMultiSelected('text', text.id) ? 'multi-selected' : ''
+          }`}
+          style={positionStyle(text)}
+          onPointerDown={handlePointerDown('text', text.id)}
+        >
+          <span style={resolveTextStyle(text)}>{text.text}</span>
+        </button>
+      );
+    }
+
+    if (entry.kind === 'image') {
+      const image = layout.images.find((item) => item.id === entry.id);
+      if (!image || !isVisible(image)) return null;
+
+      return (
+        <button
+          key={image.id}
+          type="button"
+          className={`vb-element ${isSelected('image', image.id) ? 'selected' : ''} ${
+            isMultiSelected('image', image.id) ? 'multi-selected' : ''
+          }`}
+          style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
+          onPointerDown={handlePointerDown('image', image.id)}
+        >
+          <img src={image.url} alt="" className="vb-photo-img" />
+        </button>
+      );
+    }
+
+    if (entry.kind === 'shape') {
+      const shape = layout.shapes.find((item) => item.id === entry.id);
+      if (!shape || !isVisible(shape)) return null;
+
+      const isEmptyFrame = shape.fill.type === 'image' && !shape.fill.url;
+      const selectedOnCanvas = isSelected('shape', shape.id);
+
+      return (
+        <div
+          key={shape.id}
+          className={`vb-shape ${selectedOnCanvas ? 'selected' : ''} ${
+            isEmptyFrame ? 'is-empty-frame' : ''
+          } ${isMultiSelected('shape', shape.id) ? 'multi-selected' : ''}`}
+          style={resolveShapeStyle(shape)}
+          onPointerDown={handlePointerDown('shape', shape.id)}
+        >
+          {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
+
+          {selectedOnCanvas && (
+            <span
+              className="vb-shape-resize"
+              title="Drag to resize"
+              onPointerDown={editor.beginResize(shape.id)}
+            />
+          )}
+        </div>
+      );
+    }
+
+    return null;
   }
 
   const selectedImage =
@@ -240,14 +517,30 @@ export default function AdminVisualBoard() {
   const isTextSelected = selected?.kind === 'text';
   const shapeLabels = labelShapes(layout.shapes);
 
+  /*
+   * The canvas mirrors the live board's three columns: a reserved column,
+   * the free-form middle column (logo, text, shapes), and a right column
+   * for the headline and the candidate board - matching /visual exactly,
+   * without either page needing to know about the other's internals.
+   *
+   * Everything paints in layerOrder; the candidate board splits it into
+   * what sits behind it and what sits in front. The headline is pulled out
+   * of that free-form flow entirely, same as on the live board - it has a
+   * fixed spot in the right column instead of wherever its own x/y would
+   * otherwise place it in the middle column.
+   */
+  const headingText = layout.texts.find((item) => item.id === 'heading');
+  const isFreeFormLayer = (entry) => !(entry.kind === 'text' && entry.id === 'heading');
+
+  const candidatesIndex = layout.layerOrder.findIndex((entry) => entry.kind === 'candidates');
+  const layersBehind = layout.layerOrder.slice(0, candidatesIndex).filter(isFreeFormLayer);
+  const layersInFront = layout.layerOrder.slice(candidatesIndex + 1).filter(isFreeFormLayer);
+
   return (
     <>
       <header className="dashboard-header">
         <div>
-          <p className="greeting-subtitle">
-            Select an element to edit it, or add text, photos, shapes, and photo frames from the
-            list on the left.
-          </p>
+        
         </div>
       </header>
 
@@ -278,6 +571,106 @@ export default function AdminVisualBoard() {
               Publish
             </button>
           </div>
+        </div>
+
+        {/* ================= TOOLBAR ================= */}
+
+        <div className="vb-toolbar">
+          <div className="vb-toolbar-group">
+            <button
+              type="button"
+              className="vb-toolbar-button"
+              onClick={editor.undo}
+              disabled={!editor.canUndo}
+              title="Undo"
+              aria-label="Undo"
+            >
+              <Undo2 size={15} />
+            </button>
+            <button
+              type="button"
+              className="vb-toolbar-button"
+              onClick={editor.redo}
+              disabled={!editor.canRedo}
+              title="Redo"
+              aria-label="Redo"
+            >
+              <Redo2 size={15} />
+            </button>
+          </div>
+
+          <span className="vb-toolbar-divider" aria-hidden="true" />
+
+          <select
+            className="form-select vb-toolbar-zoom"
+            value={zoom}
+            onChange={(event) => setZoom(event.target.value)}
+            aria-label="Zoom"
+          >
+            {ZOOM_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          <span className="vb-toolbar-divider" aria-hidden="true" />
+
+          <div className="vb-toolbar-group">
+            <button
+              type="button"
+              className={`vb-toolbar-button ${showGrid ? 'active' : ''}`}
+              onClick={() => setShowGrid((current) => !current)}
+              aria-pressed={showGrid}
+              title="Toggle grid"
+            >
+              <Grid3x3 size={15} />
+              <span>Grid</span>
+            </button>
+            <button
+              type="button"
+              className={`vb-toolbar-button ${snapEnabled ? 'active' : ''}`}
+              onClick={() => setSnapEnabled((current) => !current)}
+              aria-pressed={snapEnabled}
+              title="Snap to center, edges, grid, and other elements"
+            >
+              <Magnet size={15} />
+              <span>Snap</span>
+            </button>
+          </div>
+
+          <span className="vb-toolbar-spacer" />
+
+          <button
+            type="button"
+            className="vb-toolbar-button"
+            onClick={() => setTemplateModal('save')}
+            title="Save the current board as a template"
+          >
+            <Save size={15} />
+            <span>Save Template</span>
+          </button>
+          <button
+            type="button"
+            className="vb-toolbar-button"
+            onClick={() => setTemplateModal('apply')}
+            title="Apply a saved template"
+          >
+            <FolderOpen size={15} />
+            <span>Apply Template</span>
+          </button>
+
+          <span className="vb-toolbar-divider" aria-hidden="true" />
+
+          <button
+            type="button"
+            className="vb-toolbar-button"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {isFullscreen ? <Minimize size={15} /> : <Maximize size={15} />}
+            <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+          </button>
         </div>
 
         <div className="vb-layout">
@@ -468,94 +861,171 @@ export default function AdminVisualBoard() {
                   )}
                 </>
               )}
+
+              {activePanel === 'layers' && (
+                <>
+                  <p className="vb-panel-label">Front to back</p>
+                  {[...layout.layerOrder].reverse().map((entry, displayIndex, list) => {
+                    const info = layerInfo(entry);
+                    if (!info) return null;
+
+                    const key = `${entry.kind}:${entry.id ?? ''}`;
+                    const canLockOrHide = entry.kind !== 'candidates';
+                    const visible = info.element ? isVisible(info.element) : true;
+                    const locked = info.element?.locked ?? false;
+                    const Icon = info.Icon;
+
+                    return (
+                      <div
+                        key={key}
+                        className={`vb-layer-row ${isSelected(entry.kind, entry.id) ? 'active' : ''}`}
+                      >
+                        <button
+                          type="button"
+                          className="vb-layer-icon-button"
+                          disabled={!canLockOrHide}
+                          onClick={() => editor.toggleVisible(entry.kind, entry.id)}
+                          aria-label={visible ? `Hide ${info.label}` : `Show ${info.label}`}
+                        >
+                          {visible ? <Eye size={13} /> : <EyeOff size={13} />}
+                        </button>
+
+                        <button
+                          type="button"
+                          className="vb-layer-icon-button"
+                          disabled={!canLockOrHide}
+                          onClick={() => editor.setLocked(entry.kind, entry.id, !locked)}
+                          aria-label={locked ? `Unlock ${info.label}` : `Lock ${info.label}`}
+                        >
+                          {locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                        </button>
+
+                        <button
+                          type="button"
+                          className="vb-layer-name"
+                          onClick={() => select(entry.kind, entry.id)}
+                        >
+                          <Icon size={13} />
+                          <span>{info.label}</span>
+                        </button>
+
+                        <div className="vb-layer-move">
+                          <button
+                            type="button"
+                            className="vb-layer-icon-button"
+                            disabled={displayIndex === 0}
+                            onClick={() => editor.moveLayer(entry.kind, entry.id, 'up')}
+                            aria-label={`Move ${info.label} up`}
+                            title="Move up"
+                          >
+                            <ChevronUp size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            className="vb-layer-icon-button"
+                            disabled={displayIndex === list.length - 1}
+                            onClick={() => editor.moveLayer(entry.kind, entry.id, 'down')}
+                            aria-label={`Move ${info.label} down`}
+                            title="Move down"
+                          >
+                            <ChevronDown size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </div>
           </div>
 
           {/* ================= CANVAS ================= */}
 
           <div className="vb-canvas-col">
-            <div
-              className="vb-canvas"
-              ref={canvasRef}
-              /*
-               * Pressing the empty canvas clears the selection. This listens
-               * for pointerdown rather than click because a click that starts
-               * on an element and ends on the background is reported against
-               * their common ancestor - the canvas - which would drop the
-               * selection every time an element was dragged out into space.
-               */
-              onPointerDown={(event) => {
-                if (event.target === event.currentTarget) setSelected(null);
-              }}
-            >
-              {renderShapes('back')}
-
-              {isVisible(layout.logo) && (
-                <button
-                  type="button"
-                  className={`vb-element ${isSelected('logo') ? 'selected' : ''}`}
-                  style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
-                  onPointerDown={grab('logo')}
-                >
-                  <img src={layout.logo.url || '/visual/logo.png'} alt="" className="vb-logo-img" />
-                </button>
-              )}
-
-              <button
-                type="button"
-                className={`vb-element vb-candidates ${isSelected('candidates') ? 'selected' : ''}`}
-                style={{ left: '50%', top: '58%', transform: 'translate(-50%, -50%)' }}
-                onClick={() => select('candidates')}
+            <div className="vb-canvas-stage" ref={stageRef}>
+              <div
+                className={`vb-canvas ${showGrid ? 'show-grid' : ''}`}
+                ref={canvasRef}
+                style={{ width: `${zoom === 'fit' ? fitPercent : Number(zoom) * 100}%` }}
               >
-                {candidates.length === 0 ? (
-                  <span className="vb-candidates-empty">No candidates currently shown</span>
-                ) : (
-                  <div className="vb-candidate-grid">
-                    {candidates.slice(0, 4).map((candidate) => (
-                      <div key={candidate.id} className="vb-candidate-chip">
-                        <div className="vb-candidate-photo">
-                          {candidate.photo_url ? (
-                            <img src={candidate.photo_url} alt="" />
-                          ) : (
-                            <UsersRound size={14} />
-                          )}
-                        </div>
-                        <span>{candidate.name}</span>
+                {/* LEFT COLUMN - reserved on the live board */}
+                <div className="vb-canvas-col-left">
+                  <div className="vb-canvas-divider" aria-hidden="true" />
+                </div>
+
+                {/* MIDDLE COLUMN - the free-form layout (logo, text, shapes) */}
+                <div
+                  className="vb-canvas-col-middle"
+                  ref={middleColumnRef}
+                  /*
+                   * Pressing the empty column clears the selection. This listens
+                   * for pointerdown rather than click because a click that starts
+                   * on an element and ends on the background is reported against
+                   * their common ancestor - the column - which would drop the
+                   * selection every time an element was dragged out into space.
+                   */
+                  onPointerDown={(event) => {
+                    if (event.target === event.currentTarget) {
+                      setSelected(null);
+                      setMultiSelected([]);
+                    }
+                  }}
+                >
+                  <div className="vb-canvas-divider" aria-hidden="true" />
+
+                  {layersBehind.map(renderLayerEntry)}
+                  {layersInFront.map(renderLayerEntry)}
+
+                  {editor.centerGuide.x && <div className="vb-guide vb-guide-vertical" aria-hidden="true" />}
+                  {editor.centerGuide.y && <div className="vb-guide vb-guide-horizontal" aria-hidden="true" />}
+                </div>
+
+                {/* RIGHT COLUMN - headline + candidate board */}
+                <div
+                  className="vb-canvas-col-right"
+                  onPointerDown={(event) => {
+                    if (event.target === event.currentTarget) {
+                      setSelected(null);
+                      setMultiSelected([]);
+                    }
+                  }}
+                >
+                  {headingText && isVisible(headingText) && (
+                    <p
+                      className={`vb-canvas-heading-preview ${isSelected('text', headingText.id) ? 'selected' : ''}`}
+                      style={resolveTextStyle(headingText)}
+                      onClick={() => select('text', headingText.id)}
+                    >
+                      {headingText.text}
+                    </p>
+                  )}
+
+                  <button
+                    type="button"
+                    className={`vb-candidates ${isSelected('candidates') ? 'selected' : ''}`}
+                    onClick={() => select('candidates')}
+                  >
+                    {candidates.length === 0 ? (
+                      <span className="vb-candidates-empty">No candidates currently shown</span>
+                    ) : (
+                      <div className="vb-candidate-preview-grid">
+                        {candidates.slice(0, 4).map((candidate) => (
+                          <div key={candidate.id} className="vb-candidate-preview-card">
+                            <div className="vb-candidate-preview-photo">
+                              {candidate.photo_url ? (
+                                <img src={candidate.photo_url} alt="" />
+                              ) : (
+                                <UsersRound size={14} />
+                              )}
+                            </div>
+                            <div className="vb-candidate-preview-name">{candidate.name}</div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </button>
-
-              {renderShapes('front')}
-
-              {layout.images
-                .filter((image) => isVisible(image))
-                .map((image) => (
-                  <button
-                    key={image.id}
-                    type="button"
-                    className={`vb-element ${isSelected('image', image.id) ? 'selected' : ''}`}
-                    style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
-                    onPointerDown={grab('image', image.id)}
-                  >
-                    <img src={image.url} alt="" className="vb-photo-img" />
+                    )}
                   </button>
-                ))}
-
-              {layout.texts
-                .filter((text) => isVisible(text))
-                .map((text) => (
-                  <button
-                    key={text.id}
-                    type="button"
-                    className={`vb-element ${isSelected('text', text.id) ? 'selected' : ''}`}
-                    style={positionStyle(text)}
-                    onPointerDown={grab('text', text.id)}
-                  >
-                    <span style={resolveTextStyle(text)}>{text.text}</span>
-                  </button>
-                ))}
+                </div>
+              </div>
             </div>
 
             <p className="vb-canvas-hint">
@@ -568,10 +1038,24 @@ export default function AdminVisualBoard() {
           {/* ================= PROPERTIES ================= */}
 
           <div className="vb-properties">
-            {!selected ? (
+            {multiSelected.length >= 2 ? (
+              <>
+                <h3 className="vb-properties-title">{multiSelected.length} Elements Selected</h3>
+                <p className="vb-properties-hint">
+                  Group them so dragging any one moves the rest together.
+                </p>
+                <button type="button" className="primary-button vb-group-button" onClick={handleGroup}>
+                  <Group size={13} />
+                  Group Selected
+                </button>
+              </>
+            ) : !selected ? (
               <div className="vb-properties-empty">
                 <LayoutTemplate size={22} />
-                <p>Select an element on the canvas or from the list on the left.</p>
+                <p>
+                  Select an element on the canvas or from the list on the left. Shift-click to
+                  select more than one and group them.
+                </p>
               </div>
             ) : selected.kind === 'candidates' ? (
               <div className="vb-properties-empty">
@@ -602,6 +1086,20 @@ export default function AdminVisualBoard() {
                     onChange={() => editor.toggleVisible(selected.kind, selected.id)}
                   />
                 </label>
+
+                {selectedElement.groupId && (
+                  <div className="vb-group-note">
+                    <p>Grouped - dragging this moves the whole group together.</p>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => editor.ungroup(selectedElement.groupId)}
+                    >
+                      <Ungroup size={13} />
+                      Ungroup
+                    </button>
+                  </div>
+                )}
 
                 {selected.kind === 'text' && (
                   <div className="form-group">
@@ -675,26 +1173,6 @@ export default function AdminVisualBoard() {
                           </option>
                         ))}
                       </select>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Layer</label>
-                      <div className="vb-segment">
-                        {LAYER_OPTIONS.map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={`vb-segment-button is-wide ${
-                              selectedShape.layer === option.value ? 'active' : ''
-                            }`}
-                            onClick={() =>
-                              editor.updateShape(selected.id, { layer: option.value })
-                            }
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   </>
                 )}
@@ -1016,49 +1494,56 @@ export default function AdminVisualBoard() {
                   </div>
                 )}
 
-                <div className="form-group">
-                  <label className="form-label">Position</label>
-                  <div className="vb-field-row">
-                    <label htmlFor="vb-pos-x">
-                      X
-                      <input
-                        id="vb-pos-x"
-                        className="form-input"
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={Math.round(selectedElement.x)}
-                        onChange={(event) =>
-                          editor.setPosition(
-                            selected.kind,
-                            selected.id,
-                            Number(event.target.value),
-                            selectedElement.y
-                          )
-                        }
-                      />
-                    </label>
-                    <label htmlFor="vb-pos-y">
-                      Y
-                      <input
-                        id="vb-pos-y"
-                        className="form-input"
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={Math.round(selectedElement.y)}
-                        onChange={(event) =>
-                          editor.setPosition(
-                            selected.kind,
-                            selected.id,
-                            selectedElement.x,
-                            Number(event.target.value)
-                          )
-                        }
-                      />
-                    </label>
+                {selected.kind === 'text' && selected.id === 'heading' ? (
+                  <p className="vb-properties-hint">
+                    This is the board's headline, so it's fixed at the top of the candidate
+                    column instead of being freely positioned.
+                  </p>
+                ) : (
+                  <div className="form-group">
+                    <label className="form-label">Position</label>
+                    <div className="vb-field-row">
+                      <label htmlFor="vb-pos-x">
+                        X
+                        <input
+                          id="vb-pos-x"
+                          className="form-input"
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={Math.round(selectedElement.x)}
+                          onChange={(event) =>
+                            editor.setPosition(
+                              selected.kind,
+                              selected.id,
+                              Number(event.target.value),
+                              selectedElement.y
+                            )
+                          }
+                        />
+                      </label>
+                      <label htmlFor="vb-pos-y">
+                        Y
+                        <input
+                          id="vb-pos-y"
+                          className="form-input"
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={Math.round(selectedElement.y)}
+                          onChange={(event) =>
+                            editor.setPosition(
+                              selected.kind,
+                              selected.id,
+                              selectedElement.x,
+                              Number(event.target.value)
+                            )
+                          }
+                        />
+                      </label>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {(selected.kind === 'image' ||
                   selected.kind === 'text' ||
@@ -1073,6 +1558,100 @@ export default function AdminVisualBoard() {
           </div>
         </div>
       </section>
+
+      {templateModal === 'save' && (
+        <div className="confirmation-overlay" role="presentation">
+          <form
+            className="candidate-edit-popup"
+            onSubmit={handleSaveTemplate}
+            aria-labelledby="vb-save-template-title"
+          >
+            <h2 id="vb-save-template-title">Save as Template</h2>
+
+            <label className="form-label" htmlFor="vb-template-name">
+              Template name
+            </label>
+            <input
+              id="vb-template-name"
+              className="form-input"
+              required
+              autoFocus
+              placeholder="e.g. Holiday theme"
+              value={templateName}
+              onChange={(event) => setTemplateName(event.target.value)}
+            />
+
+            <div className="confirmation-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setTemplateModal(null)}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="primary-button">
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {templateModal === 'apply' && (
+        <div className="confirmation-overlay" role="presentation">
+          <div
+            className="candidate-edit-popup vb-template-popup"
+            role="dialog"
+            aria-labelledby="vb-apply-template-title"
+          >
+            <div className="modal-heading-row">
+              <h2 id="vb-apply-template-title">Apply a Template</h2>
+              <button
+                type="button"
+                className="modal-close-button"
+                onClick={() => setTemplateModal(null)}
+                aria-label="Close"
+              >
+                &times;
+              </button>
+            </div>
+
+            {templates.length === 0 ? (
+              <p className="vb-properties-hint">
+                No templates saved yet - use Save Template on the toolbar first.
+              </p>
+            ) : (
+              <div className="vb-template-list">
+                {templates.map((template) => (
+                  <div key={template.id} className="vb-template-row">
+                    <div className="vb-template-row-info">
+                      <strong>{template.name}</strong>
+                      <span>{new Date(template.savedAt).toLocaleString()}</span>
+                    </div>
+                    <div className="vb-template-row-actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => handleApplyTemplate(template.id)}
+                      >
+                        Apply
+                      </button>
+                      <button
+                        type="button"
+                        className="delete-button"
+                        onClick={() => handleDeleteTemplate(template.id)}
+                        aria-label={`Delete ${template.name}`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

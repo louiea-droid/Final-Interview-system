@@ -24,16 +24,16 @@ function seedRows() {
   const iso = (offsetDays) => new Date(now + offsetDays * 86400000).toISOString();
 
   const people = [
-    { name: 'Miku T.', position: 'Warehouse Associate', img: 26, status: 'Scheduled' },
-    { name: 'Jose C.', position: 'Forklift Operator', img: 12, status: 'In Progress' },
-    { name: 'Angelica B.', position: 'Inventory Clerk', img: 47, status: 'Waiting' },
-    { name: 'Rafael D.', position: 'Shift Lead', img: 33, status: 'Scheduled' },
+    { name: 'Miku T.', course: 'BS Information Technology', img: 26, status: 'Scheduled' },
+    { name: 'Jose C.', course: 'BS Business Administration', img: 12, status: 'In Progress' },
+    { name: 'Angelica B.', course: 'BS Accountancy', img: 47, status: 'Waiting' },
+    { name: 'Rafael D.', course: 'BS Psychology', img: 33, status: 'Scheduled' },
   ];
 
   return people.map((person, index) => ({
     id: 'seed-' + (index + 1),
     name: person.name,
-    position: person.position,
+    course: person.course,
     photo_url: 'https://i.pravatar.cc/400?img=' + person.img,
     status: person.status,
     interview_type: 'Final Interview',
