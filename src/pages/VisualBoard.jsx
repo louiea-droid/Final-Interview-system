@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
+import { Megaphone } from "lucide-react";
 
 import FullscreenSwitch from "../components/FullscreenSwitch";
 import AutoFitText from "../components/AutoFitText";
-import { subscribeCandidates } from "../lib/localBackend";
+import { subscribeAnnouncements, subscribeCandidates } from "../lib/localBackend";
 import { isShownOnBoard } from "../lib/candidateVisibility";
+import { DEFAULT_LAYOUT, LAYOUT_EVENT, isVisible, loadBoardLayout } from "../lib/boardLayout";
+import { resolveTextStyle } from "../lib/textStyle";
+import { resolveShapeStyle } from "../lib/shapeStyle";
+import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from "../lib/boardGeometry";
+
+/* Announcements cycle on their own timer, independent of the candidate sets. */
+const ANNOUNCEMENT_DURATION = 7000;
 
 /* ---------------- ember field ---------------- */
 
@@ -206,6 +214,69 @@ export default function DisplayPage() {
     });
   }, []);
 
+  /* =========================================================
+     LOAD ANNOUNCEMENTS (live)
+  ========================================================= */
+
+  const [announcements, setAnnouncements] = useState([]);
+  const [currentAnnouncement, setCurrentAnnouncement] = useState(0);
+
+  useEffect(() => {
+    return subscribeAnnouncements((rows) => {
+      setAnnouncements(
+        rows
+          .filter((announcement) => announcement.active !== false)
+          .sort(
+            (a, b) => new Date(a.created_at) - new Date(b.created_at)
+          )
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    if (currentAnnouncement >= announcements.length) {
+      setCurrentAnnouncement(0);
+    }
+  }, [currentAnnouncement, announcements.length]);
+
+  useEffect(() => {
+    if (announcements.length <= 1) return;
+
+    const timer = window.setInterval(() => {
+      setCurrentAnnouncement(
+        (previous) => (previous + 1) % announcements.length
+      );
+    }, ANNOUNCEMENT_DURATION);
+
+    return () => window.clearInterval(timer);
+  }, [announcements.length]);
+
+  /* =========================================================
+     LOAD BOARD LAYOUT (live)
+
+     Where the logo, every text block, and any photos or shapes sit
+     - and whether each is shown at all - set from /admin/visual-board
+     and synced here the same way the theme is: a native 'storage'
+     event reaches this page in another tab or in the dashboard's
+     preview iframe, and LAYOUT_EVENT covers a listener in the very
+     same window.
+  ========================================================= */
+
+  const [layout, setLayout] = useState(DEFAULT_LAYOUT);
+
+  useEffect(() => {
+    const load = () => setLayout(loadBoardLayout());
+
+    load();
+    window.addEventListener("storage", load);
+    window.addEventListener(LAYOUT_EVENT, load);
+
+    return () => {
+      window.removeEventListener("storage", load);
+      window.removeEventListener(LAYOUT_EVENT, load);
+    };
+  }, []);
+
   useEffect(() => {
     if (isPreviewEmbed) return;
 
@@ -370,6 +441,7 @@ export default function DisplayPage() {
 
   return (
     <main
+      style={{ containerType: "size" }}
       className={`
         relative
         grid
@@ -411,6 +483,70 @@ export default function DisplayPage() {
       />
 
       <FullscreenSwitch />
+
+      {/* =====================================================
+          FREE-FORM LAYOUT (logo, text, photos)
+
+          Positioned from admin-configured percentages so the
+          /admin/visual-board editor can move and show/hide each
+          of these independently of the centered candidate board
+          below.
+      ===================================================== */}
+
+      {/*
+        Shapes set to "Behind" sit here, above the background wash but under
+        the candidate board (z-[2]) - the layer decoration belongs on. The
+        rest are drawn with the free-form elements below.
+      */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1]">
+        {layout.shapes
+          .filter((shape) => isVisible(shape) && shape.layer !== 'front')
+          .map((shape) => (
+            <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)} />
+          ))}
+      </div>
+
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[3]">
+        {/* front shapes paint first here, so text and photos stay on top of them */}
+        {layout.shapes
+          .filter((shape) => isVisible(shape) && shape.layer === 'front')
+          .map((shape) => (
+            <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)} />
+          ))}
+
+        {isVisible(layout.logo) && (
+          <img
+            src={layout.logo.url || "/visual/logo.png"}
+            alt="Hyacinth"
+            style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
+            className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.55)]"
+          />
+        )}
+
+        {layout.images
+          .filter((image) => isVisible(image))
+          .map((image) => (
+            <img
+              key={image.id}
+              src={image.url}
+              alt=""
+              style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
+              className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
+            />
+          ))}
+
+        {layout.texts
+          .filter((text) => isVisible(text))
+          .map((text) => (
+            <p
+              key={text.id}
+              style={{ ...positionStyle(text), ...resolveTextStyle(text) }}
+              className="absolute w-max"
+            >
+              {text.text}
+            </p>
+          ))}
+      </div>
 
       {/* Falling embers */}
 
@@ -455,58 +591,46 @@ export default function DisplayPage() {
         "
       >
 
-        {/* Logo */}
+        {/* =====================================================
+            ANNOUNCEMENTS
+        ===================================================== */}
 
-        <img
-          src="/visual/logo.png"
-          alt="Hyacinth"
-          className="
-            mb-[3vh]
-            block
-            h-auto
-            w-[clamp(180px,30vw,380px)]
-            drop-shadow-[0_4px_14px_rgba(0,0,0,.55)]
-            [@media(max-height:560px)]:w-[clamp(140px,22vw,240px)]
-          "
-        />
+        {announcements.length > 0 && (
+          <div
+            key={announcements[currentAnnouncement]?.id}
+            className={`
+              flex
+              max-w-[min(88vw,900px)]
+              items-center
+              justify-center
+              gap-2
+              rounded-[2px]
+              border
+              border-[#c9a03c]
+              px-[clamp(12px,2.4vw,22px)]
+              py-[clamp(6px,1.2vw,12px)]
+              text-center
+              animate-[fadeIn_.7s_ease-in-out]
+              ${lightMode ? "bg-[#fdf6f3] text-[#7a5a12]" : "bg-[#2e0505] text-[#f0d689]"}
+            `}
+          >
+            <Megaphone
+              size={18}
+              className="shrink-0"
+              aria-hidden="true"
+            />
 
-        {/* Title */}
-
-        <div className="flex items-center">
-
-       <h1
-  className={`
-    font-display-heavy
-    my-3
-    w-fit
-    max-w-full
-    whitespace-nowrap
-    text-center
-    uppercase
-    text-[min(5vw,74px)]
-    leading-[1.02]
-    tracking-[-0.012em]
-    [word-spacing:-0.04em]
-
-    bg-[radial-gradient(ellipse_at_center,#fff5b8_0%,#f4ca5d_24%,#c68b22_45%,#e4b84d_65%,#ffe89a_84%,#fff3bc_100%)]
-
-    bg-clip-text
-    text-transparent
-    drop-shadow-[0_2px_10px_rgba(244,194,74,.55)]
-
-    [filter:drop-shadow(0_2px_1px_rgba(0,0,0,.55))_drop-shadow(0_0_22px_rgba(227,179,91,.40))]
-
-    max-[620px]:whitespace-normal
-    max-[620px]:text-[min(9vw,40px)]
-    max-[620px]:leading-[1.06]
-
-    [@media(max-height:560px)]:text-[min(4.4vw,44px)]
-  `}
->
-  Final Interview Applicants
-</h1>
-
-        </div>
+            <p
+              className="
+                text-[clamp(13px,1.6vw,18px)]
+                font-semibold
+                leading-snug
+              "
+            >
+              {announcements[currentAnnouncement]?.message}
+            </p>
+          </div>
+        )}
 
         {/* =====================================================
             CANDIDATE BOARD
@@ -830,28 +954,6 @@ export default function DisplayPage() {
 
           </div>
         )}
-
-        {/* Best of Luck */}
-
-        <div
-          className={`
-            font-style-formal
-            mt-[2vh]
-            px-[0.08em]
-            pt-[0.22em]
-            pb-[0.22em]
-            text-center
-            text-[clamp(24px,5vw,48px)]
-            leading-[1.4]
-            bg-[radial-gradient(ellipse_at_center,#fff5b8_0%,#f4ca5d_24%,#c68b22_45%,#e4b84d_65%,#ffe89a_84%,#fff3bc_100%)]
-            bg-clip-text
-            text-transparent
-            drop-shadow-[0_2px_8px_rgba(244,194,74,.6)]
-
-          `}
-        >
-          Best of Luck!
-        </div>
 
       </div>
     </main>

@@ -3,6 +3,8 @@ import { Outlet, useLocation } from 'react-router-dom';
 import {
   ClipboardList,
   LayoutDashboard,
+  LayoutTemplate,
+  Megaphone,
   Menu,
   X,
   Moon,
@@ -23,6 +25,8 @@ const COLLAPSE_KEY = 'interview-sidebar-collapsed';
  */
 function pageTitle(pathname) {
   if (pathname.startsWith('/admin/settings')) return 'Settings';
+  if (pathname.startsWith('/admin/announcements')) return 'Announcements';
+  if (pathname.startsWith('/admin/visual-board')) return 'Visual Board';
   if (pathname.startsWith('/admin/records')) return 'Records';
   if (pathname.startsWith('/admin/history')) return 'Records';
   return 'Final Interview Applicants';
@@ -158,6 +162,26 @@ export default function AdminProtectedLayout() {
           >
             <ClipboardList size={19} strokeWidth={2.1} />
             <span>Records</span>
+          </a>
+
+          <a
+            className={`sidebar-link ${pathname.startsWith('/admin/announcements') ? 'active' : ''}`}
+            href="/admin/announcements"
+            onClick={() => setSidebarOpen(false)}
+            title={collapsed ? 'Announcements' : undefined}
+          >
+            <Megaphone size={19} strokeWidth={2.1} />
+            <span>Announcements</span>
+          </a>
+
+          <a
+            className={`sidebar-link ${pathname.startsWith('/admin/visual-board') ? 'active' : ''}`}
+            href="/admin/visual-board"
+            onClick={() => setSidebarOpen(false)}
+            title={collapsed ? 'Visual Board' : undefined}
+          >
+            <LayoutTemplate size={19} strokeWidth={2.1} />
+            <span>Visual Board</span>
           </a>
 
           <a

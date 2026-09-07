@@ -13,7 +13,6 @@
 
 const ROWS_KEY = 'local-backend:candidates';
 const PHOTOS_KEY = 'local-backend:photos';
-const CHANGE_EVENT = 'local-backend:changed';
 
 /* Photos are capped on the long edge so several fit in the localStorage quota. */
 const MAX_PHOTO_EDGE = 900;
@@ -47,6 +46,28 @@ function seedRows() {
 
 /* ------------------------------------------------------------------- storage */
 
+/*
+ * Every table this stand-in backend knows about, keyed by the name callers
+ * pass to `.from(table)` - mirroring the real backend, where that name picks
+ * the table rather than being decorative. Each table gets its own
+ * localStorage key and its own change event, so subscribing to one table
+ * doesn't cause a reload for listeners on another.
+ */
+const TABLES = {
+  candidates: { storageKey: ROWS_KEY, seed: seedRows },
+  announcements: { storageKey: 'local-backend:announcements', seed: () => [] },
+};
+
+function changeEventName(table) {
+  return `local-backend:changed:${table}`;
+}
+
+function tableConfig(table) {
+  const config = TABLES[table];
+  if (!config) throw new Error(`Unknown local backend table: ${table}`);
+  return config;
+}
+
 function readJson(key, fallback) {
   try {
     const raw = window.localStorage.getItem(key);
@@ -66,41 +87,53 @@ function writeJson(key, value) {
   }
 }
 
-function loadRows() {
-  const stored = readJson(ROWS_KEY, null);
+function loadRows(table) {
+  const { storageKey, seed } = tableConfig(table);
+  const stored = readJson(storageKey, null);
   if (Array.isArray(stored)) return stored;
 
   // first run in this browser
-  const seeded = seedRows();
-  writeJson(ROWS_KEY, seeded);
+  const seeded = seed();
+  writeJson(storageKey, seeded);
   return seeded;
 }
 
-function saveRows(rows) {
-  writeJson(ROWS_KEY, rows);
+function saveRows(table, rows) {
+  writeJson(tableConfig(table).storageKey, rows);
   // same-tab listeners; the storage event only fires in *other* tabs
-  window.dispatchEvent(new Event(CHANGE_EVENT));
+  window.dispatchEvent(new Event(changeEventName(table)));
 }
 
 /**
- * Calls `listener` with every candidate row now and after each change,
+ * Calls `listener` with every row of `table` now and after each change,
  * including changes made in another tab. Returns an unsubscribe function.
  */
-export function subscribeCandidates(listener) {
-  const emit = () => listener(loadRows());
+export function subscribeTable(table, listener) {
+  const { storageKey } = tableConfig(table);
+  const emit = () => listener(loadRows(table));
 
   const onStorage = (event) => {
-    if (!event.key || event.key === ROWS_KEY) emit();
+    if (!event.key || event.key === storageKey) emit();
   };
 
   emit();
-  window.addEventListener(CHANGE_EVENT, emit);
+  window.addEventListener(changeEventName(table), emit);
   window.addEventListener('storage', onStorage);
 
   return () => {
-    window.removeEventListener(CHANGE_EVENT, emit);
+    window.removeEventListener(changeEventName(table), emit);
     window.removeEventListener('storage', onStorage);
   };
+}
+
+/** Calls `listener` with every candidate row now and after each change. */
+export function subscribeCandidates(listener) {
+  return subscribeTable('candidates', listener);
+}
+
+/** Calls `listener` with every announcement now and after each change. */
+export function subscribeAnnouncements(listener) {
+  return subscribeTable('announcements', listener);
 }
 
 /* --------------------------------------------------------------- comparisons */
@@ -129,7 +162,8 @@ function matchesClause(row, clause) {
 /* ------------------------------------------------------------- query builder */
 
 class Query {
-  constructor(operation, values) {
+  constructor(table, operation, values) {
+    this.table = table;
     this.operation = operation;
     this.values = values;
     this.filters = [];
@@ -187,7 +221,7 @@ class Query {
   }
 
   run() {
-    const rows = loadRows();
+    const rows = loadRows(this.table);
 
     if (this.operation === 'select') {
       const matched = this.sorted(this.matching(rows));
@@ -210,12 +244,13 @@ class Query {
           '-' +
           Math.random().toString(36).slice(2, 7),
         sort_order: highest + index + 1,
-        show_in_visual: true,
         created_at: new Date().toISOString(),
+        // candidates default to visible; other tables don't use this flag
+        ...(this.table === 'candidates' ? { show_in_visual: true } : {}),
         ...value,
       }));
 
-      saveRows([...rows, ...added]);
+      saveRows(this.table, [...rows, ...added]);
       return { data: added, error: null, count: added.length };
     }
 
@@ -225,13 +260,13 @@ class Query {
         target.has(row.id) ? { ...row, ...this.values } : row
       );
 
-      saveRows(next);
+      saveRows(this.table, next);
       return { data: next.filter((row) => target.has(row.id)), error: null };
     }
 
     if (this.operation === 'delete') {
       const target = new Set(this.matching(rows).map((row) => row.id));
-      saveRows(rows.filter((row) => !target.has(row.id)));
+      saveRows(this.table, rows.filter((row) => !target.has(row.id)));
       return { data: null, error: null };
     }
 
@@ -315,12 +350,12 @@ const localStorageApi = {
 /* ------------------------------------------------------------------- exports */
 
 export const localClient = {
-  from() {
+  from(table) {
     return {
-      select: (columns, options) => new Query('select').select(columns, options),
-      insert: (rows) => new Query('insert', Array.isArray(rows) ? rows : [rows]),
-      update: (values) => new Query('update', values),
-      delete: () => new Query('delete'),
+      select: (columns, options) => new Query(table, 'select').select(columns, options),
+      insert: (rows) => new Query(table, 'insert', Array.isArray(rows) ? rows : [rows]),
+      update: (values) => new Query(table, 'update', values),
+      delete: () => new Query(table, 'delete'),
     };
   },
 
@@ -329,8 +364,11 @@ export const localClient = {
 
 /** Wipes local data so the next load starts from the seed candidates again. */
 export function resetLocalData() {
-  window.localStorage.removeItem(ROWS_KEY);
   window.localStorage.removeItem(PHOTOS_KEY);
   photoUrls.clear();
-  saveRows(loadRows());
+
+  for (const table of Object.keys(TABLES)) {
+    window.localStorage.removeItem(tableConfig(table).storageKey);
+    saveRows(table, loadRows(table));
+  }
 }

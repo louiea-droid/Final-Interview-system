@@ -503,179 +503,188 @@ export default function CandidatesPage() {
   }
 
   return (
-    <div className="candidates-page">
-      <header className="candidates-page-header">
-        <div>
-          <p className="greeting-subtitle">
-            Candidates organized by interview schedule.
-          </p>
-        </div>
+    <>
+      <div className="candidates-page">
+        <header className="candidates-page-header">
+          <div>
+            <p className="greeting-subtitle">
+              Candidates organized by interview schedule.
+            </p>
+          </div>
 
-        <button
-          type="button"
-          className="primary-button"
-          onClick={openAddModal}
-        >
-          <Plus size={12} />
-          Add Candidate
-        </button>
-      </header>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={openAddModal}
+          >
+            <Plus size={12} />
+            Add Candidate
+          </button>
+        </header>
 
-      <section className="candidate-filter-bar">
-        <div className="candidate-filter-title">
-          <CalendarDays size={15} />
-          <span>View candidates by interview date</span>
-        </div>
-        <select
-          className="candidate-date-filter"
-          value={selectedDate}
-          onChange={(event) => setSelectedDate(event.target.value)}
-          aria-label="Filter candidates by interview date"
-        >
-          <option value="all">All dates</option>
-          {dates.map((date) => (
-            <option key={date} value={date}>
-              {formatInterviewGroup(date)}
-            </option>
-          ))}
-        </select>
-      </section>
+        <section className="candidate-filter-bar">
+          <div className="candidate-filter-title">
+            <CalendarDays size={15} />
+            <span>View candidates by interview date</span>
+          </div>
+          <select
+            className="candidate-date-filter"
+            value={selectedDate}
+            onChange={(event) => setSelectedDate(event.target.value)}
+            aria-label="Filter candidates by interview date"
+          >
+            <option value="all">All dates</option>
+            {dates.map((date) => (
+              <option key={date} value={date}>
+                {formatInterviewGroup(date)}
+              </option>
+            ))}
+          </select>
+        </section>
 
-      {loading ? (
-        <div
-          className="candidate-list-state"
-          style={{ '--rows-per-page': pageSize }}
-        >Loading candidates...</div>
-      ) : groupedCandidates.length ? (
-        <div
-          className="candidate-date-groups"
-          style={{
-            '--rows-per-page': pageSize,
-            '--group-count': groupedCandidates.length,
-          }}
-        >
-          {groupedCandidates.map(([date, dateCandidates]) => {
-            const allShownOnBoard = dateCandidates.every((candidate) =>
-              isShownOnBoard(candidate)
-            );
+        {loading ? (
+          <div
+            className="candidate-list-state"
+            style={{ '--rows-per-page': pageSize }}
+          >Loading candidates...</div>
+        ) : groupedCandidates.length ? (
+          <div
+            className="candidate-date-groups"
+            style={{
+              '--rows-per-page': pageSize,
+              '--group-count': groupedCandidates.length,
+            }}
+          >
+            {groupedCandidates.map(([date, dateCandidates]) => {
+              const allShownOnBoard = dateCandidates.every((candidate) =>
+                isShownOnBoard(candidate)
+              );
 
-            return (
-            <section className="candidate-date-group" key={date}>
-              <div className="candidate-date-heading">
-                <div>
-                  <h2>
-                    {formatInterviewGroup(date)}
-                  </h2>
-                  <span>
-                    {dateCandidates.length}{' '}
-                    {dateCandidates.length === 1 ? 'candidate' : 'candidates'}
-                  </span>
-                </div>
-
-                <div className="date-heading-actions">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={allShownOnBoard}
-                    className={`visual-toggle ${allShownOnBoard ? 'on' : ''}`}
-                    onClick={() =>
-                      toggleGroupVisibility(dateCandidates, !allShownOnBoard)
-                    }
-                    aria-label={`${
-                      allShownOnBoard ? 'Hide' : 'Show'
-                    } all candidates scheduled on ${formatInterviewGroup(date)} on the visual board`}
-                  >
-                    <span className="visual-toggle-track">
-                      <span className="visual-toggle-thumb2" />
+              return (
+              <section className="candidate-date-group" key={date}>
+                <div className="candidate-date-heading">
+                  <div>
+                    <h2>
+                      {formatInterviewGroup(date)}
+                    </h2>
+                    <span>
+                      {dateCandidates.length}{' '}
+                      {dateCandidates.length === 1 ? 'candidate' : 'candidates'}
                     </span>
-                    <span className="visual-toggle-label">
-                      {allShownOnBoard ? 'Shown' : 'Hidden'}
-                    </span>
-                  </button>
+                  </div>
 
-                  <button
-                    type="button"
-                    className="edit-button date-edit-button"
-                    onClick={() => startEditing(date, dateCandidates)}
-                  >
-                    <Pencil size={13} />
-                    Edit
-                  </button>
-                </div>
-              </div>
-
-              <div className="candidate-directory">
-                {dateCandidates.map((candidate) => (
-                  <article className="candidate-directory-row" key={candidate.id}>
+                  <div className="date-heading-actions">
                     <button
                       type="button"
-                      className="candidate-directory-avatar-button"
-                      onClick={() => setViewingCandidate(candidate)}
-                      aria-label={`View ${candidate.name}'s details`}
+                      role="switch"
+                      aria-checked={allShownOnBoard}
+                      className={`visual-toggle ${allShownOnBoard ? 'on' : ''}`}
+                      onClick={() =>
+                        toggleGroupVisibility(dateCandidates, !allShownOnBoard)
+                      }
+                      aria-label={`${
+                        allShownOnBoard ? 'Hide' : 'Show'
+                      } all candidates scheduled on ${formatInterviewGroup(date)} on the visual board`}
                     >
-                      {candidate.photo_url ? (
-                        <img
-                          className="candidate-directory-avatar"
-                          src={candidate.photo_url}
-                          alt={candidate.name}
-                        />
-                      ) : (
-                        <div className="candidate-directory-avatar no-photo-avatar">
-                          <UserRound size={16} />
-                        </div>
-                      )}
+                      <span className="visual-toggle-track">
+                        <span className="visual-toggle-thumb2" />
+                      </span>
+                      <span className="visual-toggle-label">
+                        {allShownOnBoard ? 'Shown' : 'Hidden'}
+                      </span>
                     </button>
 
                     <button
                       type="button"
-                      className="candidate-directory-details"
-                      onClick={() => setViewingCandidate(candidate)}
-                      aria-label={`View ${candidate.name}'s details`}
+                      className="edit-button date-edit-button"
+                      onClick={() => startEditing(date, dateCandidates)}
                     >
-                      <h3>{candidate.name}</h3>
-                      <span>{candidate.position || 'No position'}</span>
+                      <Pencil size={13} />
+                      Edit
                     </button>
+                  </div>
+                </div>
 
-                    <div className="candidate-directory-edit">
+                <div className="candidate-directory">
+                  {dateCandidates.map((candidate) => (
+                    <article className="candidate-directory-row" key={candidate.id}>
                       <button
                         type="button"
-                        className="delete-button"
-                        onClick={() => setCandidateToDelete(candidate)}
-                        aria-label={`Remove ${candidate.name}`}
+                        className="candidate-directory-avatar-button"
+                        onClick={() => setViewingCandidate(candidate)}
+                        aria-label={`View ${candidate.name}'s details`}
                       >
-                        <Trash2 size={13} />
+                        {candidate.photo_url ? (
+                          <img
+                            className="candidate-directory-avatar"
+                            src={candidate.photo_url}
+                            alt={candidate.name}
+                          />
+                        ) : (
+                          <div className="candidate-directory-avatar no-photo-avatar">
+                            <UserRound size={16} />
+                          </div>
+                        )}
                       </button>
-                    </div>
 
-                  </article>
-                ))}
-              </div>
+                      <button
+                        type="button"
+                        className="candidate-directory-details"
+                        onClick={() => setViewingCandidate(candidate)}
+                        aria-label={`View ${candidate.name}'s details`}
+                      >
+                        <h3>{candidate.name}</h3>
+                        <span>{candidate.position || 'No position'}</span>
+                      </button>
 
-            </section>
-            );
-          })}
-        </div>
-      ) : (
-        <div
-          className="candidate-list-state"
-          style={{ '--rows-per-page': pageSize }}
-        >
-          No candidates found for this date.
-        </div>
-      )}
+                      <div className="candidate-directory-edit">
+                        <button
+                          type="button"
+                          className="delete-button"
+                          onClick={() => setCandidateToDelete(candidate)}
+                          aria-label={`Remove ${candidate.name}`}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
 
-      {!loading && (
-        <TablePagination
-          page={page}
-          pageSize={pageSize}
-          totalItems={filteredCandidates.length}
-          onPageChange={setPage}
-          onPageSizeChange={(size) => {
-            setPageSize(size);
-            setPage(1);
-          }}
-        />
-      )}
+                    </article>
+                  ))}
+                </div>
+
+              </section>
+              );
+            })}
+          </div>
+        ) : (
+          <div
+            className="candidate-list-state"
+            style={{ '--rows-per-page': pageSize }}
+          >
+            No candidates found for this date.
+          </div>
+        )}
+
+        {!loading && (
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            totalItems={filteredCandidates.length}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        )}
+      </div>
+
+      {/*
+       * The modals below are deliberately siblings of .candidates-page, not
+       * descendants - that div fades in via a CSS animation, which creates a
+       * stacking context and would otherwise trap these position: fixed
+       * overlays under the sticky header regardless of their own z-index.
+       */}
 
       {editingDate && (
         <div className="confirmation-overlay" role="presentation">
@@ -966,7 +975,7 @@ export default function CandidatesPage() {
         />
       )}
 
-    </div>
+    </>
   );
 }
 

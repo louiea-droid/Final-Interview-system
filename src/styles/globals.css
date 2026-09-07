@@ -1025,6 +1025,15 @@ button {
   color: #5f5f5f;
 }
 
+.form-textarea {
+  height: auto;
+  min-height: 90px;
+  padding: 10px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
 .password-input-wrapper {
   position: relative;
 }
@@ -3442,4 +3451,663 @@ svg {
 .admin-layout.light-mode .settings-saved,
 .admin-layout.light-mode .record-edit-file-name {
   color: #28734a;
+}
+
+/* =========================================
+   VISUAL BOARD EDITOR
+
+   Three columns: an icon rail plus its panel on the left, the live
+   canvas in the middle, and a compact properties panel on the right
+   for whatever is currently selected.
+   ========================================= */
+
+.vb-layout {
+  display: grid;
+  grid-template-columns: 226px minmax(0, 1fr) 250px;
+  gap: 16px;
+
+  padding: 18px;
+}
+
+@media (max-width: 1080px) {
+  .vb-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.vb-unpublished {
+  color: #f4ca5d;
+}
+
+/* ---------------- elements column ---------------- */
+
+.vb-elements {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  min-width: 0;
+}
+
+.vb-element-row {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 8px;
+
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+
+  color: #d5d5d5;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+
+  cursor: pointer;
+}
+
+.vb-element-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.vb-element-row.is-hidden {
+  color: #767676;
+}
+
+/* Photos, text, and shapes pair their row with a remove button; Logo and
+   Candidate Board are permanent fixtures and don't get one. */
+.vb-element-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+
+  border-radius: 7px;
+}
+
+.vb-element-row-wrap.active .vb-element-row {
+  background: rgba(212, 93, 89, 0.16);
+  color: var(--red-status);
+}
+
+.vb-elements > .vb-element-row.active {
+  background: rgba(212, 93, 89, 0.16);
+  color: var(--red-status);
+}
+
+.vb-element-remove {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+
+  width: 30px;
+
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+
+  color: #6e6e6e;
+  cursor: pointer;
+}
+
+.vb-element-remove:hover {
+  background: rgba(212, 93, 89, 0.16);
+  color: var(--red-status);
+}
+
+.vb-add-row {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  color: #9c9c9c;
+}
+
+/* ---------------- canvas column ---------------- */
+
+.vb-canvas-col {
+  min-width: 0;
+}
+
+.vb-canvas {
+  position: relative;
+  container-type: size;
+
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+
+  background: radial-gradient(ellipse at 50% 20%, #2a0606 0%, #12010a 55%, #0b0102 100%);
+}
+
+.vb-canvas-hint {
+  margin: 10px 2px 0;
+  color: #8b8b8b;
+  font-size: 12.5px;
+}
+
+.vb-element {
+  position: absolute;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+
+  padding: 3px;
+
+  cursor: grab;
+  touch-action: none;
+}
+
+.vb-element:active {
+  cursor: grabbing;
+}
+
+.vb-element:hover {
+  outline: 1px dashed rgba(244, 202, 93, 0.5);
+}
+
+.vb-element.selected {
+  outline: 1.5px dashed #f4ca5d;
+  outline-offset: 2px;
+}
+
+/*
+ * The logo and photo buttons are sized by scaledPositionStyle's inline
+ * `width` (in cqw, against the canvas/board container) - the image inside
+ * just fills whatever box that gives it.
+ */
+.vb-logo-img,
+.vb-photo-img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.vb-photo-img {
+  border-radius: 2px;
+}
+
+.vb-candidates {
+  border-radius: 6px;
+  padding: 6px;
+}
+
+.vb-candidate-grid {
+  display: flex;
+  gap: 4px;
+}
+
+.vb-candidate-chip {
+  display: flex;
+  width: clamp(34px, 6vw, 54px);
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.vb-candidate-photo {
+  display: flex;
+  width: 100%;
+  aspect-ratio: 11 / 10;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #8b8b8b;
+}
+
+.vb-candidate-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vb-candidate-chip span {
+  max-width: 100%;
+  overflow: hidden;
+  color: #d8bc6c;
+  font-size: 8px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vb-candidates-empty {
+  color: #8b7a7a;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ---------------- shapes and photo frames on the canvas ---------------- */
+
+.vb-shape {
+  position: absolute;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  cursor: grab;
+  touch-action: none;
+}
+
+.vb-shape:active {
+  cursor: grabbing;
+}
+
+.vb-shape:hover {
+  outline: 1px dashed rgba(244, 202, 93, 0.5);
+}
+
+/*
+ * A selected shape comes to the front of the canvas. Shapes paint behind the
+ * text and photos - the order the live board uses - so without this its
+ * resize handle can end up under the candidate board and unclickable.
+ */
+.vb-shape.selected {
+  outline: 1.5px dashed #f4ca5d;
+  outline-offset: 2px;
+  z-index: 5;
+}
+
+/* an empty photo frame reads as a placeholder here, but paints nothing live */
+.vb-shape.is-empty-frame {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.vb-frame-hint {
+  color: rgba(244, 202, 93, 0.7);
+  pointer-events: none;
+}
+
+.vb-shape-resize {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+
+  width: 11px;
+  height: 11px;
+
+  border-radius: 2px;
+  border: 1.5px solid #0b0102;
+
+  background: #f4ca5d;
+
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+/* ---------------- properties column ---------------- */
+
+.vb-properties {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.vb-properties-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+
+  padding: 24px 10px;
+
+  color: #767676;
+  font-size: 12px;
+  text-align: center;
+}
+
+.vb-properties-title {
+  margin: 0;
+  color: #eeeeee;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.vb-properties-thumb {
+  width: 100%;
+  max-width: 120px;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+}
+
+.vb-field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.vb-field-row label {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+
+  color: #929292;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.vb-remove-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+
+  width: 100%;
+  height: 32px;
+  font-size: 12px;
+}
+
+/*
+ * Compact overrides for the shared form controls, scoped to the properties
+ * panel only - every other page keeps the regular sizing.
+ */
+.vb-properties .form-group {
+  gap: 4px;
+}
+
+.vb-properties .form-label {
+  font-size: 11.5px;
+}
+
+.vb-properties .form-input,
+.vb-properties .form-select {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12.5px;
+}
+
+.vb-properties .form-textarea {
+  min-height: 64px;
+  padding: 7px 8px;
+}
+
+.vb-properties .settings-option {
+  padding: 8px 10px;
+  gap: 10px;
+}
+
+.vb-properties .settings-option strong {
+  font-size: 12px;
+}
+
+.vb-properties .photo-upload-box {
+  height: 32px;
+}
+
+.vb-properties .photo-upload-title {
+  font-size: 12px;
+}
+
+.vb-properties .scale-field-value {
+  font-size: 11px;
+}
+
+/* ---------------- segmented toggles ---------------- */
+
+.vb-segment {
+  display: inline-flex;
+  gap: 2px;
+
+  padding: 2px;
+
+  border-radius: 7px;
+  border: 1px solid var(--border);
+}
+
+.vb-segment-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 30px;
+  height: 26px;
+
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+
+  color: #a4a4a4;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vb-segment-button.is-wide {
+  width: auto;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.vb-segment-button:hover {
+  color: #ffffff;
+}
+
+.vb-segment-button.active {
+  background: rgba(212, 93, 89, 0.16);
+  color: var(--red-status);
+}
+
+/* ---------------- fill editor ---------------- */
+
+.vb-fill {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  padding: 10px;
+
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.vb-fill-head,
+.vb-fill-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vb-fill-preview {
+  width: 30px;
+  height: 24px;
+  flex-shrink: 0;
+
+  border-radius: 5px;
+  border: 1px solid var(--border);
+
+  background-size: cover;
+  background-position: center;
+}
+
+.vb-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vb-palette-row {
+  display: flex;
+  gap: 4px;
+}
+
+.vb-palette-swatch {
+  flex: 1;
+  height: 20px;
+
+  border-radius: 4px;
+  border: 1px solid var(--border);
+
+  cursor: pointer;
+}
+
+.vb-palette-swatch.active {
+  border-color: #f4ca5d;
+  box-shadow: 0 0 0 2px rgba(244, 202, 93, 0.35);
+}
+
+.vb-color-fields {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vb-color-format {
+  width: 78px;
+  flex-shrink: 0;
+  height: 32px;
+}
+
+.vb-color-text {
+  min-width: 0;
+  height: 32px;
+}
+
+.vb-color-input {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0;
+
+  border-radius: 6px;
+  border: 1px solid var(--border);
+
+  background: transparent;
+  cursor: pointer;
+}
+
+.vb-color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.vb-color-input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 4px;
+}
+
+.vb-gradient-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.vb-gradient-preset {
+  height: 26px;
+
+  border-radius: 5px;
+  border: 1px solid var(--border);
+
+  cursor: pointer;
+}
+
+.vb-gradient-preset:hover {
+  border-color: #f4ca5d;
+}
+
+.vb-stops {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vb-stop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vb-stop-position {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+}
+
+.vb-add-stop {
+  align-self: flex-start;
+  gap: 5px;
+}
+
+.vb-stroke-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vb-stroke-field input[type='range'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-layout.light-mode .vb-element-row {
+  color: #3a2a2a;
+}
+
+.admin-layout.light-mode .vb-element-row.is-hidden {
+  color: #9a8a8a;
+}
+
+.admin-layout.light-mode .vb-element-remove {
+  color: #9a8a8a;
+}
+
+.admin-layout.light-mode .vb-add-row {
+  border-top-color: rgba(91, 55, 55, 0.28);
+  color: #7a6a6a;
+}
+
+.admin-layout.light-mode .vb-canvas {
+  border-color: rgba(91, 55, 55, 0.2);
+}
+
+.admin-layout.light-mode .vb-canvas-hint {
+  color: #806f6f;
+}
+
+.admin-layout.light-mode .vb-properties-title {
+  color: #2a2a2a;
+}
+
+.admin-layout.light-mode .vb-properties-empty {
+  color: #96827e;
+}
+
+.admin-layout.light-mode .vb-palette-swatch,
+.admin-layout.light-mode .vb-color-input,
+.admin-layout.light-mode .vb-gradient-preset,
+.admin-layout.light-mode .vb-fill-preview,
+.admin-layout.light-mode .vb-segment {
+  border-color: rgba(91, 55, 55, 0.22);
+}
+
+.admin-layout.light-mode .vb-fill {
+  border-color: rgba(91, 55, 55, 0.18);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.admin-layout.light-mode .vb-segment-button {
+  color: #7a6a6a;
+}
+
+.admin-layout.light-mode .vb-segment-button:hover {
+  color: #2a2a2a;
 }

@@ -17,6 +17,8 @@ import AdminLayout from './pages/AdminLayout';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminHistory from './pages/AdminHistory';
 import AdminRecords from './pages/AdminRecords';
+import AdminAnnouncements from './pages/AdminAnnouncements';
+import AdminVisualBoard from './pages/AdminVisualBoard';
 import AdminSettings from './pages/AdminSettings';
 
 createRoot(document.getElementById('root')).render(
@@ -46,6 +48,8 @@ createRoot(document.getElementById('root')).render(
             <Route index element={<AdminDashboard />} />
             <Route path="history" element={<AdminHistory />} />
             <Route path="records" element={<AdminRecords />} />
+            <Route path="announcements" element={<AdminAnnouncements />} />
+            <Route path="visual-board" element={<AdminVisualBoard />} />
             <Route path="settings" element={<AdminSettings />} />
           </Route>
 
