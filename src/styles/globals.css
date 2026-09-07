@@ -3479,19 +3479,88 @@ svg {
   color: #f4ca5d;
 }
 
-/* ---------------- elements column ---------------- */
+/* ---------------- elements column: rail + panel ---------------- */
 
-.vb-elements {
+.vb-elements-col {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  gap: 10px;
 
   min-width: 0;
 }
 
+.vb-rail {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vb-rail-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+
+  width: 56px;
+  padding: 10px 4px;
+
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+
+  color: #9c9c9c;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.vb-rail-button span {
+  white-space: nowrap;
+}
+
+.vb-rail-button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #d5d5d5;
+}
+
+.vb-rail-button.active {
+  background: rgba(212, 93, 89, 0.16);
+  color: var(--red-status);
+}
+
+.vb-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-light);
+}
+
+.vb-panel-label {
+  margin: 10px 0 2px;
+  color: #767676;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.vb-panel-label:first-child {
+  margin-top: 0;
+}
+
 .vb-element-row {
   display: flex;
-  flex: 1;
+  flex: 0 0 auto;
   align-items: center;
   gap: 8px;
 
@@ -3509,8 +3578,20 @@ svg {
   cursor: pointer;
 }
 
+/* Inside a remove-button pair, the row grows to fill the space beside it -
+   as a bare panel child (Logo, Candidate Board) it must not grow at all. */
+.vb-element-row-wrap > .vb-element-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .vb-element-row:hover {
   background: rgba(255, 255, 255, 0.05);
+}
+
+.vb-element-row.active {
+  background: rgba(212, 93, 89, 0.16);
+  color: var(--red-status);
 }
 
 .vb-element-row.is-hidden {
@@ -3528,11 +3609,6 @@ svg {
 }
 
 .vb-element-row-wrap.active .vb-element-row {
-  background: rgba(212, 93, 89, 0.16);
-  color: var(--red-status);
-}
-
-.vb-elements > .vb-element-row.active {
   background: rgba(212, 93, 89, 0.16);
   color: var(--red-status);
 }
@@ -3558,11 +3634,63 @@ svg {
   color: var(--red-status);
 }
 
-.vb-add-row {
-  margin-top: 6px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--border);
+.vb-panel-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 10px;
+
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  background: transparent;
+
   color: #9c9c9c;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.vb-panel-add:hover {
+  border-color: var(--red-status);
+  color: #d5d5d5;
+}
+
+.vb-shape-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.vb-shape-grid-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+
+  padding: 12px 4px;
+
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+
+  color: #c8c8c8;
+  font: inherit;
+  font-size: 11px;
+  text-align: center;
+
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.vb-shape-grid-button:hover {
+  border-color: var(--red-status);
+  background: rgba(212, 93, 89, 0.1);
+  color: #ffffff;
 }
 
 /* ---------------- canvas column ---------------- */
@@ -4070,9 +4198,36 @@ svg {
   color: #9a8a8a;
 }
 
-.admin-layout.light-mode .vb-add-row {
-  border-top-color: rgba(91, 55, 55, 0.28);
+.admin-layout.light-mode .vb-panel-add {
+  border-color: rgba(91, 55, 55, 0.28);
   color: #7a6a6a;
+}
+
+.admin-layout.light-mode .vb-panel {
+  border-left-color: rgba(91, 55, 55, 0.2);
+}
+
+.admin-layout.light-mode .vb-panel-label {
+  color: #9a8a8a;
+}
+
+.admin-layout.light-mode .vb-rail-button {
+  color: #7a6a6a;
+}
+
+.admin-layout.light-mode .vb-rail-button:hover {
+  background: rgba(91, 55, 55, 0.06);
+  color: #3a2a2a;
+}
+
+.admin-layout.light-mode .vb-shape-grid-button {
+  border-color: rgba(91, 55, 55, 0.2);
+  background: rgba(91, 55, 55, 0.03);
+  color: #5a4a4a;
+}
+
+.admin-layout.light-mode .vb-shape-grid-button:hover {
+  color: #3a2a2a;
 }
 
 .admin-layout.light-mode .vb-canvas {
