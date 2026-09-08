@@ -141,7 +141,13 @@ export function resolveTextStyle(text) {
     textTransform: style.textCase === 'none' ? 'none' : style.textCase,
     letterSpacing: `${style.letterSpacing ?? 0}em`,
     whiteSpace: 'pre-line',
-    maxWidth: '92cqw',
+    /*
+     * max-width is ignored on a non-replaced inline element, and the editor
+     * renders text in a span - so without this the heading never wrapped and
+     * ran straight off its box.
+     */
+    display: 'inline-block',
+    maxWidth: `${text.boxWidth ?? 92}cqw`,
     filter: SHADOW_FILTERS[style.shadow] ?? 'none',
     ...fillTextCss(style.fill),
   };

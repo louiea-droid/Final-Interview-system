@@ -7,6 +7,7 @@ import {
   ChevronUp,
   ChevronsDown,
   ChevronsUp,
+  Copy,
   Circle,
   Crown,
   ExternalLink,
@@ -21,6 +22,8 @@ import {
   Layers,
   LayoutTemplate,
   Megaphone,
+  SeparatorHorizontal,
+  SeparatorVertical,
   Lock,
   LockOpen,
   Magnet,
@@ -53,7 +56,7 @@ import {
   publishBoardLayout,
   saveTemplate,
 } from '../lib/boardLayout';
-import { useBoardLayoutEditor } from '../lib/useBoardLayoutEditor';
+import { useBoardLayoutEditor, findElement } from '../lib/useBoardLayoutEditor';
 import {
   ALIGN_OPTIONS,
   CASE_OPTIONS,
@@ -90,6 +93,18 @@ const RAIL_TABS = [
 
 /* Which rail tab owns a given kind of element, so selecting one on the
    canvas brings its panel forward too. */
+/* The elements that are positioned boxes rather than points. */
+const BOX_KINDS = {
+  candidates: {
+    label: 'Candidate Board',
+    hint: 'Drag it anywhere, or drag its corner to resize. What it shows comes from Records.',
+  },
+  announcements: {
+    label: 'Announcements',
+    hint: 'Drag it anywhere, or drag its corner to set its width. What it shows comes from Announcements.',
+  },
+};
+
 const PANEL_BY_KIND = {
   logo: 'brand',
   candidates: 'brand',
@@ -116,6 +131,8 @@ function propertiesTitle(kind, shape) {
       return 'Text';
     case 'shape':
       return shape ? shapeLabel(shape) : 'Shape';
+    case 'divider':
+      return 'Divider';
     default:
       return '';
   }
@@ -140,9 +157,13 @@ export default function AdminVisualBoard() {
 
   /* { kind, id, x, y } while the right-click order menu is open */
   const [orderMenu, setOrderMenu] = useState(null);
+
+  /* The element Ctrl+C remembered, for Ctrl+V to copy. */
+  const [clipboard, setClipboard] = useState(null);
   const [isDirty, setIsDirty] = useState(false);
 
-  const [zoom, setZoom] = useState('1'); // '0.5' | '0.75' | '1' | 'fit'
+  // '0.5' | '0.75' | '1' | 'fit' - a share of the stage's height
+  const [zoom, setZoom] = useState('fit');
   const [showGrid, setShowGrid] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -155,6 +176,7 @@ export default function AdminVisualBoard() {
   const canvasRef = useRef(null);
   const middleColumnRef = useRef(null);
   const stageRef = useRef(null);
+  const layoutRef = useRef(null);
   const publishedSnapshotRef = useRef(JSON.stringify(loadBoardLayout()));
   const showToast = useToast();
 
@@ -213,13 +235,23 @@ export default function AdminVisualBoard() {
      while the user is typing in a field. */
   useEffect(() => {
     function handleKeydown(event) {
-      const isMeta = event.ctrlKey || event.metaKey;
-      if (!isMeta) return;
-
       const isEditing = event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]');
       if (isEditing) return;
 
+      const isMeta = event.ctrlKey || event.metaKey;
+
+      /* Delete needs no modifier - it is the obvious key for it. */
+      if (!isMeta && (event.key === 'Delete' || event.key === 'Backspace')) {
+        if (!selected) return;
+        event.preventDefault();
+        removeSelected();
+        return;
+      }
+
+      if (!isMeta) return;
+
       const key = event.key.toLowerCase();
+
       if (key === 'z' && event.shiftKey) {
         event.preventDefault();
         editor.redo();
@@ -229,18 +261,85 @@ export default function AdminVisualBoard() {
       } else if (key === 'y') {
         event.preventDefault();
         editor.redo();
+      } else if (key === 'c') {
+        /* Copy remembers the selection; paste puts a copy of it down. */
+        if (!selected) return;
+        event.preventDefault();
+        setClipboard(selected);
+      } else if (key === 'v') {
+        if (!clipboard) return;
+        event.preventDefault();
+        const copyId = editor.duplicateElement(clipboard.kind, clipboard.id);
+        if (copyId) setSelected({ kind: clipboard.kind, id: copyId });
+        else showToast(`There can only be one ${describe(clipboard).toLowerCase()}.`);
+      } else if (key === 'd') {
+        if (!selected) return;
+        event.preventDefault();
+        duplicateSelected();
       }
     }
 
     window.addEventListener('keydown', handleKeydown);
     return () => window.removeEventListener('keydown', handleKeydown);
-  }, [editor]);
+  }, [editor, selected, clipboard, layout]);
 
+  /*
+   * Sizes the workspace to whatever is left below the header and toolbar,
+   * measured rather than guessed: a hard-coded offset drifts the moment the
+   * chrome above changes height, and being a few pixels out is the
+   * difference between reaching the bottom and putting a scrollbar on the
+   * page.
+   */
+  useEffect(() => {
+    const node = layoutRef.current;
+    if (!node) return;
+
+    function fit() {
+      if (document.fullscreenElement) {
+        node.style.removeProperty('--vb-chrome');
+        return;
+      }
+
+      const top = node.getBoundingClientRect().top + window.scrollY;
+
+      /*
+       * The page's own bottom padding sits below the workspace, so it has
+       * to come out of the height too - leaving it in is what put a nine
+       * pixel scrollbar on the page.
+       */
+      const container = node.closest('.dashboard-content');
+      const gap = container
+        ? parseFloat(getComputedStyle(container).paddingBottom) || 0
+        : 18;
+
+      /* rounded up, so a sub-pixel offset cannot leave a 1px scrollbar */
+      node.style.setProperty('--vb-chrome', `${Math.ceil(top) + Math.ceil(gap) + 1}px`);
+    }
+
+    fit();
+
+    const observer = new ResizeObserver(fit);
+    observer.observe(document.documentElement);
+    document.addEventListener('fullscreenchange', fit);
+
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('fullscreenchange', fit);
+    };
+  }, []);
+
+  /*
+   * Fullscreen takes the whole workspace rather than the canvas alone.
+   * Only the canvas used to go fullscreen, which left the element rail and
+   * the properties panel outside the fullscreen element and therefore
+   * invisible - nothing could be selected or changed until you came back
+   * out again.
+   */
   function toggleFullscreen() {
     if (document.fullscreenElement) {
       document.exitFullscreen();
     } else {
-      stageRef.current?.requestFullscreen();
+      layoutRef.current?.requestFullscreen();
     }
   }
 
@@ -311,6 +410,45 @@ export default function AdminVisualBoard() {
       window.removeEventListener('keydown', onKey);
     };
   }, [orderMenu]);
+
+  /*
+   * Arrow keys nudge whatever is selected. This is what makes an element
+   * that something larger is sitting on top of still movable: pick it in
+   * the layers panel, then walk it out from under the thing covering it.
+   * Shift takes bigger steps.
+   */
+  useEffect(() => {
+    if (!selected) return;
+
+    function onKeyDown(event) {
+      const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[
+        event.key
+      ];
+      if (!step) return;
+
+      // never steal the arrows from a field being typed in
+      const tag = event.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable) {
+        return;
+      }
+
+      const element = findElement(layout, selected.kind, selected.id);
+      if (!element || element.locked) return;
+
+      event.preventDefault();
+
+      const distance = event.shiftKey ? 5 : 0.5;
+      editor.setPosition(
+        selected.kind,
+        selected.id,
+        element.x + step[0] * distance,
+        element.y + step[1] * distance
+      );
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selected, layout, editor]);
 
   function handleContextMenu(kind, id) {
     return (event) => {
@@ -386,6 +524,10 @@ export default function AdminVisualBoard() {
     select('text', editor.addText());
   }
 
+  function addDividerAndSelect(orientation) {
+    select('divider', editor.addDivider(orientation));
+  }
+
   function addShapeAndSelect(kind) {
     select('shape', editor.addShape(kind));
   }
@@ -407,9 +549,60 @@ export default function AdminVisualBoard() {
 
   function removeSelected() {
     if (!selected) return;
-    if (selected.kind === 'image') removePhoto(selected.id);
-    if (selected.kind === 'text') removeText(selected.id);
-    if (selected.kind === 'shape') removeShape(selected.id);
+
+    const element = findElement(layout, selected.kind, selected.id);
+    if (element?.locked) {
+      showToast('That element is locked.');
+      return;
+    }
+
+    const outcome = editor.removeElement(selected.kind, selected.id);
+
+    if (outcome === 'hidden') {
+      showToast(`${describe(selected)} hidden - turn it back on from Layers.`);
+    }
+
+    setSelected(null);
+    setMultiSelected([]);
+  }
+
+  /* Copies the selected element, and selects the copy. */
+  function duplicateSelected() {
+    if (!selected) return;
+
+    const copyId = editor.duplicateElement(selected.kind, selected.id);
+
+    if (!copyId) {
+      showToast(`There can only be one ${describe(selected).toLowerCase()}.`);
+      return;
+    }
+
+    setSelected({ kind: selected.kind, id: copyId });
+    setMultiSelected([]);
+  }
+
+  /* A readable name for a selection, for messages. */
+  function describe(target) {
+    if (BOX_KINDS[target.kind]) return BOX_KINDS[target.kind].label;
+    if (target.kind === 'logo') return 'Logo';
+    return target.kind.charAt(0).toUpperCase() + target.kind.slice(1);
+  }
+
+  /*
+   * A divider's CSS. The grab area is padded out to a usable thickness even
+   * when the rule itself is a hairline, so a 1px line is still easy to hit.
+   */
+  function dividerStyle(divider) {
+    const vertical = divider.orientation !== 'horizontal';
+    const grab = Math.max(divider.thickness, 10);
+
+    return {
+      left: `${divider.x}%`,
+      top: `${divider.y}%`,
+      width: vertical ? `${grab}px` : `${divider.length}%`,
+      height: vertical ? `${divider.length}%` : `${grab}px`,
+      transform: 'translate(-50%, -50%)',
+    };
   }
 
   /* A positioned box's CSS - centred on its position, sized in percentages. */
@@ -446,6 +639,16 @@ export default function AdminVisualBoard() {
       return { label: 'Announcements', Icon: Megaphone, element: layout.announcements };
     }
 
+    if (entry.kind === 'divider') {
+      const index = layout.dividers.findIndex((item) => item.id === entry.id);
+      if (index < 0) return null;
+      return {
+        label: `Divider ${index + 1}`,
+        Icon: SeparatorVertical,
+        element: layout.dividers[index],
+      };
+    }
+
     if (entry.kind === 'text') {
       const index = layout.texts.findIndex((item) => item.id === entry.id);
       if (index < 0) return null;
@@ -473,6 +676,37 @@ export default function AdminVisualBoard() {
    * separately inline, since its markup is a fixed, non-draggable block.
    */
   function renderLayerEntry(entry) {
+    if (entry.kind === 'divider') {
+      const divider = layout.dividers.find((item) => item.id === entry.id);
+      if (!divider || !isVisible(divider)) return null;
+
+      const selectedOnCanvas = isSelected('divider', divider.id);
+
+      return (
+        <div
+          key={divider.id}
+          className={`vb-box vb-divider-box ${
+            divider.orientation === 'horizontal' ? 'is-horizontal' : ''
+          } ${selectedOnCanvas ? 'selected' : ''} ${
+            isMultiSelected('divider', divider.id) ? 'multi-selected' : ''
+          }`}
+          style={dividerStyle(divider)}
+          onPointerDown={handlePointerDown('divider', divider.id)}
+          onContextMenu={handleContextMenu('divider', divider.id)}
+        >
+          <span className="vb-divider-line" aria-hidden="true" />
+
+          {selectedOnCanvas && (
+            <span
+              className="vb-shape-resize"
+              title="Drag to set its length"
+              onPointerDown={editor.beginDividerResize(divider.id)}
+            />
+          )}
+        </div>
+      );
+    }
+
     if (entry.kind === 'candidates') {
       const box = layout.candidates;
       if (!isVisible(box)) return null;
@@ -564,6 +798,14 @@ export default function AdminVisualBoard() {
           onContextMenu={handleContextMenu('logo', null)}
         >
           <img src={layout.logo.url || '/visual/logo.png'} alt="" className="vb-logo-img" />
+
+          {isSelected('logo') && (
+            <span
+              className="vb-shape-resize"
+              title="Drag to resize"
+              onPointerDown={editor.beginScaleResize('logo', null, LOGO_BASE_WIDTH)}
+            />
+          )}
         </button>
       );
     }
@@ -584,6 +826,14 @@ export default function AdminVisualBoard() {
           onContextMenu={handleContextMenu('text', text.id)}
         >
           <span style={resolveTextStyle(text)}>{text.text}</span>
+
+          {isSelected('text', text.id) && (
+            <span
+              className="vb-shape-resize"
+              title="Drag to resize"
+              onPointerDown={editor.beginFontResize(text.id)}
+            />
+          )}
         </button>
       );
     }
@@ -604,6 +854,14 @@ export default function AdminVisualBoard() {
           onContextMenu={handleContextMenu('image', image.id)}
         >
           <img src={image.url} alt="" className="vb-photo-img" />
+
+          {isSelected('image', image.id) && (
+            <span
+              className="vb-shape-resize"
+              title="Drag to resize"
+              onPointerDown={editor.beginScaleResize('image', image.id, PHOTO_BASE_WIDTH)}
+            />
+          )}
         </button>
       );
     }
@@ -648,6 +906,11 @@ export default function AdminVisualBoard() {
   const selectedShape =
     selected?.kind === 'shape' ? layout.shapes.find((shape) => shape.id === selected.id) : null;
 
+  const selectedDivider =
+    selected?.kind === 'divider'
+      ? layout.dividers.find((divider) => divider.id === selected.id)
+      : null;
+
   const selectedElement =
     selected?.kind === 'logo'
       ? layout.logo
@@ -655,7 +918,9 @@ export default function AdminVisualBoard() {
         ? selectedImage
         : selected?.kind === 'text'
           ? selectedText
-          : selectedShape;
+          : selected?.kind === 'divider'
+            ? selectedDivider
+            : selectedShape;
 
   const isTextSelected = selected?.kind === 'text';
   const shapeLabels = labelShapes(layout.shapes);
@@ -797,7 +1062,7 @@ export default function AdminVisualBoard() {
           </button>
         </div>
 
-        <div className="vb-layout">
+        <div className="vb-layout" ref={layoutRef}>
           {/* ================= ELEMENTS ================= */}
 
           <div className="vb-elements-col">
@@ -821,6 +1086,26 @@ export default function AdminVisualBoard() {
             <div className="vb-panel">
               {activePanel === 'elements' && (
                 <>
+                  <p className="vb-panel-label">Add a divider</p>
+                  <div className="vb-shape-grid">
+                    <button
+                      type="button"
+                      className="vb-shape-grid-button"
+                      onClick={() => addDividerAndSelect('vertical')}
+                    >
+                      <SeparatorVertical size={16} />
+                      <span>Vertical</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="vb-shape-grid-button"
+                      onClick={() => addDividerAndSelect('horizontal')}
+                    >
+                      <SeparatorHorizontal size={16} />
+                      <span>Horizontal</span>
+                    </button>
+                  </div>
+
                   <p className="vb-panel-label">Add a shape</p>
                   <div className="vb-shape-grid">
                     {SHAPE_KINDS.map((option) => {
@@ -1090,7 +1375,12 @@ export default function AdminVisualBoard() {
               <div
                 className={`vb-canvas ${showGrid ? 'show-grid' : ''}`}
                 ref={canvasRef}
-                style={{ width: `${zoom === 'fit' ? fitPercent : Number(zoom) * 100}%` }}
+                /*
+                 * Height-driven, so the board fills the stage down to the
+                 * bottom and its 16:9 ratio gives the width. Zoom scales
+                 * that height; "fit" is simply all of it.
+                 */
+                style={{ height: `${zoom === 'fit' ? 100 : Number(zoom) * 100}%` }}
               >
                 {/*
                   One free-form surface, matching the live board: every
@@ -1149,20 +1439,17 @@ export default function AdminVisualBoard() {
                   select more than one and group them.
                 </p>
               </div>
-            ) : selected.kind === 'candidates' || selected.kind === 'announcements' ? (
+            ) : BOX_KINDS[selected.kind] ? (
               (() => {
-                const isBoard = selected.kind === 'candidates';
-                const box = isBoard ? layout.candidates : layout.announcements;
+                const box = layout[selected.kind];
 
                 return (
                   <>
                     <h3 className="vb-properties-title">
-                      {isBoard ? 'Candidate Board' : 'Announcements'}
+                      {BOX_KINDS[selected.kind].label}
                     </h3>
                     <p className="vb-properties-hint">
-                      {isBoard
-                        ? 'Drag it anywhere on the board, or drag its corner to resize. What it shows comes from Records.'
-                        : 'Drag it anywhere on the board, or drag its corner to set its width. What it shows comes from Announcements.'}
+                      {BOX_KINDS[selected.kind].hint}
                     </p>
 
                     <div className="vb-field-row">
@@ -1203,23 +1490,25 @@ export default function AdminVisualBoard() {
                     </div>
 
                     <div className="vb-field-row">
-                      <label htmlFor="vb-box-w">
-                        W %
-                        <input
-                          id="vb-box-w"
-                          className="form-input"
-                          type="number"
-                          min="8"
-                          max="100"
-                          step="0.5"
-                          value={Number(box.width.toFixed(1))}
-                          onChange={(event) =>
-                            editor.updateElement(selected.kind, null, {
-                              width: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </label>
+                      {box.width !== undefined && (
+                        <label htmlFor="vb-box-w">
+                          W %
+                          <input
+                            id="vb-box-w"
+                            className="form-input"
+                            type="number"
+                            min="1"
+                            max="100"
+                            step="0.5"
+                            value={Number(box.width.toFixed(1))}
+                            onChange={(event) =>
+                              editor.updateElement(selected.kind, null, {
+                                width: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                      )}
 
                       {box.height !== undefined && (
                         <label htmlFor="vb-box-h">
@@ -1240,6 +1529,57 @@ export default function AdminVisualBoard() {
                           />
                         </label>
                       )}
+                    </div>
+
+                    {box.secondsPerCard !== undefined && (
+                      <div className="vb-field-row">
+                        <label htmlFor="vb-carousel-speed">
+                          Carousel seconds per card
+                          <input
+                            id="vb-carousel-speed"
+                            className="form-input"
+                            type="number"
+                            min="0.5"
+                            max="30"
+                            step="0.5"
+                            value={box.secondsPerCard}
+                            onChange={(event) =>
+                              editor.updateElement(selected.kind, null, {
+                                secondsPerCard: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+                    )}
+
+                    {box.secondsPerCard !== undefined && (
+                      <input
+                        className="vb-range"
+                        type="range"
+                        min="0.5"
+                        max="12"
+                        step="0.5"
+                        value={box.secondsPerCard}
+                        aria-label="Carousel speed"
+                        onChange={(event) =>
+                          editor.updateElement(selected.kind, null, {
+                            secondsPerCard: Number(event.target.value),
+                          })
+                        }
+                      />
+                    )}
+
+                    <div className="vb-element-actions">
+                      <button
+                        type="button"
+                        className="delete-button vb-remove-button"
+                        onClick={removeSelected}
+                        title="Remove (Delete)"
+                      >
+                        <Trash2 size={12} />
+                        Remove from board
+                      </button>
                     </div>
                   </>
                 );
@@ -1534,6 +1874,88 @@ export default function AdminVisualBoard() {
                   </div>
                 )}
 
+                {selected.kind === 'text' && selectedElement && (
+                  <div className="vb-field-row">
+                    <label htmlFor="vb-text-box-width">
+                      Box width %
+                      <input
+                        id="vb-text-box-width"
+                        className="form-input"
+                        type="number"
+                        min="5"
+                        max="100"
+                        step="1"
+                        value={Number((selectedElement.boxWidth ?? 92).toFixed(0))}
+                        onChange={(event) =>
+                          editor.updateElement('text', selected.id, {
+                            boxWidth: Number(event.target.value),
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {selected.kind === 'divider' && selectedElement && (
+                  <>
+                    <div className="vb-field-row">
+                      <label htmlFor="vb-divider-dir">
+                        Direction
+                        <select
+                          id="vb-divider-dir"
+                          className="form-select"
+                          value={selectedElement.orientation}
+                          onChange={(event) =>
+                            editor.updateDivider(selected.id, {
+                              orientation: event.target.value,
+                            })
+                          }
+                        >
+                          <option value="vertical">Vertical</option>
+                          <option value="horizontal">Horizontal</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="vb-field-row">
+                      <label htmlFor="vb-divider-len">
+                        Length %
+                        <input
+                          id="vb-divider-len"
+                          className="form-input"
+                          type="number"
+                          min="2"
+                          max="100"
+                          step="1"
+                          value={Number(selectedElement.length.toFixed(1))}
+                          onChange={(event) =>
+                            editor.updateDivider(selected.id, {
+                              length: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label htmlFor="vb-divider-thick">
+                        Thickness
+                        <input
+                          id="vb-divider-thick"
+                          className="form-input"
+                          type="number"
+                          min="1"
+                          max="24"
+                          step="1"
+                          value={selectedElement.thickness}
+                          onChange={(event) =>
+                            editor.updateDivider(selected.id, {
+                              thickness: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                  </>
+                )}
+
                 {selected.kind === 'shape' && (
                   <>
                     <div className="vb-field-row">
@@ -1724,14 +2146,32 @@ export default function AdminVisualBoard() {
                   </div>
                 )}
 
-                {(selected.kind === 'image' ||
-                  selected.kind === 'text' ||
-                  selected.kind === 'shape') && (
-                  <button type="button" className="delete-button vb-remove-button" onClick={removeSelected}>
+                <div className="vb-element-actions">
+                  {(selected.kind === 'image' ||
+                    selected.kind === 'text' ||
+                    selected.kind === 'shape' ||
+                    selected.kind === 'divider') && (
+                    <button
+                      type="button"
+                      className="secondary-button vb-duplicate-button"
+                      onClick={duplicateSelected}
+                      title="Duplicate (Ctrl+D)"
+                    >
+                      <Copy size={12} />
+                      Duplicate
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className="delete-button vb-remove-button"
+                    onClick={removeSelected}
+                    title="Remove (Delete)"
+                  >
                     <Trash2 size={12} />
-                    Remove {propertiesTitle(selected.kind, selectedShape)}
+                    Remove
                   </button>
-                )}
+                </div>
               </>
             )}
           </div>

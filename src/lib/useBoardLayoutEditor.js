@@ -9,7 +9,12 @@ import { imageFill } from './fill';
 const MAX_IMAGE_EDGE = 800;
 
 /* Which list each addressable kind lives in; anything else is a singleton. */
-const LIST_BY_KIND = { image: 'images', text: 'texts', shape: 'shapes' };
+const LIST_BY_KIND = {
+  image: 'images',
+  text: 'texts',
+  shape: 'shapes',
+  divider: 'dividers',
+};
 
 /* Undo history: how many steps are kept, and how close together in time
    edits have to be to collapse into a single step - a drag or a slider
@@ -37,6 +42,7 @@ function collectPositionedElements(layout) {
     ...layout.texts.map((item) => ({ kind: 'text', ...item })),
     ...layout.images.map((item) => ({ kind: 'image', ...item })),
     ...layout.shapes.map((item) => ({ kind: 'shape', ...item })),
+    ...layout.dividers.map((item) => ({ kind: 'divider', ...item })),
   ];
 }
 
@@ -360,6 +366,61 @@ export function useBoardLayoutEditor(
    * Resizing a shape holds its centre still, so the corner handle stays under
    * the cursor: half the box is the distance from the centre to the pointer.
    */
+  /*
+   * Resizes the logo or a photo by dragging its corner. Both are sized as a
+   * multiplier of a base width, so the drag reads the half-width the pointer
+   * is asking for and divides by the base to get the multiplier.
+   */
+  function beginScaleResize(kind, id, baseWidth) {
+    return (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const element = findElement(latestLayoutRef.current, kind, id);
+      if (!element || element.locked) return;
+
+      dragWith((moveEvent, rect) => {
+        const centerX = rect.left + (element.x / 100) * rect.width;
+        const halfWidth = (Math.abs(moveEvent.clientX - centerX) * 100) / rect.width;
+
+        commitFrom(
+          (current) =>
+            patchElement(current, kind, id, {
+              scale: Math.min(6, Math.max(0.1, (halfWidth * 2) / baseWidth)),
+            }),
+          { immediate: false }
+        );
+      });
+    };
+  }
+
+  /*
+   * Resizes a text block by dragging its corner. Type is sized against the
+   * board's height, so the drag measures vertically from the block's centre.
+   */
+  function beginFontResize(id) {
+    return (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const text = findElement(latestLayoutRef.current, 'text', id);
+      if (!text || text.locked) return;
+
+      dragWith((moveEvent, rect) => {
+        const centerY = rect.top + (text.y / 100) * rect.height;
+        const halfHeight = (Math.abs(moveEvent.clientY - centerY) * 100) / rect.height;
+
+        commitFrom(
+          (current) =>
+            patchElement(current, 'text', id, {
+              fontSize: Math.min(40, Math.max(0.3, halfHeight * 2)),
+            }),
+          { immediate: false }
+        );
+      });
+    };
+  }
+
   function beginResize(id) {
     return (event) => {
       event.preventDefault();
@@ -488,6 +549,110 @@ export function useBoardLayoutEditor(
       if (!element) return current;
       return patchElement(current, kind, id, { visible: !isVisible(element) });
     });
+  }
+
+  /* A new divider, dropped in the middle of the board. */
+  function addDivider(orientation = 'vertical') {
+    const id = crypto.randomUUID();
+
+    commitFrom((current) => ({
+      ...current,
+      dividers: [
+        ...current.dividers,
+        { id, x: 50, y: 50, length: 70, thickness: 1, orientation, visible: true },
+      ],
+      layerOrder: [...current.layerOrder, { kind: 'divider', id }],
+    }));
+
+    return id;
+  }
+
+  /* Drag a divider's end to set how long it is. */
+  function beginDividerResize(id) {
+    return (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const divider = findElement(latestLayoutRef.current, 'divider', id);
+      if (!divider || divider.locked) return;
+
+      dragWith((moveEvent, rect) => {
+        const vertical = divider.orientation !== 'horizontal';
+
+        const center = vertical
+          ? rect.top + (divider.y / 100) * rect.height
+          : rect.left + (divider.x / 100) * rect.width;
+        const pointer = vertical ? moveEvent.clientY : moveEvent.clientX;
+        const extent = vertical ? rect.height : rect.width;
+
+        const length = (Math.abs(pointer - center) * 2 * 100) / extent;
+
+        commitFrom(
+          (current) =>
+            patchElement(current, 'divider', id, {
+              length: Math.min(100, Math.max(2, length)),
+            }),
+          { immediate: false }
+        );
+      });
+    };
+  }
+
+  /*
+   * Copies an element and drops the copy slightly down and to the right of
+   * the original, on top of the paint order. Only the kinds that can exist
+   * more than once are copyable - the logo, the candidate board, the
+   * announcement strip and the divider are each one of a kind.
+   */
+  function duplicateElement(kind, id) {
+    const list = LIST_BY_KIND[kind];
+    if (!list) return null;
+
+    const source = findElement(latestLayoutRef.current, kind, id);
+    if (!source) return null;
+
+    const copy = {
+      ...source,
+      id: crypto.randomUUID(),
+      x: clampPercent(source.x + 3),
+      y: clampPercent(source.y + 3),
+      locked: false,
+      /* a copy is its own element, not a member of the original's group */
+      groupId: undefined,
+    };
+
+    commitFrom((current) => ({
+      ...current,
+      [list]: [...current[list], copy],
+      layerOrder: [...current.layerOrder, { kind, id: copy.id }],
+    }));
+
+    return copy.id;
+  }
+
+  /*
+   * Takes an element off the board. The kinds that live in a list are
+   * deleted outright; the one-of-a-kind ones are hidden instead, since
+   * there would be no way to add them back - the layers panel still lists
+   * them, so they can be turned on again.
+   */
+  function removeElement(kind, id) {
+    const list = LIST_BY_KIND[kind];
+
+    if (!list) {
+      updateElement(kind, id, { visible: false });
+      return 'hidden';
+    }
+
+    commitFrom((current) => ({
+      ...current,
+      [list]: current[list].filter((item) => item.id !== id),
+      layerOrder: current.layerOrder.filter(
+        (entry) => !(entry.kind === kind && entry.id === id)
+      ),
+    }));
+
+    return 'removed';
   }
 
   /* Logo and photo size - a multiplier of their base width. */
@@ -679,6 +844,13 @@ export function useBoardLayoutEditor(
     beginDrag,
     beginResizeBox,
     beginResize,
+    beginScaleResize,
+    beginFontResize,
+    duplicateElement,
+    removeElement,
+    addDivider,
+    beginDividerResize,
+    updateDivider: (id, patch) => updateElement('divider', id, patch),
     setPosition,
     toggleVisible,
     setScale,

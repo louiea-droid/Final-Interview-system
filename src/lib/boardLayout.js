@@ -26,6 +26,15 @@ import {
 } from './textStyle';
 import { normalizeShapes } from './shapeStyle';
 
+/*
+ * Bumped when stored geometry stops meaning what it used to. Positions were
+ * once percentages of a middle column that took about half the board's
+ * width; on one free-form surface those same numbers point somewhere else
+ * entirely, so a layout from before the change is dropped rather than
+ * reinterpreted into a scramble.
+ */
+export const LAYOUT_VERSION = 3;
+
 export const LAYOUT_KEY = 'interview-board-layout';
 export const DRAFT_KEY = 'interview-board-layout:draft';
 export const LAYOUT_EVENT = 'interview-board-layout-updated';
@@ -43,16 +52,34 @@ export const DEFAULT_CANDIDATES = {
   y: 56,
   width: 58,
   height: 74,
+  /* Seconds the carousel spends per card - lower is faster. */
+  secondsPerCard: 4,
 };
 
 export const DEFAULT_ANNOUNCEMENTS = {
-  visible: true,
+  /* off by default - turn it on from the Layers panel when it is wanted */
+  visible: false,
   x: 27,
   y: 78,
   width: 42,
 };
 
+/*
+ * The soft gold rules that used to be the column edges. They are ordinary
+ * list elements now - as many as you like, each with its own position,
+ * length, thickness and direction - so nothing about them is capped.
+ */
+export const DEFAULT_DIVIDER = {
+  x: 50,
+  y: 50,
+  length: 78,
+  thickness: 1,
+  orientation: 'vertical',
+  visible: true,
+};
+
 export const DEFAULT_LAYOUT = {
+  version: LAYOUT_VERSION,
   logo: { visible: true, url: null, x: 24, y: 16, scale: 1 },
   candidates: DEFAULT_CANDIDATES,
   announcements: DEFAULT_ANNOUNCEMENTS,
@@ -78,6 +105,8 @@ export const DEFAULT_LAYOUT = {
     },
   ],
   images: [], // { id, url, x, y, scale, visible, locked?, groupId? }
+  // { id, x, y, length, thickness, orientation, visible, locked?, groupId? }
+  dividers: [{ ...DEFAULT_DIVIDER, id: 'divider-1' }],
   shapes: [], // { id, kind, x, y, width, height, rotation, radius, layer, fill, stroke, visible, locked?, groupId? }
   /*
    * Paint order, back to front, across every kind at once - the layers
@@ -87,6 +116,7 @@ export const DEFAULT_LAYOUT = {
    */
   layerOrder: [
     { kind: 'logo', id: null },
+    { kind: 'divider', id: 'divider-1' },
     { kind: 'candidates', id: null },
     { kind: 'announcements', id: null },
     { kind: 'text', id: 'heading' },
@@ -109,6 +139,8 @@ function normalizeText(text, base = DEFAULT_EXTRA_TEXT_STYLE, baseSize = DEFAULT
       ? clamp(text.fontSize, 0.3, 40)
       : clamp(baseSize * (Number(text.scale) || 1), 0.3, 40),
     visible: text.visible !== false,
+    /* How wide the text may run before wrapping, as a share of the board. */
+    boxWidth: clamp(text.boxWidth ?? 92, 5, 100),
     style: normalizeTextStyle(text.style, base),
   };
 }
@@ -130,6 +162,7 @@ function normalizeLayerOrder(saved, layout) {
     { kind: 'candidates', id: null },
     { kind: 'announcements', id: null },
     ...layout.texts.map((item) => ({ kind: 'text', id: item.id })),
+    ...layout.dividers.map((item) => ({ kind: 'divider', id: item.id })),
     ...layout.images.map((item) => ({ kind: 'image', id: item.id })),
     ...layout.shapes.map((item) => ({ kind: 'shape', id: item.id })),
   ];
@@ -151,6 +184,33 @@ function normalizeLayerOrder(saved, layout) {
   return ordered;
 }
 
+/*
+ * Every divider on the board. A layout from when there was only ever one
+ * carries it over as the first entry of the list.
+ */
+function normalizeDividers(parsed) {
+  const source = Array.isArray(parsed.dividers)
+    ? parsed.dividers
+    : parsed.divider
+      ? [parsed.divider]
+      : [];
+
+  return source
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => ({
+      id: item.id ?? crypto.randomUUID(),
+      x: clamp(item.x ?? DEFAULT_DIVIDER.x, 0, 100),
+      y: clamp(item.y ?? DEFAULT_DIVIDER.y, 0, 100),
+      // `height` was the field before dividers could also run across
+      length: clamp(item.length ?? item.height ?? DEFAULT_DIVIDER.length, 2, 100),
+      thickness: clamp(item.thickness ?? DEFAULT_DIVIDER.thickness, 1, 24),
+      orientation: item.orientation === 'horizontal' ? 'horizontal' : 'vertical',
+      visible: item.visible !== false,
+      locked: item.locked === true,
+      ...(item.groupId ? { groupId: item.groupId } : {}),
+    }));
+}
+
 /* A positioned, sized box - the candidate board and the announcement strip. */
 function normalizeBox(box, defaults) {
   const source = box && typeof box === 'object' ? box : {};
@@ -160,10 +220,21 @@ function normalizeBox(box, defaults) {
     locked: source.locked === true,
     x: clamp(source.x ?? defaults.x, 0, 100),
     y: clamp(source.y ?? defaults.y, 0, 100),
-    width: clamp(source.width ?? defaults.width, 8, 100),
+    ...(defaults.width === undefined
+      ? {}
+      : { width: clamp(source.width ?? defaults.width, 1, 100) }),
     ...(defaults.height === undefined
       ? {}
       : { height: clamp(source.height ?? defaults.height, 8, 100) }),
+    ...(defaults.secondsPerCard === undefined
+      ? {}
+      : {
+          secondsPerCard: clamp(
+            source.secondsPerCard ?? defaults.secondsPerCard,
+            0.5,
+            30
+          ),
+        }),
   };
 }
 
@@ -208,11 +279,13 @@ function normalizeLayout(parsed) {
     logo: { ...DEFAULT_LAYOUT.logo, ...(parsed.logo ?? {}) },
     candidates: normalizeBox(parsed.candidates, DEFAULT_CANDIDATES),
     announcements: normalizeBox(parsed.announcements, DEFAULT_ANNOUNCEMENTS),
+    dividers: normalizeDividers(parsed),
     texts: hasTextData ? texts : DEFAULT_LAYOUT.texts,
     images: Array.isArray(parsed.images) ? parsed.images : [],
     shapes: normalizeShapes(parsed.shapes),
   };
 
+  layout.version = LAYOUT_VERSION;
   layout.layerOrder = normalizeLayerOrder(parsed.layerOrder, layout);
 
   return layout;
@@ -222,7 +295,16 @@ function readLayout(key) {
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
-    return normalizeLayout(JSON.parse(raw));
+
+    const parsed = JSON.parse(raw);
+
+    // geometry from before the free-form change cannot be carried over
+    if (parsed?.version !== LAYOUT_VERSION) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+
+    return normalizeLayout(parsed);
   } catch {
     return null;
   }

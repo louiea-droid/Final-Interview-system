@@ -282,11 +282,13 @@ export default function DisplayPage() {
    * =========================================================
    */
 
-  const CAROUSEL_SECONDS_PER_CARD = 4;
+  /* Set per board in the editor; the pace is per card, not per loop. */
+  const secondsPerCard = layout.candidates.secondsPerCard ?? 4;
 
   const carouselDuration = Math.max(
-    16,
-    candidates.length * CAROUSEL_SECONDS_PER_CARD
+    /* a short list still needs long enough not to be a blur */
+    secondsPerCard * 4,
+    candidates.length * secondsPerCard
   );
 
   /*
@@ -362,7 +364,35 @@ export default function DisplayPage() {
     );
   }
 
+  /* A soft gold rule - fading at both ends rather than a flat border. */
+  function renderDividerLayer(id) {
+    const divider = layout.dividers.find((item) => item.id === id);
+    if (!divider || !isVisible(divider)) return null;
+
+    const vertical = divider.orientation !== "horizontal";
+
+    return (
+      <div
+        key={divider.id}
+        aria-hidden="true"
+        className="absolute"
+        style={{
+          left: `${divider.x}%`,
+          top: `${divider.y}%`,
+          width: vertical ? `${divider.thickness}px` : `${divider.length}%`,
+          height: vertical ? `${divider.length}%` : `${divider.thickness}px`,
+          transform: "translate(-50%, -50%)",
+          background: `linear-gradient(to ${
+            vertical ? "bottom" : "right"
+          }, transparent, rgba(201,160,60,0.55) 18%, rgba(201,160,60,0.75) 50%, rgba(201,160,60,0.55) 82%, transparent)`,
+          boxShadow: "0 0 10px rgba(201,160,60,0.28)",
+        }}
+      />
+    );
+  }
+
   function renderLayer(entry) {
+    if (entry.kind === "divider") return renderDividerLayer(entry.id);
     if (entry.kind === "candidates") return renderCandidatesLayer();
     if (entry.kind === "announcements") return renderAnnouncementsLayer();
 
@@ -406,7 +436,7 @@ export default function DisplayPage() {
         <p
           key={text.id}
           style={{ ...positionStyle(text), ...resolveTextStyle(text) }}
-          className="absolute w-max"
+          className="absolute"
         >
           {text.text}
         </p>
