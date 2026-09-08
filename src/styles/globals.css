@@ -771,6 +771,25 @@ button {
   margin-bottom: 10px;
 }
 
+/* Two form panels side by side instead of stacked - each keeps its own
+   natural height rather than stretching to match its neighbour. */
+.panel-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  gap: 10px;
+}
+
+.panel-columns .form-panel {
+  margin-bottom: 0;
+}
+
+@media (max-width: 860px) {
+  .panel-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 .interview-chart-wrap {
   padding: 8px 0 0;
 }
@@ -890,6 +909,220 @@ button {
 .form-container {
   padding: 15px;
 
+}
+
+/* A preview of the live board's announcement banner, styled the same way
+   (dark gradient, gold border) so a font choice here shows exactly what it
+   will look like there. */
+.announcement-style-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+
+  margin-bottom: 12px;
+  padding: 14px 18px;
+
+  border: 1px solid #c9a03c;
+  border-radius: 8px;
+
+  background: linear-gradient(180deg, #3a0d0c 0%, #1c0403 100%);
+
+  text-align: center;
+}
+
+.announcement-style-preview-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  color: #f0d689;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  opacity: 0.85;
+}
+
+.announcement-style-preview-rule {
+  width: 64px;
+  height: 1px;
+  background: rgba(244, 202, 93, 0.5);
+}
+
+.announcement-style-preview p {
+  margin: 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+/*
+ * The style editor itself: a floating toolbar, not a tall stack of labelled
+ * fields - but still organised into clearly bordered groups (typography,
+ * sizing, color) rather than one undifferentiated row, so it reads as a
+ * handful of related decisions instead of a wall of identical controls.
+ */
+.announcement-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+
+  margin-bottom: 14px;
+  padding: 10px;
+
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.announcement-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+
+  padding: 6px 8px;
+
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.announcement-toolbar-select {
+  height: 32px;
+  min-width: 0;
+  width: 98px;
+  flex: 0 1 auto;
+
+  padding: 0 10px;
+
+  color: #d8d8d8;
+  font-size: 12.5px;
+  font-weight: 500;
+
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.announcement-toolbar-select:hover {
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.announcement-toolbar-select:focus {
+  border-color: rgba(244, 202, 93, 0.6);
+  box-shadow: 0 0 0 3px rgba(244, 202, 93, 0.15);
+}
+
+.announcement-toolbar-select-wide {
+  width: 122px;
+}
+
+/* An icon labelling what the slider next to it does, with a small tabular
+   readout after it - enough to see the exact value without a text label
+   above the control eating into the toolbar's height. */
+.announcement-toolbar-slider {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  padding: 0 2px;
+  color: #9a9a9a;
+}
+
+.announcement-toolbar-slider input[type='range'] {
+  width: 82px;
+  accent-color: #f4ca5d;
+}
+
+.announcement-toolbar-slider-value {
+  min-width: 34px;
+
+  color: #8b8b8b;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.announcement-toolbar-swatches {
+  gap: 9px;
+}
+
+.announcement-toolbar-swatch {
+  width: 21px;
+  height: 21px;
+  flex-shrink: 0;
+
+  border-radius: 999px;
+  border: 1px solid var(--border);
+
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.announcement-toolbar-swatch:hover {
+  transform: scale(1.12);
+}
+
+.announcement-toolbar-swatch.active {
+  border-color: #f4ca5d;
+  box-shadow: 0 0 0 2px rgba(244, 202, 93, 0.35);
+}
+
+.announcement-toolbar-icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+
+  color: #a4a4a4;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.announcement-toolbar-icon-button:hover {
+  color: #ffffff;
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.announcement-toolbar-icon-button.active {
+  background: rgba(212, 93, 89, 0.16);
+  border-color: transparent;
+  color: var(--red-status);
+}
+
+/* Sits outside the grouped clusters, pushed to the end of the row - a
+   reset is a distinct, occasional action rather than another style knob. */
+.announcement-toolbar-reset {
+  margin-left: auto;
+}
+
+.announcement-toolbar-popover {
+  position: fixed;
+  z-index: 60;
+
+  width: 260px;
+
+  padding: 10px;
+
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  background: var(--card);
+
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 
 .settings-options {

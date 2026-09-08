@@ -22,7 +22,7 @@ export const FONT_OPTIONS = [
   { value: 'magneton', label: 'Magneton', stack: "'Magneton', 'Brush Script MT', cursive" },
 ];
 
-const FONT_STACKS = Object.fromEntries(FONT_OPTIONS.map((font) => [font.value, font.stack]));
+export const FONT_STACKS = Object.fromEntries(FONT_OPTIONS.map((font) => [font.value, font.stack]));
 
 /* The three fonts the first version of this editor shipped with. */
 const LEGACY_FONTS = { display: 'poppins', script: 'styleformal', simple: 'inter' };
@@ -57,7 +57,7 @@ export const SHADOW_OPTIONS = [
   { value: 'glow', label: 'Glow' },
 ];
 
-const SHADOW_FILTERS = {
+export const SHADOW_FILTERS = {
   none: 'none',
   soft: 'drop-shadow(0 2px 8px rgba(0,0,0,.55))',
   hard: 'drop-shadow(0 3px 0 rgba(0,0,0,.65))',
