@@ -1,16 +1,41 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Megaphone, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  AlignVerticalSpaceAround,
+  Megaphone,
+  MoveHorizontal,
+  Palette,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Trash2,
+  Type,
+} from 'lucide-react';
 
 // local stand-in for the backend; same query API, no network
 import { localClient as supabase } from '../lib/localBackend';
 import { formatCurrentDate } from '../lib/adminTime';
 import TablePagination from '../components/TablePagination';
 import { useToast } from '../components/ToastProvider';
+import FillEditor from '../components/FillEditor';
+import {
+  DEFAULT_ANNOUNCEMENT_STYLE,
+  loadAnnouncementStyle,
+  normalizeAnnouncementStyle,
+  resolveAnnouncementStyle,
+  saveAnnouncementStyle,
+} from '../lib/announcementStyle';
+import { CASE_OPTIONS, FONT_OPTIONS, SHADOW_OPTIONS, WEIGHT_OPTIONS } from '../lib/textStyle';
 
 /** Whether an announcement should appear on the /visual board. */
 function isShownOnBoard(announcement) {
   return announcement.active !== false;
 }
+
+/* One representative shade from each row of the fill editor's full palette,
+   for a one-click swatch in the toolbar - the full palette (plus gradients
+   and images) is still one click away behind the palette button. */
+const QUICK_COLORS = ['#f4ca5d', '#ffffff', '#a51d1d', '#2f8fd6', '#8b5bf5'];
 
 export default function AdminAnnouncements() {
   const [announcements, setAnnouncements] = useState([]);
@@ -25,6 +50,68 @@ export default function AdminAnnouncements() {
   const [editingId, setEditingId] = useState(null);
   const [editMessage, setEditMessage] = useState('');
   const [announcementToDelete, setAnnouncementToDelete] = useState(null);
+
+  /*
+   * How announcements look on the board - saved straight to localStorage as
+   * each control changes, same as the light/dark theme toggle, since there's
+   * no draft/publish step here.
+   */
+  const [style, setStyle] = useState(() => loadAnnouncementStyle());
+  // The fill popover renders through a portal (see below) since the panel
+  // it lives in clips overflow for its rounded corners - a plain absolutely
+  // positioned child would be cut off instead of floating above the page.
+  const [fillPopoverPos, setFillPopoverPos] = useState(null);
+  const fillButtonRef = useRef(null);
+  const fillPopoverRef = useRef(null);
+
+  function toggleFillPopover() {
+    if (fillPopoverPos) {
+      setFillPopoverPos(null);
+      return;
+    }
+
+    const rect = fillButtonRef.current.getBoundingClientRect();
+    setFillPopoverPos({
+      top: rect.bottom + 8,
+      left: Math.max(8, rect.right - 260),
+    });
+  }
+
+  // Closes the fill popover on an outside click, same as any other dropdown.
+  useEffect(() => {
+    if (!fillPopoverPos) return;
+
+    function handlePointerDown(event) {
+      if (fillButtonRef.current?.contains(event.target)) return;
+      if (fillPopoverRef.current?.contains(event.target)) return;
+      setFillPopoverPos(null);
+    }
+
+    function handleScroll() {
+      setFillPopoverPos(null);
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [fillPopoverPos]);
+
+  function updateStyle(patch) {
+    setStyle((current) => {
+      const next = normalizeAnnouncementStyle({ ...current, ...patch });
+      saveAnnouncementStyle(next);
+      return next;
+    });
+  }
+
+  function resetStyle() {
+    setStyle(DEFAULT_ANNOUNCEMENT_STYLE);
+    saveAnnouncementStyle(DEFAULT_ANNOUNCEMENT_STYLE);
+    showToast.success('Announcement style reset to default.');
+  }
 
   async function loadAnnouncements() {
     setLoading(true);
@@ -154,6 +241,7 @@ export default function AdminAnnouncements() {
         </div>
       </header>
 
+      <div className="panel-columns">
       <section className="panel form-panel">
         <div className="panel-header">
           <div className="panel-title-area">
@@ -194,6 +282,192 @@ export default function AdminAnnouncements() {
           </div>
         </form>
       </section>
+
+      <section className="panel form-panel">
+        <div className="panel-header">
+          <div className="panel-title-area">
+            <div className="panel-title-icon">
+              <Type size={14} />
+            </div>
+            <div>
+              <h2 className="panel-title">Announcement Style</h2>
+              <p className="panel-subtitle">
+                How the message looks in the board's announcement banner.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="form-container">
+          <div className="announcement-toolbar">
+            <div className="announcement-toolbar-group">
+              <select
+                className="announcement-toolbar-select announcement-toolbar-select-wide"
+                title="Font"
+                aria-label="Font"
+                value={style.fontFamily}
+                onChange={(event) => updateStyle({ fontFamily: event.target.value })}
+              >
+                {FONT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value} style={{ fontFamily: option.stack }}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                className="announcement-toolbar-select"
+                title="Weight"
+                aria-label="Weight"
+                value={style.weight}
+                onChange={(event) => updateStyle({ weight: Number(event.target.value) })}
+              >
+                {WEIGHT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                className="announcement-toolbar-select"
+                title="Case"
+                aria-label="Case"
+                value={style.textCase}
+                onChange={(event) => updateStyle({ textCase: event.target.value })}
+              >
+                {CASE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                className="announcement-toolbar-select"
+                title="Shadow"
+                aria-label="Shadow"
+                value={style.shadow}
+                onChange={(event) => updateStyle({ shadow: event.target.value })}
+              >
+                {SHADOW_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="announcement-toolbar-group">
+              <label className="announcement-toolbar-slider" title="Size">
+                <Type size={13} />
+                <input
+                  type="range"
+                  min="1"
+                  max="6"
+                  step="0.1"
+                  aria-label="Size"
+                  value={style.fontSize}
+                  onChange={(event) => updateStyle({ fontSize: Number(event.target.value) })}
+                />
+                <span className="announcement-toolbar-slider-value">{style.fontSize.toFixed(1)}</span>
+              </label>
+
+              <label className="announcement-toolbar-slider" title="Letter spacing">
+                <MoveHorizontal size={13} />
+                <input
+                  type="range"
+                  min="-0.05"
+                  max="0.4"
+                  step="0.005"
+                  aria-label="Letter spacing"
+                  value={style.letterSpacing}
+                  onChange={(event) => updateStyle({ letterSpacing: Number(event.target.value) })}
+                />
+                <span className="announcement-toolbar-slider-value">
+                  {style.letterSpacing.toFixed(2)}em
+                </span>
+              </label>
+
+              <label className="announcement-toolbar-slider" title="Line height">
+                <AlignVerticalSpaceAround size={13} />
+                <input
+                  type="range"
+                  min="0.9"
+                  max="2"
+                  step="0.05"
+                  aria-label="Line height"
+                  value={style.lineHeight}
+                  onChange={(event) => updateStyle({ lineHeight: Number(event.target.value) })}
+                />
+                <span className="announcement-toolbar-slider-value">{style.lineHeight.toFixed(2)}</span>
+              </label>
+            </div>
+
+            <div className="announcement-toolbar-group announcement-toolbar-swatches">
+              {QUICK_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  className={`announcement-toolbar-swatch ${
+                    style.fill.type === 'solid' && style.fill.color === color ? 'active' : ''
+                  }`}
+                  style={{ background: color }}
+                  title={color}
+                  aria-label={`Fill ${color}`}
+                  onClick={() => updateStyle({ fill: { type: 'solid', color, opacity: 1 } })}
+                />
+              ))}
+
+              <button
+                ref={fillButtonRef}
+                type="button"
+                className={`announcement-toolbar-icon-button ${fillPopoverPos ? 'active' : ''}`}
+                title="More colors"
+                aria-label="More colors"
+                aria-expanded={Boolean(fillPopoverPos)}
+                onClick={toggleFillPopover}
+              >
+                <Palette size={13} />
+              </button>
+
+              {fillPopoverPos &&
+                createPortal(
+                  <div
+                    ref={fillPopoverRef}
+                    className="announcement-toolbar-popover"
+                    style={{ top: fillPopoverPos.top, left: fillPopoverPos.left }}
+                  >
+                    <FillEditor fill={style.fill} onChange={(fill) => updateStyle({ fill })} />
+                  </div>,
+                  document.body
+                )}
+            </div>
+
+            <button
+              type="button"
+              className="announcement-toolbar-icon-button announcement-toolbar-reset"
+              title="Reset to default"
+              aria-label="Reset to default"
+              onClick={resetStyle}
+            >
+              <RotateCcw size={13} />
+            </button>
+          </div>
+
+          <div className="announcement-style-preview">
+            <div className="announcement-style-preview-eyebrow">
+              <Megaphone size={14} />
+              <span>Announcement</span>
+            </div>
+            <span className="announcement-style-preview-rule" aria-hidden="true" />
+            <p style={resolveAnnouncementStyle(style)}>
+              {message.trim() || 'Final interviews resume at 1:00 PM.'}
+            </p>
+          </div>
+        </div>
+      </section>
+      </div>
 
       <section className="panel table-panel">
         <div className="panel-header">
