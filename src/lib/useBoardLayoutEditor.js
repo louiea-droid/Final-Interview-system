@@ -32,6 +32,8 @@ function clampPercent(value) {
 function collectPositionedElements(layout) {
   return [
     { kind: 'logo', id: null, ...layout.logo },
+    { kind: 'candidates', id: null, ...layout.candidates },
+    { kind: 'announcements', id: null, ...layout.announcements },
     ...layout.texts.map((item) => ({ kind: 'text', ...item })),
     ...layout.images.map((item) => ({ kind: 'image', ...item })),
     ...layout.shapes.map((item) => ({ kind: 'shape', ...item })),
@@ -263,6 +265,40 @@ export function useBoardLayoutEditor(
     window.addEventListener('pointerup', up);
   }
 
+  /*
+   * Resizes the candidate board or the announcement strip by dragging its
+   * corner. Width follows the pointer's distance from the box's centre,
+   * doubled because the box is centred on its position; height does the
+   * same where the box has one.
+   */
+  function beginResizeBox(kind) {
+    return (event) => {
+      const box = findElement(latestLayoutRef.current, kind, null);
+      if (box?.locked) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const hasHeight = box.height !== undefined;
+
+      dragWith((moveEvent, rect) => {
+        const { x, y } = pointToPercent(moveEvent, rect);
+
+        commitFrom((current) => {
+          const target = current[kind];
+          const size = (value) => Math.min(100, Math.max(8, value));
+          const patch = { width: size(Math.abs(x - target.x) * 2) };
+
+          if (hasHeight) {
+            patch.height = size(Math.abs(y - target.y) * 2);
+          }
+
+          return patchElement(current, kind, null, patch);
+        });
+      });
+    };
+  }
+
   function beginDrag(kind, id) {
     return (event) => {
       const element = findElement(latestLayoutRef.current, kind, id);
@@ -412,7 +448,6 @@ export function useBoardLayoutEditor(
   }
 
   function setLocked(kind, id, locked) {
-    if (kind === 'candidates') return;
     updateElement(kind, id, { locked });
   }
 
@@ -642,6 +677,7 @@ export function useBoardLayoutEditor(
     canRedo: historyRef.current.redo.length > 0,
     centerGuide,
     beginDrag,
+    beginResizeBox,
     beginResize,
     setPosition,
     toggleVisible,
@@ -659,6 +695,8 @@ export function useBoardLayoutEditor(
     addShape,
     removeShape,
     updateShape: (id, patch) => updateElement('shape', id, patch),
+    /* the candidate board and the announcement strip are patched directly */
+    updateElement,
     setShapeStroke,
     handleFramePhoto,
     resetLayout,

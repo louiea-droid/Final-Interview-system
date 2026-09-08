@@ -31,15 +31,38 @@ export const DRAFT_KEY = 'interview-board-layout:draft';
 export const LAYOUT_EVENT = 'interview-board-layout-updated';
 export const TEMPLATES_KEY = 'interview-board-templates';
 
+/*
+ * The candidate board and the announcement strip are boxes rather than
+ * points: they carry a width and height as percentages of the board, so
+ * they can be placed and sized anywhere instead of being pinned to a
+ * column. Both default to roughly where the old fixed layout put them.
+ */
+export const DEFAULT_CANDIDATES = {
+  visible: true,
+  x: 68,
+  y: 56,
+  width: 58,
+  height: 74,
+};
+
+export const DEFAULT_ANNOUNCEMENTS = {
+  visible: true,
+  x: 27,
+  y: 78,
+  width: 42,
+};
+
 export const DEFAULT_LAYOUT = {
-  logo: { visible: true, url: null, x: 50, y: 12, scale: 1 },
+  logo: { visible: true, url: null, x: 24, y: 16, scale: 1 },
+  candidates: DEFAULT_CANDIDATES,
+  announcements: DEFAULT_ANNOUNCEMENTS,
   // { id, text, x, y, fontSize, visible, style, locked?, groupId? }
   texts: [
     {
       id: 'heading',
       text: 'Final Interview Applicants',
-      x: 50,
-      y: 27,
+      x: 27,
+      y: 36,
       fontSize: DEFAULT_TEXT_SIZES.heading,
       visible: true,
       style: DEFAULT_HEADING_STYLE,
@@ -47,8 +70,8 @@ export const DEFAULT_LAYOUT = {
     {
       id: 'closing',
       text: 'Best of Luck!',
-      x: 50,
-      y: 91,
+      x: 27,
+      y: 92,
       fontSize: DEFAULT_TEXT_SIZES.closing,
       visible: true,
       style: DEFAULT_CLOSING_STYLE,
@@ -65,6 +88,7 @@ export const DEFAULT_LAYOUT = {
   layerOrder: [
     { kind: 'logo', id: null },
     { kind: 'candidates', id: null },
+    { kind: 'announcements', id: null },
     { kind: 'text', id: 'heading' },
     { kind: 'text', id: 'closing' },
   ],
@@ -104,6 +128,7 @@ function normalizeLayerOrder(saved, layout) {
   const real = [
     { kind: 'logo', id: null },
     { kind: 'candidates', id: null },
+    { kind: 'announcements', id: null },
     ...layout.texts.map((item) => ({ kind: 'text', id: item.id })),
     ...layout.images.map((item) => ({ kind: 'image', id: item.id })),
     ...layout.shapes.map((item) => ({ kind: 'shape', id: item.id })),
@@ -124,6 +149,22 @@ function normalizeLayerOrder(saved, layout) {
   }
 
   return ordered;
+}
+
+/* A positioned, sized box - the candidate board and the announcement strip. */
+function normalizeBox(box, defaults) {
+  const source = box && typeof box === 'object' ? box : {};
+
+  return {
+    visible: source.visible !== false,
+    locked: source.locked === true,
+    x: clamp(source.x ?? defaults.x, 0, 100),
+    y: clamp(source.y ?? defaults.y, 0, 100),
+    width: clamp(source.width ?? defaults.width, 8, 100),
+    ...(defaults.height === undefined
+      ? {}
+      : { height: clamp(source.height ?? defaults.height, 8, 100) }),
+  };
 }
 
 function normalizeLayout(parsed) {
@@ -165,6 +206,8 @@ function normalizeLayout(parsed) {
 
   const layout = {
     logo: { ...DEFAULT_LAYOUT.logo, ...(parsed.logo ?? {}) },
+    candidates: normalizeBox(parsed.candidates, DEFAULT_CANDIDATES),
+    announcements: normalizeBox(parsed.announcements, DEFAULT_ANNOUNCEMENTS),
     texts: hasTextData ? texts : DEFAULT_LAYOUT.texts,
     images: Array.isArray(parsed.images) ? parsed.images : [],
     shapes: normalizeShapes(parsed.shapes),

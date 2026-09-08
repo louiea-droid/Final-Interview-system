@@ -20,6 +20,7 @@ import {
   ImagePlus,
   Layers,
   LayoutTemplate,
+  Megaphone,
   Lock,
   LockOpen,
   Magnet,
@@ -411,6 +412,17 @@ export default function AdminVisualBoard() {
     if (selected.kind === 'shape') removeShape(selected.id);
   }
 
+  /* A positioned box's CSS - centred on its position, sized in percentages. */
+  function boxStyle(box) {
+    return {
+      left: `${box.x}%`,
+      top: `${box.y}%`,
+      width: `${box.width}%`,
+      ...(box.height === undefined ? {} : { height: `${box.height}%` }),
+      transform: 'translate(-50%, -50%)',
+    };
+  }
+
   /* Selecting on the canvas and starting a drag are the same gesture. */
   function grab(kind, id) {
     return (event) => {
@@ -427,7 +439,11 @@ export default function AdminVisualBoard() {
     }
 
     if (entry.kind === 'candidates') {
-      return { label: 'Candidate Board', Icon: UsersRound, element: null };
+      return { label: 'Candidate Board', Icon: UsersRound, element: layout.candidates };
+    }
+
+    if (entry.kind === 'announcements') {
+      return { label: 'Announcements', Icon: Megaphone, element: layout.announcements };
     }
 
     if (entry.kind === 'text') {
@@ -457,6 +473,82 @@ export default function AdminVisualBoard() {
    * separately inline, since its markup is a fixed, non-draggable block.
    */
   function renderLayerEntry(entry) {
+    if (entry.kind === 'candidates') {
+      const box = layout.candidates;
+      if (!isVisible(box)) return null;
+
+      const selectedOnCanvas = isSelected('candidates');
+
+      return (
+        <div
+          key="candidates"
+          className={`vb-box vb-candidates ${selectedOnCanvas ? 'selected' : ''} ${
+            isMultiSelected('candidates') ? 'multi-selected' : ''
+          }`}
+          style={boxStyle(box)}
+          onPointerDown={handlePointerDown('candidates', null)}
+          onContextMenu={handleContextMenu('candidates', null)}
+        >
+          {candidates.length === 0 ? (
+            <span className="vb-candidates-empty">No candidates currently shown</span>
+          ) : (
+            <div className="vb-candidate-preview-grid">
+              {candidates.slice(0, 4).map((candidate) => (
+                <div key={candidate.id} className="vb-candidate-preview-card">
+                  <div className="vb-candidate-preview-photo">
+                    {candidate.photo_url ? (
+                      <img src={candidate.photo_url} alt="" />
+                    ) : (
+                      <UsersRound size={14} />
+                    )}
+                  </div>
+                  <div className="vb-candidate-preview-name">{candidate.name}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {selectedOnCanvas && (
+            <span
+              className="vb-shape-resize"
+              title="Drag to resize"
+              onPointerDown={editor.beginResizeBox('candidates')}
+            />
+          )}
+        </div>
+      );
+    }
+
+    if (entry.kind === 'announcements') {
+      const box = layout.announcements;
+      if (!isVisible(box)) return null;
+
+      const selectedOnCanvas = isSelected('announcements');
+
+      return (
+        <div
+          key="announcements"
+          className={`vb-box vb-announcements ${selectedOnCanvas ? 'selected' : ''} ${
+            isMultiSelected('announcements') ? 'multi-selected' : ''
+          }`}
+          style={boxStyle(box)}
+          onPointerDown={handlePointerDown('announcements', null)}
+          onContextMenu={handleContextMenu('announcements', null)}
+        >
+          <Megaphone size={14} aria-hidden="true" />
+          <span>Announcements</span>
+
+          {selectedOnCanvas && (
+            <span
+              className="vb-shape-resize"
+              title="Drag to resize"
+              onPointerDown={editor.beginResizeBox('announcements')}
+            />
+          )}
+        </div>
+      );
+    }
+
     if (entry.kind === 'logo') {
       if (!isVisible(layout.logo)) return null;
 
@@ -567,25 +659,6 @@ export default function AdminVisualBoard() {
 
   const isTextSelected = selected?.kind === 'text';
   const shapeLabels = labelShapes(layout.shapes);
-
-  /*
-   * The canvas mirrors the live board's three columns: a reserved column,
-   * the free-form middle column (logo, text, shapes), and a right column
-   * for the headline and the candidate board - matching /visual exactly,
-   * without either page needing to know about the other's internals.
-   *
-   * Everything paints in layerOrder; the candidate board splits it into
-   * what sits behind it and what sits in front. The headline is pulled out
-   * of that free-form flow entirely, same as on the live board - it has a
-   * fixed spot in the right column instead of wherever its own x/y would
-   * otherwise place it in the middle column.
-   */
-  const headingText = layout.texts.find((item) => item.id === 'heading');
-  const isFreeFormLayer = (entry) => !(entry.kind === 'text' && entry.id === 'heading');
-
-  const candidatesIndex = layout.layerOrder.findIndex((entry) => entry.kind === 'candidates');
-  const layersBehind = layout.layerOrder.slice(0, candidatesIndex).filter(isFreeFormLayer);
-  const layersInFront = layout.layerOrder.slice(candidatesIndex + 1).filter(isFreeFormLayer);
 
   return (
     <>
@@ -921,7 +994,7 @@ export default function AdminVisualBoard() {
                     if (!info) return null;
 
                     const key = `${entry.kind}:${entry.id ?? ''}`;
-                    const canLockOrHide = entry.kind !== 'candidates';
+                    const canLockOrHide = true;
                     const visible = info.element ? isVisible(info.element) : true;
                     const locked = info.element?.locked ?? false;
                     const Icon = info.Icon;
@@ -1019,22 +1092,19 @@ export default function AdminVisualBoard() {
                 ref={canvasRef}
                 style={{ width: `${zoom === 'fit' ? fitPercent : Number(zoom) * 100}%` }}
               >
-                {/* LEFT COLUMN - reserved on the live board */}
-                <div className="vb-canvas-col-left">
-                  <div className="vb-canvas-divider" aria-hidden="true" />
-                </div>
+                {/*
+                  One free-form surface, matching the live board: every
+                  element is positioned against it, and pressing the empty
+                  canvas clears the selection.
 
-                {/* MIDDLE COLUMN - the free-form layout (logo, text, shapes) */}
+                  This listens for pointerdown rather than click because a
+                  click that starts on an element and ends on the background
+                  is reported against their common ancestor, which would drop
+                  the selection every time an element was dragged into space.
+                */}
                 <div
-                  className="vb-canvas-col-middle"
+                  className="vb-canvas-surface"
                   ref={middleColumnRef}
-                  /*
-                   * Pressing the empty column clears the selection. This listens
-                   * for pointerdown rather than click because a click that starts
-                   * on an element and ends on the background is reported against
-                   * their common ancestor - the column - which would drop the
-                   * selection every time an element was dragged out into space.
-                   */
                   onPointerDown={(event) => {
                     if (event.target === event.currentTarget) {
                       setSelected(null);
@@ -1042,59 +1112,10 @@ export default function AdminVisualBoard() {
                     }
                   }}
                 >
-                  <div className="vb-canvas-divider" aria-hidden="true" />
-
-                  {layersBehind.map(renderLayerEntry)}
-                  {layersInFront.map(renderLayerEntry)}
+                  {layout.layerOrder.map(renderLayerEntry)}
 
                   {editor.centerGuide.x && <div className="vb-guide vb-guide-vertical" aria-hidden="true" />}
                   {editor.centerGuide.y && <div className="vb-guide vb-guide-horizontal" aria-hidden="true" />}
-                </div>
-
-                {/* RIGHT COLUMN - headline + candidate board */}
-                <div
-                  className="vb-canvas-col-right"
-                  onPointerDown={(event) => {
-                    if (event.target === event.currentTarget) {
-                      setSelected(null);
-                      setMultiSelected([]);
-                    }
-                  }}
-                >
-                  {headingText && isVisible(headingText) && (
-                    <p
-                      className={`vb-canvas-heading-preview ${isSelected('text', headingText.id) ? 'selected' : ''}`}
-                      style={resolveTextStyle(headingText)}
-                      onClick={() => select('text', headingText.id)}
-                    >
-                      {headingText.text}
-                    </p>
-                  )}
-
-                  <button
-                    type="button"
-                    className={`vb-candidates ${isSelected('candidates') ? 'selected' : ''}`}
-                    onClick={() => select('candidates')}
-                  >
-                    {candidates.length === 0 ? (
-                      <span className="vb-candidates-empty">No candidates currently shown</span>
-                    ) : (
-                      <div className="vb-candidate-preview-grid">
-                        {candidates.slice(0, 4).map((candidate) => (
-                          <div key={candidate.id} className="vb-candidate-preview-card">
-                            <div className="vb-candidate-preview-photo">
-                              {candidate.photo_url ? (
-                                <img src={candidate.photo_url} alt="" />
-                              ) : (
-                                <UsersRound size={14} />
-                              )}
-                            </div>
-                            <div className="vb-candidate-preview-name">{candidate.name}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </button>
                 </div>
               </div>
             </div>
@@ -1128,14 +1149,101 @@ export default function AdminVisualBoard() {
                   select more than one and group them.
                 </p>
               </div>
-            ) : selected.kind === 'candidates' ? (
-              <div className="vb-properties-empty">
-                <UsersRound size={22} />
-                <p>
-                  The candidate board is managed from Records and always centers itself
-                  automatically.
-                </p>
-              </div>
+            ) : selected.kind === 'candidates' || selected.kind === 'announcements' ? (
+              (() => {
+                const isBoard = selected.kind === 'candidates';
+                const box = isBoard ? layout.candidates : layout.announcements;
+
+                return (
+                  <>
+                    <h3 className="vb-properties-title">
+                      {isBoard ? 'Candidate Board' : 'Announcements'}
+                    </h3>
+                    <p className="vb-properties-hint">
+                      {isBoard
+                        ? 'Drag it anywhere on the board, or drag its corner to resize. What it shows comes from Records.'
+                        : 'Drag it anywhere on the board, or drag its corner to set its width. What it shows comes from Announcements.'}
+                    </p>
+
+                    <div className="vb-field-row">
+                      <label htmlFor="vb-box-x">
+                        X %
+                        <input
+                          id="vb-box-x"
+                          className="form-input"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.5"
+                          value={Number(box.x.toFixed(1))}
+                          onChange={(event) =>
+                            editor.updateElement(selected.kind, null, {
+                              x: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label htmlFor="vb-box-y">
+                        Y %
+                        <input
+                          id="vb-box-y"
+                          className="form-input"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.5"
+                          value={Number(box.y.toFixed(1))}
+                          onChange={(event) =>
+                            editor.updateElement(selected.kind, null, {
+                              y: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+
+                    <div className="vb-field-row">
+                      <label htmlFor="vb-box-w">
+                        W %
+                        <input
+                          id="vb-box-w"
+                          className="form-input"
+                          type="number"
+                          min="8"
+                          max="100"
+                          step="0.5"
+                          value={Number(box.width.toFixed(1))}
+                          onChange={(event) =>
+                            editor.updateElement(selected.kind, null, {
+                              width: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+
+                      {box.height !== undefined && (
+                        <label htmlFor="vb-box-h">
+                          H %
+                          <input
+                            id="vb-box-h"
+                            className="form-input"
+                            type="number"
+                            min="8"
+                            max="100"
+                            step="0.5"
+                            value={Number(box.height.toFixed(1))}
+                            onChange={(event) =>
+                              editor.updateElement(selected.kind, null, {
+                                height: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </>
+                );
+              })()
             ) : !selectedElement ? (
               <div className="vb-properties-empty">
                 <LayoutTemplate size={22} />

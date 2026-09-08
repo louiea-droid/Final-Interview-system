@@ -3961,34 +3961,18 @@ svg {
 }
 
 /*
- * Mirrors the live board's three columns - the fractions here must match
- * VisualBoard.jsx's own grid-cols-[0.8fr_2.2fr_1.3fr] exactly, since that
- * file is never imported from here (and isn't touched by this admin page).
+ * One free-form surface, matching the live board: it is the container-query
+ * basis, so an element sized in cqw/cqh measures against the whole board
+ * exactly as it does on the real thing.
  */
-.vb-canvas-col-left {
-  position: relative;
-}
-
-.vb-canvas-col-middle {
+.vb-canvas-surface {
   position: relative;
   container-type: size;
   overflow: hidden;
+  width: 100%;
+  height: 100%;
 }
 
-.vb-canvas-col-right {
-  position: relative;
-  container-type: size;
-  overflow: hidden;
-
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-
-  padding: 6% 5%;
-}
-
-/* the same soft gold line the live board uses between its columns */
 .vb-canvas-divider {
   position: absolute;
   inset: 0 0 0 auto;
@@ -4106,28 +4090,53 @@ svg {
  * (duplicated here on purpose, since this admin page can't import from a
  * file it isn't allowed to touch).
  */
-.vb-candidates {
+/* A positioned box on the canvas: the candidate board, or the strip. */
+.vb-box {
+  position: absolute;
   display: flex;
-  width: 100%;
-  flex: 1;
-  min-height: 0;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
 
   border: 0;
-  border-radius: 4px;
   background: transparent;
 
-  cursor: pointer;
+  cursor: grab;
 }
 
-.vb-candidates:hover {
+.vb-box:active {
+  cursor: grabbing;
+}
+
+.vb-box:hover {
   outline: 1px dashed rgba(244, 202, 93, 0.5);
 }
 
-.vb-candidates.selected {
+.vb-box.selected {
   outline: 1.5px dashed #f4ca5d;
   outline-offset: 2px;
+}
+
+.vb-box.multi-selected {
+  outline: 1.5px dashed #7ab7ff;
+  outline-offset: 2px;
+}
+
+.vb-candidates {
+  align-items: flex-start;
+}
+
+/* the strip stands in for the real announcement, which comes from data */
+.vb-announcements {
+  gap: 7px;
+  padding: 7px 12px;
+
+  border: 1px solid #c9a03c;
+  background: rgba(46, 5, 5, 0.85);
+
+  color: #f0d689;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .vb-candidate-preview-grid {

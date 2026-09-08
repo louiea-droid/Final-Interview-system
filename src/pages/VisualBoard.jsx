@@ -289,19 +289,83 @@ export default function DisplayPage() {
     candidates.length * CAROUSEL_SECONDS_PER_CARD
   );
 
-  /* Everything paints in the admin editor's layerOrder; the candidate board
-     splits it into what sits behind it and what sits in front. The headline
-     is pulled out of that free-form flow entirely - it now has a fixed spot
-     above the candidate carousel, in the right column, rather than wherever
-     its own x/y happens to place it in the middle column. */
-  const headingText = layout.texts.find((item) => item.id === "heading");
-  const isFreeFormLayer = (entry) => !(entry.kind === "text" && entry.id === "heading");
+  /*
+   * The board is one free-form surface: every entry in layerOrder paints in
+   * that order, the candidate board and the announcement strip included.
+   * Nothing is pinned to a column any more, so an element sits exactly
+   * where the editor put it.
+   */
 
-  const candidatesIndex = layout.layerOrder.findIndex((entry) => entry.kind === "candidates");
-  const layersBehind = layout.layerOrder.slice(0, candidatesIndex).filter(isFreeFormLayer);
-  const layersInFront = layout.layerOrder.slice(candidatesIndex + 1).filter(isFreeFormLayer);
+  /* The candidate board, as a positioned and sized box. */
+  function renderCandidatesLayer() {
+    const box = layout.candidates;
+    if (!isVisible(box)) return null;
+
+    return (
+      <div
+        key="candidates"
+        className="absolute [container-type:size]"
+        style={{
+          left: `${box.x}%`,
+          top: `${box.y}%`,
+          width: `${box.width}%`,
+          height: `${box.height}%`,
+          transform: "translate(-50%, -50%)",
+        }}
+      >
+        {renderCandidateCarousel()}
+      </div>
+    );
+  }
+
+  /* The announcement strip, as a positioned box that sizes to its text. */
+  function renderAnnouncementsLayer() {
+    const box = layout.announcements;
+    if (!isVisible(box) || announcements.length === 0) return null;
+
+    return (
+      <div
+        key="announcements"
+        className="absolute flex justify-center"
+        style={{
+          left: `${box.x}%`,
+          top: `${box.y}%`,
+          width: `${box.width}%`,
+          transform: "translate(-50%, -50%)",
+        }}
+      >
+        <div
+          key={announcements[currentAnnouncement]?.id}
+          className={`
+            flex
+            max-w-full
+            items-center
+            justify-center
+            gap-2
+            rounded-[2px]
+            border
+            border-[#c9a03c]
+            px-[clamp(12px,2.4vw,22px)]
+            py-[clamp(6px,1.2vw,12px)]
+            text-center
+            animate-[fadeIn_.7s_ease-in-out]
+            ${lightMode ? "bg-[#fdf6f3] text-[#7a5a12]" : "bg-[#2e0505] text-[#f0d689]"}
+          `}
+        >
+          <Megaphone size={18} className="shrink-0" aria-hidden="true" />
+
+          <p className="text-[clamp(13px,1.6vw,18px)] font-semibold leading-snug">
+            {announcements[currentAnnouncement]?.message}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   function renderLayer(entry) {
+    if (entry.kind === "candidates") return renderCandidatesLayer();
+    if (entry.kind === "announcements") return renderAnnouncementsLayer();
+
     if (entry.kind === "shape") {
       const shape = layout.shapes.find((item) => item.id === entry.id);
       if (!shape || !isVisible(shape)) return null;
@@ -352,24 +416,6 @@ export default function DisplayPage() {
     return null;
   }
 
-  /* A soft gold line between columns - fading top and bottom with a gentle
-     glow, rather than a flat CSS border, at a column's own right edge. */
-  function renderColumnDivider() {
-    return (
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-y-0 right-0 w-px"
-        style={{
-          background: lightMode
-            ? "linear-gradient(to bottom, transparent 0%, rgba(201,160,60,.65) 18%, rgba(201,160,60,.85) 50%, rgba(201,160,60,.65) 82%, transparent 100%)"
-            : "linear-gradient(to bottom, transparent 0%, rgba(244,202,93,.55) 18%, rgba(244,202,93,.9) 50%, rgba(244,202,93,.55) 82%, transparent 100%)",
-          boxShadow: lightMode
-            ? "0 0 10px 1px rgba(201,160,60,.35)"
-            : "0 0 14px 1px rgba(244,202,93,.4)",
-        }}
-      />
-    );
-  }
 
   /* Groups a flat list into rows of `size` - unlike a flat grid, a lone
      last candidate is marked to span the full row instead of leaving an
@@ -627,135 +673,18 @@ export default function DisplayPage() {
           ))
       )}
 
-      {/* Main content: three columns - a small reserved column on the
-          left, the branding/announcements in the middle (biggest), and
-          the candidate carousel on the right. */}
+      {/*
+        The board itself: one full-bleed surface that every element is
+        positioned against. It marks itself as the container-query basis,
+        so an element's cqw/cqh sizing is relative to the whole board
+        rather than to a column of it.
+      */}
 
       <div
-        className="
-          absolute
-          inset-0
-          z-[2]
-          grid
-          grid-cols-[0.8fr_2.2fr_1.3fr]
-        "
+        style={{ containerType: "size" }}
+        className="absolute inset-0 z-[2]"
       >
-
-        {/* LEFT COLUMN - reserved */}
-
-        <div className="relative">{renderColumnDivider()}</div>
-
-        {/* MIDDLE COLUMN
-
-            The admin editor's free-form layout (logo, headline, closing
-            line, and anything else the admin adds) is scoped to this
-            column specifically - containerType: size makes it the cqw/cqh
-            basis for scaledPositionStyle, and overflow-hidden clips
-            anything that would otherwise spill into the side columns. */}
-
-        <div
-          style={{ containerType: "size" }}
-          className="
-            relative
-            flex
-            flex-col
-            items-center
-            justify-center
-            gap-[clamp(6px,1.4vh,18px)]
-            overflow-hidden
-            px-[clamp(10px,2vw,24px)]
-            py-[clamp(10px,2vh,28px)]
-          "
-        >
-
-          {renderColumnDivider()}
-
-          {/*
-            Everything paints in the admin editor's layerOrder; whatever
-            sits before the candidate board in that order goes here, above
-            the background wash but under the announcement.
-          */}
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-            {layersBehind.map(renderLayer)}
-          </div>
-
-          {/* =====================================================
-              ANNOUNCEMENTS
-          ===================================================== */}
-
-          {announcements.length > 0 && (
-            <div
-              key={announcements[currentAnnouncement]?.id}
-              className={`
-                flex
-                max-w-full
-                items-center
-                justify-center
-                gap-2
-                rounded-[2px]
-                border
-                border-[#c9a03c]
-                px-[clamp(12px,2.4vw,22px)]
-                py-[clamp(6px,1.2vw,12px)]
-                text-center
-                animate-[fadeIn_.7s_ease-in-out]
-                ${lightMode ? "bg-[#fdf6f3] text-[#7a5a12]" : "bg-[#2e0505] text-[#f0d689]"}
-              `}
-            >
-              <Megaphone
-                size={18}
-                className="shrink-0"
-                aria-hidden="true"
-              />
-
-              <p
-                className="
-                  text-[clamp(13px,1.6vw,18px)]
-                  font-semibold
-                  leading-snug
-                "
-              >
-                {announcements[currentAnnouncement]?.message}
-              </p>
-            </div>
-          )}
-
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-            {layersInFront.map(renderLayer)}
-          </div>
-
-        </div>
-
-        {/* =====================================================
-            RIGHT COLUMN - HEADLINE + CANDIDATE CAROUSEL
-        ===================================================== */}
-
-        <div
-          style={{ containerType: "size" }}
-          className="
-            relative
-            flex
-            h-full
-            flex-col
-            items-center
-            gap-[clamp(6px,1.2vh,14px)]
-            overflow-hidden
-            px-[clamp(8px,1.4vw,20px)]
-            py-[clamp(10px,2vh,24px)]
-          "
-        >
-          {headingText && isVisible(headingText) && (
-            <p
-              className="w-full shrink-0 text-center"
-              style={resolveTextStyle(headingText)}
-            >
-              {headingText.text}
-            </p>
-          )}
-
-          <div className="relative min-h-0 w-full flex-1">{renderCandidateCarousel()}</div>
-        </div>
-
+        {layout.layerOrder.map(renderLayer)}
       </div>
     </main>
   );
