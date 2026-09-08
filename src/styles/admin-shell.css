@@ -696,3 +696,57 @@
   min-width: 104px;
   min-height: 38px;
 }
+
+/* =========================================
+   BOARD ORDER MENU
+
+   Right-click menu on a canvas element.
+   ========================================= */
+
+.vb-order-menu {
+  position: fixed;
+  z-index: var(--z-popover, 110);
+
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  padding: 4px;
+
+  border: 1px solid var(--border);
+  background: var(--surface-raised, #303030);
+
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+}
+
+.vb-order-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  padding: 8px 10px;
+
+  border: 0;
+  border-radius: 0;
+
+  color: var(--text-soft);
+  background: transparent;
+
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.vb-order-menu button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.vb-order-menu svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.vb-order-menu button:hover svg {
+  color: var(--text);
+}

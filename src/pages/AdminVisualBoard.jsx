@@ -5,6 +5,8 @@ import {
   AlignRight,
   ChevronDown,
   ChevronUp,
+  ChevronsDown,
+  ChevronsUp,
   Circle,
   Crown,
   ExternalLink,
@@ -134,6 +136,9 @@ export default function AdminVisualBoard() {
   const [multiSelected, setMultiSelected] = useState([]); // [{ kind, id }] - shift-click grouping
   const [activePanel, setActivePanel] = useState('elements');
   const [candidates, setCandidates] = useState([]);
+
+  /* { kind, id, x, y } while the right-click order menu is open */
+  const [orderMenu, setOrderMenu] = useState(null);
   const [isDirty, setIsDirty] = useState(false);
 
   const [zoom, setZoom] = useState('1'); // '0.5' | '0.75' | '1' | 'fit'
@@ -281,6 +286,48 @@ export default function AdminVisualBoard() {
     };
   }
 
+  /*
+   * Right-clicking an element selects it and opens the order menu at the
+   * pointer, so layering is reachable on the canvas rather than only in the
+   * layers panel.
+   */
+  useEffect(() => {
+    if (!orderMenu) return;
+
+    const close = () => setOrderMenu(null);
+    const onKey = (event) => {
+      if (event.key === 'Escape') close();
+    };
+
+    // capture, so the menu closes even if the target stops propagation
+    window.addEventListener('pointerdown', close, true);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', onKey);
+
+    return () => {
+      window.removeEventListener('pointerdown', close, true);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [orderMenu]);
+
+  function handleContextMenu(kind, id) {
+    return (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      select(kind, id);
+      setMultiSelected([]);
+      setOrderMenu({ kind, id, x: event.clientX, y: event.clientY });
+    };
+  }
+
+  function orderAndClose(direction) {
+    if (!orderMenu) return;
+    editor.moveLayer(orderMenu.kind, orderMenu.id, direction);
+    setOrderMenu(null);
+  }
+
   function handleGroup() {
     if (multiSelected.length < 2) return;
     editor.groupElements(multiSelected);
@@ -422,6 +469,7 @@ export default function AdminVisualBoard() {
           }`}
           style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
           onPointerDown={handlePointerDown('logo')}
+          onContextMenu={handleContextMenu('logo', null)}
         >
           <img src={layout.logo.url || '/visual/logo.png'} alt="" className="vb-logo-img" />
         </button>
@@ -441,6 +489,7 @@ export default function AdminVisualBoard() {
           }`}
           style={positionStyle(text)}
           onPointerDown={handlePointerDown('text', text.id)}
+          onContextMenu={handleContextMenu('text', text.id)}
         >
           <span style={resolveTextStyle(text)}>{text.text}</span>
         </button>
@@ -460,6 +509,7 @@ export default function AdminVisualBoard() {
           }`}
           style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
           onPointerDown={handlePointerDown('image', image.id)}
+          onContextMenu={handleContextMenu('image', image.id)}
         >
           <img src={image.url} alt="" className="vb-photo-img" />
         </button>
@@ -481,6 +531,7 @@ export default function AdminVisualBoard() {
           } ${isMultiSelected('shape', shape.id) ? 'multi-selected' : ''}`}
           style={resolveShapeStyle(shape)}
           onPointerDown={handlePointerDown('shape', shape.id)}
+          onContextMenu={handleContextMenu('shape', shape.id)}
         >
           {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
 
@@ -914,9 +965,19 @@ export default function AdminVisualBoard() {
                             type="button"
                             className="vb-layer-icon-button"
                             disabled={displayIndex === 0}
+                            onClick={() => editor.moveLayer(entry.kind, entry.id, 'front')}
+                            aria-label={`Bring ${info.label} to front`}
+                            title="Bring to front"
+                          >
+                            <ChevronsUp size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            className="vb-layer-icon-button"
+                            disabled={displayIndex === 0}
                             onClick={() => editor.moveLayer(entry.kind, entry.id, 'up')}
-                            aria-label={`Move ${info.label} up`}
-                            title="Move up"
+                            aria-label={`Bring ${info.label} forward`}
+                            title="Bring forward"
                           >
                             <ChevronUp size={13} />
                           </button>
@@ -925,10 +986,20 @@ export default function AdminVisualBoard() {
                             className="vb-layer-icon-button"
                             disabled={displayIndex === list.length - 1}
                             onClick={() => editor.moveLayer(entry.kind, entry.id, 'down')}
-                            aria-label={`Move ${info.label} down`}
-                            title="Move down"
+                            aria-label={`Send ${info.label} backward`}
+                            title="Send backward"
                           >
                             <ChevronDown size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            className="vb-layer-icon-button"
+                            disabled={displayIndex === list.length - 1}
+                            onClick={() => editor.moveLayer(entry.kind, entry.id, 'back')}
+                            aria-label={`Send ${info.label} to back`}
+                            title="Send to back"
+                          >
+                            <ChevronsDown size={13} />
                           </button>
                         </div>
                       </div>
@@ -1650,6 +1721,33 @@ export default function AdminVisualBoard() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {orderMenu && (
+        <div
+          className="vb-order-menu"
+          style={{ left: orderMenu.x, top: orderMenu.y }}
+          /* the dismiss listener runs in capture, so keep it off this menu */
+          onPointerDown={(event) => event.stopPropagation()}
+          role="menu"
+        >
+          <button type="button" role="menuitem" onClick={() => orderAndClose('front')}>
+            <ChevronsUp size={13} />
+            <span>Bring to front</span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => orderAndClose('up')}>
+            <ChevronUp size={13} />
+            <span>Bring forward</span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => orderAndClose('down')}>
+            <ChevronDown size={13} />
+            <span>Send backward</span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => orderAndClose('back')}>
+            <ChevronsDown size={13} />
+            <span>Send to back</span>
+          </button>
         </div>
       )}
     </>

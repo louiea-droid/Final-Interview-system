@@ -372,16 +372,37 @@ export function useBoardLayoutEditor(
     return `${entry.kind}:${entry.id ?? ''}`;
   }
 
-  /* Moves a layer one step toward the front ('up') or the back ('down') of
-     layerOrder - the layers panel lists that order front-first. */
+  /*
+   * Moves a layer through layerOrder, which runs back to front - so 'up'
+   * and 'front' move later in the array. The layers panel lists it
+   * reversed, front first, which is why its buttons read the other way.
+   *
+   *   'up'    one step toward the front      'front'  all the way to the front
+   *   'down'  one step toward the back       'back'   all the way to the back
+   */
   function moveLayer(kind, id, direction) {
     commitFrom((current) => {
       const order = current.layerOrder;
       const target = layerKey({ kind, id: kind === 'logo' || kind === 'candidates' ? null : id });
       const index = order.findIndex((entry) => layerKey(entry) === target);
-      const swapWith = direction === 'up' ? index + 1 : index - 1;
 
-      if (index < 0 || swapWith < 0 || swapWith >= order.length) return current;
+      if (index < 0) return current;
+
+      const entry = order[index];
+      const rest = order.filter((_, i) => i !== index);
+
+      if (direction === 'front') {
+        if (index === order.length - 1) return current;
+        return { ...current, layerOrder: [...rest, entry] };
+      }
+
+      if (direction === 'back') {
+        if (index === 0) return current;
+        return { ...current, layerOrder: [entry, ...rest] };
+      }
+
+      const swapWith = direction === 'up' ? index + 1 : index - 1;
+      if (swapWith < 0 || swapWith >= order.length) return current;
 
       const nextOrder = [...order];
       [nextOrder[index], nextOrder[swapWith]] = [nextOrder[swapWith], nextOrder[index]];
