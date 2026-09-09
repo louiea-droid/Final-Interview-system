@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 
 // local stand-in for the backend; same query API, no network
-import { localClient as supabase } from '../lib/localBackend';
+import { firebaseClient } from '../lib/firebaseBackend';
 import { isShownOnBoard } from '../lib/candidateVisibility';
 import { getStatusPillClass } from '../lib/candidateStatus';
 import CandidateDetailsModal from '../components/CandidateDetailsModal';
@@ -28,14 +28,6 @@ function createEmptyAddForm() {
     interview_date: '',
   };
 }
-
-const statusClasses = {
-  Scheduled: 'candidate-status scheduled',
-  Waiting: 'candidate-status waiting',
-  'In Progress': 'candidate-status progress',
-  Completed: 'candidate-status completed',
-  Cancelled: 'candidate-status cancelled',
-};
 
 const statuses = [
   'Scheduled',
@@ -56,13 +48,14 @@ export default function CandidatesPage() {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addForms, setAddForms] = useState([createEmptyAddForm()]);
   const [addProcessingIds, setAddProcessingIds] = useState(new Set());
+  const [isAddingCandidates, setIsAddingCandidates] = useState(false);
   const [addCropTarget, setAddCropTarget] = useState(null);
   const [processingPhoto, setProcessingPhoto] = useState(false);
   const [cropTarget, setCropTarget] = useState
 (null);
 
   async function loadCandidates() {
-    const { data, error } = await supabase
+    const { data, error } = await firebaseClient
       .from('candidates')
       .select('*')
       .order('created_at', { ascending: false })
@@ -88,7 +81,7 @@ export default function CandidatesPage() {
           .map((candidate) => getInterviewDateKey(candidate.interview_date))
           .filter((date) => Boolean(date))
       )
-    );
+    ).sort(compareDateKeys);
   }, [candidates]);
 
   const [page, setPage] = useState(1);
@@ -125,7 +118,7 @@ export default function CandidatesPage() {
       groups.set(dateKey, group);
     });
 
-    return Array.from(groups.entries());
+    return Array.from(groups.entries()).sort(([a], [b]) => compareDateKeys(a, b));
   }, [pageCandidates]);
 
   // a shrinking list must not leave the view stranded past the end
@@ -155,57 +148,61 @@ export default function CandidatesPage() {
 
     setSavingEdit(true);
 
-    const results = await Promise.all(editForms.map(async (candidate) => {
-      const existingCandidate = candidates.find((item) => item.id === candidate.id);
-      let photoUrl = candidate.no_photo ? null : existingCandidate?.photo_url ?? null;
+    try {
+      const results = await Promise.all(editForms.map(async (candidate) => {
+        const existingCandidate = candidates.find((item) => item.id === candidate.id);
+        let photoUrl = candidate.no_photo ? null : existingCandidate?.photo_url ?? null;
 
-      if (!candidate.no_photo && candidate.photo_file) {
-        const fileExt = candidate.photo_file.name.split('.').pop();
-        const fileName = `${crypto.randomUUID()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage
-          .from('Candidate-photos')
-          .upload(fileName, candidate.photo_file, {
-            cacheControl: '3600',
-            upsert: false,
-          });
+        if (!candidate.no_photo && candidate.photo_file) {
+          const fileExt = candidate.photo_file.name.split('.').pop();
+          const fileName = `${crypto.randomUUID()}.${fileExt}`;
+          const { error: uploadError } = await firebaseClient.storage
+            .from('Candidate-photos')
+            .upload(fileName, candidate.photo_file, {
+              cacheControl: '3600',
+              upsert: false,
+            });
 
-        if (uploadError) return { error: uploadError, data: null };
+          if (uploadError) return { error: uploadError, data: null };
 
-        photoUrl = supabase.storage
-          .from('Candidate-photos')
-          .getPublicUrl(fileName).data.publicUrl;
+          photoUrl = firebaseClient.storage
+            .from('Candidate-photos')
+            .getPublicUrl(fileName).data.publicUrl;
+        }
+
+        return firebaseClient
+          .from('candidates')
+          .update({
+            name: candidate.name,
+            photo_url: photoUrl,
+            course: candidate.course || null,
+            interview_date: candidate.interview_date || null,
+            status: candidate.status,
+          })
+          .eq('id', candidate.id)
+          .select('*')
+          .single();
+      }));
+      const failedResult = results.find((result) => result.error);
+
+      if (failedResult?.error) {
+        showToast.error(failedResult.error.message);
+      } else {
+        const updatedCandidates = results
+          .map((result) => result.data)
+          .filter((candidate) => Boolean(candidate));
+        setCandidates((current) =>
+          current.map((candidate) =>
+            updatedCandidates.find((updated) => updated.id === candidate.id) ?? candidate
+          )
+        );
+        setEditingDate(null);
       }
-
-      return supabase
-        .from('candidates')
-        .update({
-          name: candidate.name,
-          photo_url: photoUrl,
-          course: candidate.course || null,
-          interview_date: candidate.interview_date || null,
-          status: candidate.status,
-        })
-        .eq('id', candidate.id)
-        .select('*')
-        .single();
-    }));
-    const failedResult = results.find((result) => result.error);
-
-    if (failedResult?.error) {
-      showToast.error(failedResult.error.message);
-    } else {
-      const updatedCandidates = results
-        .map((result) => result.data)
-        .filter((candidate) => Boolean(candidate));
-      setCandidates((current) =>
-        current.map((candidate) =>
-          updatedCandidates.find((updated) => updated.id === candidate.id) ?? candidate
-        )
-      );
-      setEditingDate(null);
+    } catch (error) {
+      showToast.error(error.message);
+    } finally {
+      setSavingEdit(false);
     }
-
-    setSavingEdit(false);
   }
 
   function updateEditForm(id, field, value) {
@@ -293,7 +290,7 @@ export default function CandidatesPage() {
   }
 
   async function removeCandidate(id) {
-    const { error } = await supabase
+    const { error } = await firebaseClient
       .from('candidates')
       .delete()
       .eq('id', id);
@@ -320,7 +317,7 @@ export default function CandidatesPage() {
   ) {
     const ids = groupCandidates.map((candidate) => candidate.id);
 
-    const { error } = await supabase
+    const { error } = await firebaseClient
       .from('candidates')
       .update({ show_in_visual: nextValue })
       .in('id', ids);
@@ -435,71 +432,85 @@ export default function CandidatesPage() {
   async function addCandidates(event) {
     event.preventDefault();
 
-    if (addProcessingIds.size > 0) return;
+    if (addProcessingIds.size > 0 || isAddingCandidates) return;
 
-    const baseOrder = candidates.length
-      ? Math.max(...candidates.map((candidate) => candidate.sort_order)) + 1
-      : 1;
-
-    // Upload every candidate's photo in parallel rather than one at a
-    // time — with several candidates queued up, that's the difference
-    // between waiting on N uploads back-to-back and waiting on one.
-    const uploadResults = await Promise.all(
-      addForms.map(async (form) => {
-        if (form.no_photo || !form.photo_file) {
-          return { photoUrl: null, error: null };
-        }
-
-        const file = form.photo_file;
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${crypto.randomUUID()}.${fileExt}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from('Candidate-photos')
-          .upload(fileName, file, {
-            cacheControl: '3600',
-            upsert: false,
-          });
-
-        if (uploadError) return { photoUrl: null, error: uploadError };
-
-        const { data } = supabase.storage
-          .from('Candidate-photos')
-          .getPublicUrl(fileName);
-
-        return { photoUrl: data.publicUrl, error: null };
-      })
+    setIsAddingCandidates(true);
+    const loadingToastId = showToast.loading(
+      addForms.length > 1 ? 'Adding candidates...' : 'Adding candidate...',
+      { duration: Infinity }
     );
 
-    const failedUpload = uploadResults.find((result) => result.error);
-    if (failedUpload?.error) {
-      showToast.error(`Photo upload failed: ${failedUpload.error.message}`);
-      return;
+    try {
+      const baseOrder = candidates.length
+        ? Math.max(...candidates.map((candidate) => Number(candidate.sort_order) || 0)) + 1
+        : 1;
+
+      // Upload every candidate's photo in parallel rather than one at a
+      // time — with several candidates queued up, that's the difference
+      // between waiting on N uploads back-to-back and waiting on one.
+      const uploadResults = await Promise.all(
+        addForms.map(async (form) => {
+          if (form.no_photo || !form.photo_file) {
+            return { photoUrl: null, error: null };
+          }
+
+          const file = form.photo_file;
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${crypto.randomUUID()}.${fileExt}`;
+
+          const { error: uploadError } = await firebaseClient.storage
+            .from('Candidate-photos')
+            .upload(fileName, file, {
+              cacheControl: '3600',
+              upsert: false,
+            });
+
+          if (uploadError) return { photoUrl: null, error: uploadError };
+
+          const { data } = firebaseClient.storage
+            .from('Candidate-photos')
+            .getPublicUrl(fileName);
+
+          return { photoUrl: data.publicUrl, error: null };
+        })
+      );
+
+      const failedUpload = uploadResults.find((result) => result.error);
+      if (failedUpload?.error) {
+        showToast.error(`Photo upload failed: ${failedUpload.error.message}`);
+        return;
+      }
+
+      const { error } = await firebaseClient.from('candidates').insert(
+        addForms.map((form, index) => ({
+          name: form.name,
+          photo_url: uploadResults[index].photoUrl,
+          course: form.course || null,
+          interview_date: form.interview_date || null,
+          status: 'Scheduled',
+          interview_type: 'Final Interview',
+          sort_order: baseOrder + index,
+        }))
+      );
+
+      if (error) {
+        showToast.error(error.message);
+        return;
+      }
+
+      // The new candidates may not fall under whichever date is
+      // currently filtered, so switch back to "All dates" to make
+      // sure they're actually visible once the modal closes.
+      setSelectedDate('all');
+      closeAddModal();
+      await loadCandidates();
+      showToast.success(
+        addForms.length > 1 ? `${addForms.length} candidates added.` : 'Candidate added.'
+      );
+    } finally {
+      showToast.dismiss(loadingToastId);
+      setIsAddingCandidates(false);
     }
-
-    const { error } = await supabase.from('candidates').insert(
-      addForms.map((form, index) => ({
-        name: form.name,
-        photo_url: uploadResults[index].photoUrl,
-        course: form.course || null,
-        interview_date: form.interview_date || null,
-        status: 'Scheduled',
-        interview_type: 'Final Interview',
-        sort_order: baseOrder + index,
-      }))
-    );
-
-    if (error) {
-      showToast.error(error.message);
-      return;
-    }
-
-    // The new candidates may not fall under whichever date is
-    // currently filtered, so switch back to "All dates" to make
-    // sure they're actually visible once the modal closes.
-    setSelectedDate('all');
-    closeAddModal();
-    await loadCandidates();
   }
 
   return (
@@ -914,6 +925,7 @@ export default function CandidatesPage() {
                 type="button"
                 className="modal-close-button"
                 onClick={closeAddModal}
+                disabled={isAddingCandidates}
                 aria-label="Close add candidates modal"
               >
                 &times;
@@ -937,7 +949,12 @@ export default function CandidatesPage() {
               ))}
             </div>
 
-            <button type="button" className="secondary-button" onClick={addAnotherCandidate}>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={addAnotherCandidate}
+              disabled={isAddingCandidates}
+            >
               <Plus size={12} />
               Add another candidate
             </button>
@@ -947,19 +964,22 @@ export default function CandidatesPage() {
                 type="button"
                 className="secondary-button"
                 onClick={closeAddModal}
+                disabled={isAddingCandidates}
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 className="confirm-delete-button"
-                disabled={addProcessingIds.size > 0}
+                disabled={addProcessingIds.size > 0 || isAddingCandidates}
               >
                 {addProcessingIds.size > 0
                   ? 'Processing photos...'
-                  : addForms.length > 1
-                    ? `Add ${addForms.length} Candidates`
-                    : 'Add Candidate'}
+                  : isAddingCandidates
+                    ? 'Adding...'
+                    : addForms.length > 1
+                      ? `Add ${addForms.length} Candidates`
+                      : 'Add Candidate'}
               </button>
             </div>
           </form>
@@ -1130,22 +1150,11 @@ function getInterviewDateKey(interviewDate) {
   return interviewDate || 'unscheduled';
 }
 
-function getAddedDateKey(createdAt) {
-  const parsedDate = new Date(createdAt);
-
-  if (Number.isNaN(parsedDate.getTime())) return 'unknown';
-
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(parsedDate);
-  const values = Object.fromEntries(
-    parts
-      .filter(({ type }) => type !== 'literal')
-      .map(({ type, value }) => [type, value])
-  );
-
-  return `${values.year}-${values.month}-${values.day}`;
+// Latest interview date first; 'unscheduled' sorts after every real date so
+// open candidates settle at the end of the list instead of the top.
+function compareDateKeys(a, b) {
+  if (a === b) return 0;
+  if (a === 'unscheduled') return 1;
+  if (b === 'unscheduled') return -1;
+  return b.localeCompare(a);
 }

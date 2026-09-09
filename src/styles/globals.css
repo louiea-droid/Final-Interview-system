@@ -414,9 +414,9 @@ button {
 
   grid-template-columns: repeat(4, 1fr);
 
-  gap: 9px;
+  gap: 8px;
 
-  margin-bottom: 9px;
+  margin-bottom: 8px;
 }
 
 @media (max-width: 1180px) {
@@ -439,6 +439,22 @@ button {
   margin-bottom: 9px;
 }
 
+/* The announcements column and the Visual Board preview need real width
+   for their content (prose, a 16:9 embed) - everything else stays a single
+   column. The Visual Board card is much taller (it keeps the board's own
+   16:9 ratio); .metric-stack fills that same height with the current
+   announcement plus what's coming up next, instead of leaving it empty. */
+.metric-stack,
+.visual-preview-card {
+  grid-column: span 2;
+}
+
+.metric-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .metric-card {
   display: flex;
   flex-direction: column;
@@ -446,9 +462,9 @@ button {
 
   min-height: 0;
 
-  padding: 10px 14px;
+  padding: 8px 12px;
 
-  border-radius: 9px;
+  border-radius: 8px;
 
   border: 1px solid rgba(255, 255, 255, 0.128);
 
@@ -474,11 +490,11 @@ button {
 .metric-top {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
 
   color: #8b8b8b;
 
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -488,10 +504,10 @@ button {
   justify-content: center;
   flex-shrink: 0;
 
-  width: 27px;
-  height: 27px;
+  width: 22px;
+  height: 22px;
 
-  border-radius: 8px;
+  border-radius: 7px;
 
   background: rgba(212, 93, 89, 0.16);
   color: var(--red-status);
@@ -503,13 +519,13 @@ button {
   justify-content: center;
   gap: 8px;
 
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .metric-value {
   font-family: var(--font-display), var(--font-sans), sans-serif;
   color: #f1f1f1;
-  font-size: 44px;
+  font-size: 28px;
   line-height: 1;
 
   font-weight: 700;
@@ -534,11 +550,89 @@ button {
 }
 
 .metric-description {
-  margin-top: 6px;
+  margin-top: 4px;
 
   color: #727272;
 
-  font-size: 13px;
+  font-size: 12px;
+}
+
+/* The Announcements card shows the message itself rather than a count, so
+   it needs body-text sizing instead of .metric-value's big number style.
+   It's a wide card (see .metric-card--wide), so one line comfortably fits
+   most announcements before the clamp ever kicks in. */
+.metric-announcement {
+  margin-top: 4px;
+
+  color: #f1f1f1;
+
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The rest of .metric-stack, next to the Announcements card - what's
+   scheduled but not live yet, from the Announcements page's scheduler. */
+.upcoming-announcements {
+  flex: 1;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+}
+
+.upcoming-announcements-list {
+  margin-top: 4px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  overflow-y: auto;
+}
+
+.upcoming-announcement-item {
+  padding: 6px 8px;
+
+  border-radius: 6px;
+  border: 1px solid rgba(215, 183, 91, 0.22);
+  background: rgba(215, 183, 91, 0.07);
+}
+
+.upcoming-announcement-message {
+  color: #f1f1f1;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.upcoming-announcement-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  margin-top: 2px;
+
+  color: var(--yellow);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.upcoming-announcements-empty {
+  margin-top: 4px;
+
+  color: #727272;
+  font-size: 12px;
 }
 
 /* =========================================
@@ -548,14 +642,6 @@ button {
 .visual-preview-card {
   display: flex;
   flex-direction: column;
-
-  /*
-   * The embedded page sizes itself in container-query units against its own
-   * box (containerType: size, h-dvh), so it scales cleanly at any height
-   * here rather than clipping - this just keeps the card in a metric-card's
-   * usual proportions.
-   */
-  min-height: 160px;
 
   border-radius: 9px;
 
@@ -638,6 +724,12 @@ button {
   }
 }
 
+.visual-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .visual-preview-link {
   display: inline-flex;
   align-items: center;
@@ -657,8 +749,12 @@ button {
 
 .visual-preview-frame-wrap {
   position: relative;
-  flex: 1;
-  min-height: 0;
+
+  /* Matches the board's own 16:9 frame (see boardGeometry.js) so the
+     embed fills this box edge to edge instead of showing its own
+     letterbox bars inside an odd-shaped one. */
+  width: 100%;
+  aspect-ratio: 16 / 9;
 
   margin: 8px 12px 12px;
 
@@ -911,43 +1007,29 @@ button {
 
 }
 
-/* A preview of the live board's announcement banner, styled the same way
-   (dark gradient, gold border) so a font choice here shows exactly what it
-   will look like there. */
+/* A preview of the live board's announcement banner - same border, background,
+   and icon-beside-text layout as VisualBoard.jsx's renderAnnouncementsLayer,
+   so a style change here shows exactly what it will look like there. */
 .announcement-style-preview {
   display: flex;
-  flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 8px;
 
   margin-bottom: 12px;
-  padding: 14px 18px;
+  padding: 10px 18px;
 
   border: 1px solid #c9a03c;
-  border-radius: 8px;
+  border-radius: 2px;
 
-  background: linear-gradient(180deg, #3a0d0c 0%, #1c0403 100%);
+  background: #2e0505;
 
   text-align: center;
 }
 
-.announcement-style-preview-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
+.announcement-style-preview-icon {
+  flex-shrink: 0;
   color: #f0d689;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.22em;
-  opacity: 0.85;
-}
-
-.announcement-style-preview-rule {
-  width: 64px;
-  height: 1px;
-  background: rgba(244, 202, 93, 0.5);
 }
 
 .announcement-style-preview p {
@@ -1791,6 +1873,34 @@ button {
   border-color: rgba(107, 197, 142, 0.7);
 }
 
+.schedule-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+
+  padding: 3px 8px;
+
+  border-radius: 999px;
+  border: 1px solid rgba(215, 183, 91, 0.3);
+  background: rgba(215, 183, 91, 0.1);
+
+  color: var(--yellow);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.schedule-badge.passed {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.schedule-badge-none {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .edit-button,
 .delete-button {
   width: 27px;
@@ -1843,12 +1953,18 @@ button {
   border: 1px solid var(--border-light);
   border-radius: 6px;
 
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
   color: #bcbcbc;
   background: rgba(255, 255, 255, 0.04);
 
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  text-decoration: none;
+  cursor: pointer;
 
   transition: color 0.18s ease, background 0.18s ease;
 }
@@ -2154,6 +2270,69 @@ button {
     opacity: 1;
   }
 }
+
+/*
+ * Motion for a board element (see src/lib/animationStyle.js). Each keyframe
+ * animates only `opacity`, `scale`, `rotate`, or `translate` - the
+ * independent CSS properties that compose with an element's own static
+ * `transform` (its centering, and for a shape its rotation, or for a photo
+ * its scale) instead of replacing it for the length of the animation.
+ */
+@keyframes board-anim-fade {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@keyframes board-anim-pulse {
+  0%, 100% { scale: 1; }
+  50% { scale: 1.08; }
+}
+
+@keyframes board-anim-bounce {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -10%; }
+}
+
+@keyframes board-anim-spin {
+  from { rotate: 0deg; }
+  to { rotate: 360deg; }
+}
+
+@keyframes board-anim-slide-left {
+  0%, 100% { translate: 0 0; }
+  50% { translate: -8% 0; }
+}
+
+@keyframes board-anim-slide-right {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 8% 0; }
+}
+
+@keyframes board-anim-slide-up {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -8%; }
+}
+
+@keyframes board-anim-slide-down {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 8%; }
+}
+
+/* A photo frame's carousel (see components/PhotoCarousel.jsx) - the outgoing
+   and incoming photo are the same two absolutely-stacked layers regardless
+   of direction; only their transform target changes. */
+.photo-carousel {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.photo-carousel-slide {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.8s ease-in-out;
+}
+
 /* =========================================
    SHARED TEXT DEFAULTS
 ========================================= */
@@ -3290,6 +3469,37 @@ svg {
   background: linear-gradient(90deg, #6f0c0b, #8b1716);
 }
 
+.date-field-day:disabled {
+  color: #3a3a3a;
+  cursor: default;
+}
+
+.date-field-day:disabled:hover {
+  background: transparent;
+}
+
+/* The time row DateTimeField adds below the calendar grid - same select
+   styling as the month/year header, just with an hour:minute pair. */
+.date-field-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+
+  color: var(--text-muted);
+}
+
+.date-field-time .date-field-select {
+  flex: 1;
+}
+
+.date-field-time-sep {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
 .date-field-actions {
   display: flex;
   align-items: center;
@@ -3522,7 +3732,8 @@ svg {
 .admin-layout.light-mode .sidebar-link,
 .admin-layout.light-mode .profile,
 .admin-layout.light-mode .panel-title,
-.admin-layout.light-mode .metric-value {
+.admin-layout.light-mode .metric-value,
+.admin-layout.light-mode .metric-announcement {
   color: #2a2a2a;
 }
 
@@ -3726,8 +3937,9 @@ svg {
   min-height: 0;
 }
 
-/* each column takes its own scrollbar rather than growing the page */
-.vb-elements-col,
+/* each column takes its own scrollbar rather than growing the page - the
+   elements column scrolls in .vb-panel specifically (see below), not here,
+   so its rail of tab icons stays put instead of scrolling away with it */
 .vb-properties {
   overflow-y: auto;
 
@@ -3735,17 +3947,78 @@ svg {
   scrollbar-gutter: stable;
 }
 
+/* A slim, themed scrollbar for the editor's scrolling panels, in place of
+   the browser's full-width default with its boxy arrow buttons - same
+   treatment as .candidate-edit-popup elsewhere in the admin. */
+.vb-panel,
+.vb-properties,
+.vb-canvas-stage {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.vb-panel::-webkit-scrollbar,
+.vb-properties::-webkit-scrollbar,
+.vb-canvas-stage::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.vb-panel::-webkit-scrollbar-track,
+.vb-properties::-webkit-scrollbar-track,
+.vb-canvas-stage::-webkit-scrollbar-track {
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.vb-panel::-webkit-scrollbar-thumb,
+.vb-properties::-webkit-scrollbar-thumb,
+.vb-canvas-stage::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
+}
+
+.vb-panel::-webkit-scrollbar-thumb:hover,
+.vb-properties::-webkit-scrollbar-thumb:hover,
+.vb-canvas-stage::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.42);
+  background-clip: padding-box;
+}
+
 .vb-canvas-col {
   display: flex;
   flex-direction: column;
   gap: 10px;
+
+  min-width: 0;
 }
 
-/* the stage takes the height the column has spare, and centres the board */
+/*
+ * The stage takes the height the column has spare, and centres the board -
+ * it's also the container-query basis .vb-canvas sizes itself against (see
+ * .vb-canvas below), so zooming past 100% needs a scrollbar rather than
+ * spilling out of the column.
+ *
+ * Centring is done with .vb-canvas's own margin: auto rather than
+ * align-items/justify-content: center here - centering an overflowing flex
+ * child with align-items/justify-content leaves the overflow on the
+ * top/left side permanently un-scrollable-to in Chrome and Firefox (the
+ * scroll container's start edge stays pinned to the centred box, not the
+ * child's actual start edge), so zooming in past 100% made the board's own
+ * left and top edges impossible to reach no matter how far the scrollbar
+ * was dragged. margin: auto centers the same way but keeps overflow
+ * reachable on every side.
+ */
 .vb-canvas-stage {
   flex: 1;
   min-height: 0;
-  align-items: center;
+
+  display: flex;
+
+  container-type: size;
+  overflow: auto;
 }
 
 @media (max-width: 1080px) {
@@ -3832,12 +4105,29 @@ svg {
   cursor: default;
 }
 
+/* An icon, a draggable range, and a tabular readout - lets the canvas be
+   sized to anything in between rather than only the three fixed presets it
+   used to jump between. */
 .vb-toolbar-zoom {
-  width: auto;
-  height: 28px;
-  padding: 0 8px;
-  font-size: 12px;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  padding: 0 2px;
+  color: #9a9a9a;
+}
+
+.vb-toolbar-zoom input[type='range'] {
+  width: 90px;
+  accent-color: var(--red-status);
+}
+
+.vb-toolbar-zoom-value {
+  min-width: 34px;
+
+  color: #8b8b8b;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------------- templates ---------------- */
@@ -3956,8 +4246,14 @@ svg {
   gap: 2px;
 
   min-width: 0;
+  min-height: 0;
   padding-left: 10px;
   border-left: 1px solid var(--border-light);
+
+  /* scrolls on its own so .vb-rail's tabs stay reachable regardless of
+     how long the active panel's content runs */
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .vb-panel-label {
@@ -4198,18 +4494,6 @@ svg {
 
 /* ---------------- canvas column ---------------- */
 
-.vb-canvas-col {
-  min-width: 0;
-}
-
-/* Centres the canvas when zoom shrinks it narrower than the column, and
-   becomes the fullscreen element when the toolbar's Fullscreen is toggled. */
-.vb-canvas-stage {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-}
-
 /*
  * Fullscreen is the whole workspace, so the element rail and the properties
  * panel stay usable - the canvas alone used to go fullscreen, which hid
@@ -4229,7 +4513,10 @@ svg {
 }
 
 /* each column scrolls on its own rather than the page */
-.vb-layout:fullscreen .vb-elements-col,
+.vb-layout:fullscreen .vb-elements-col {
+  min-height: 0;
+}
+
 .vb-layout:fullscreen .vb-properties {
   min-height: 0;
   overflow-y: auto;
@@ -4242,40 +4529,81 @@ svg {
   justify-content: center;
 }
 
-/* the canvas fills the height it is given instead of the column's width */
-.vb-layout:fullscreen .vb-canvas-stage {
+/* Focus mode: fullscreen with the rail and properties panel gone entirely,
+   so the canvas gets the whole workspace instead of splitting it with two
+   panels that have nothing to do while there's no editing chrome to hold. */
+.vb-layout:fullscreen.vb-focus-mode {
+  grid-template-columns: 1fr;
+}
+
+.vb-layout:fullscreen.vb-focus-mode .vb-elements-col,
+.vb-layout:fullscreen.vb-focus-mode .vb-properties {
+  display: none;
+}
+
+.vb-layout:fullscreen.vb-focus-mode .vb-canvas-hint {
+  display: none;
+}
+
+.vb-focus-exit {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+
+  display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 0;
-  flex: 1;
+  gap: 6px;
+
+  padding: 7px 12px;
+
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.75);
+  backdrop-filter: blur(6px);
+
+  color: #d5d5d5;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.vb-layout:fullscreen .vb-canvas {
-  width: auto;
-  height: 100%;
-  max-width: 100%;
+/* dims to stay out of the way, but never fully disappears - Escape also
+   exits (native to the Fullscreen API), this is just the discoverable way */
+.vb-layout:hover .vb-focus-exit,
+.vb-focus-exit:focus-visible {
+  opacity: 1;
 }
 
+.vb-focus-exit:hover {
+  background: rgba(212, 93, 89, 0.25);
+  color: #ffffff;
+}
+
+/*
+ * The board itself, sized to fill .vb-canvas-stage on whichever axis is
+ * tighter while holding exactly a 16:9 ratio - the same "contain" formula
+ * the live board itself uses (see boardGeometry.js) so cqw/cqh-sized
+ * elements measure the same way here as they do in .vb-canvas-surface on
+ * /visual, in or out of fullscreen, on any window shape. --vb-zoom scales
+ * that up or down from the toolbar's zoom slider; the stage scrolls once it
+ * no longer fits.
+ */
 .vb-canvas {
   position: relative;
   container-type: size;
 
-  /*
-   * One surface, not columns. This was still a three-column grid after the
-   * board went free-form, which left the canvas surface sitting in the
-   * first column at a fifth of the width - so every element was crammed
-   * into that strip and could not be dragged out of it.
-   */
   display: block;
 
-  /*
-   * Height-bounded: the stage decides how tall the board can be and the
-   * aspect ratio gives the width, so it fills the space without ever
-   * spilling past the column. The zoom control narrows it from there.
-   */
-  max-width: 100%;
-  max-height: 100%;
-  aspect-ratio: 16 / 9;
+  width: calc(min(100cqw, 100cqh * 16 / 9) * var(--vb-zoom, 1));
+  height: calc(min(100cqh, 100cqw * 9 / 16) * var(--vb-zoom, 1));
+  flex-shrink: 0;
+  margin: auto;
+
   overflow: hidden;
 
   border-radius: 8px;
@@ -4283,7 +4611,7 @@ svg {
 
   background: radial-gradient(ellipse at 50% 20%, #2a0606 0%, #12010a 55%, #0b0102 100%);
 
-  transition: width 0.15s ease;
+  transition: width 0.15s ease, height 0.15s ease;
 }
 
 /*
@@ -4384,9 +4712,13 @@ svg {
   outline: 1px dashed rgba(244, 202, 93, 0.5);
 }
 
+/* Brought to the front for the same reason as a selected shape (see below) -
+   otherwise its resize handle can end up under a later-painted element and
+   unclickable. */
 .vb-element.selected {
   outline: 1.5px dashed #f4ca5d;
   outline-offset: 2px;
+  z-index: 5;
 }
 
 .vb-element.multi-selected {
@@ -4437,9 +4769,15 @@ svg {
   outline: 1px dashed rgba(244, 202, 93, 0.5);
 }
 
+/*
+ * Brought to the front for the same reason as a selected shape (see below) -
+ * otherwise a box's own resize handle can end up under a later-painted
+ * element and unclickable.
+ */
 .vb-box.selected {
   outline: 1.5px dashed #f4ca5d;
   outline-offset: 2px;
+  z-index: 5;
 }
 
 .vb-box.multi-selected {
@@ -4636,6 +4974,74 @@ svg {
   line-height: 1.5;
 }
 
+/* Thumbnails for a photo frame's carousel list - add tile always trails. */
+.vb-carousel-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.vb-carousel-photo {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+}
+
+.vb-carousel-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vb-carousel-photo-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  cursor: pointer;
+}
+
+.vb-carousel-photo-remove:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.vb-carousel-photo-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+
+  border: 1px dashed var(--border-light);
+  border-radius: 6px;
+  color: #8b8b8b;
+  cursor: pointer;
+}
+
+.vb-carousel-photo-add:hover {
+  border-color: #c9a03c;
+  color: #c9a03c;
+}
+
+.vb-carousel-photo-add input {
+  display: none;
+}
+
 .vb-group-button {
   width: 100%;
   gap: 6px;
@@ -4673,6 +5079,29 @@ svg {
   object-fit: cover;
   border-radius: 6px;
   border: 1px solid var(--border-light);
+}
+
+.vb-photo-position-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vb-photo-position-reset {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  border: 0;
+  background: transparent;
+
+  color: #8b8b8b;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.vb-photo-position-reset:hover {
+  color: #d5d5d5;
 }
 
 .vb-field-row {
@@ -4964,6 +5393,32 @@ svg {
 
 .admin-layout.light-mode .vb-panel {
   border-left-color: rgba(91, 55, 55, 0.2);
+}
+
+.admin-layout.light-mode .vb-panel,
+.admin-layout.light-mode .vb-properties,
+.admin-layout.light-mode .vb-canvas-stage {
+  scrollbar-color: rgba(91, 55, 55, 0.3) transparent;
+}
+
+.admin-layout.light-mode .vb-panel::-webkit-scrollbar-track,
+.admin-layout.light-mode .vb-properties::-webkit-scrollbar-track,
+.admin-layout.light-mode .vb-canvas-stage::-webkit-scrollbar-track {
+  background: rgba(91, 55, 55, 0.05);
+}
+
+.admin-layout.light-mode .vb-panel::-webkit-scrollbar-thumb,
+.admin-layout.light-mode .vb-properties::-webkit-scrollbar-thumb,
+.admin-layout.light-mode .vb-canvas-stage::-webkit-scrollbar-thumb {
+  background: rgba(91, 55, 55, 0.3);
+  background-clip: padding-box;
+}
+
+.admin-layout.light-mode .vb-panel::-webkit-scrollbar-thumb:hover,
+.admin-layout.light-mode .vb-properties::-webkit-scrollbar-thumb:hover,
+.admin-layout.light-mode .vb-canvas-stage::-webkit-scrollbar-thumb:hover {
+  background: rgba(91, 55, 55, 0.45);
+  background-clip: padding-box;
 }
 
 .admin-layout.light-mode .vb-panel-label {

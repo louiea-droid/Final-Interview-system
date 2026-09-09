@@ -1,14 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Megaphone } from "lucide-react";
 
 import FullscreenSwitch from "../components/FullscreenSwitch";
 import AutoFitText from "../components/AutoFitText";
-import { subscribeAnnouncements, subscribeCandidates } from "../lib/localBackend";
+import { subscribeAnnouncements, subscribeCandidates } from "../lib/firebaseBackend";
 import { isShownOnBoard } from "../lib/candidateVisibility";
-import { DEFAULT_LAYOUT, LAYOUT_EVENT, isVisible, loadBoardLayout } from "../lib/boardLayout";
+import { isShownOnBoard as isAnnouncementShownOnBoard } from "../lib/announcementVisibility";
+import { DEFAULT_LAYOUT, isVisible, subscribeBoardLayout, subscribeDraftLayout } from "../lib/boardLayout";
+import {
+  DEFAULT_ANNOUNCEMENT_STYLE,
+  resolveAnnouncementStyle,
+  subscribeAnnouncementStyle,
+} from "../lib/announcementStyle";
 import { resolveTextStyle } from "../lib/textStyle";
-import { resolveShapeStyle } from "../lib/shapeStyle";
+import { isCarousel, resolveShapeStyle } from "../lib/shapeStyle";
+import { resolveAnimationCss } from "../lib/animationStyle";
 import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from "../lib/boardGeometry";
+import PhotoCarousel from "../components/PhotoCarousel";
+import PhotoAdjuster from "../components/PhotoAdjuster";
+import VideoAdjuster from "../components/VideoAdjuster";
+import TextContent from "../components/TextContent";
 
 /* Announcements cycle on their own timer, independent of the candidate sets. */
 const ANNOUNCEMENT_DURATION = 7000;
@@ -112,7 +123,16 @@ const SPARK_LAYERS = [
 
 /* ---------------- Visual Board ---------------- */
 
-export default function DisplayPage() {
+/*
+ * `usePublished` (default true) is /visual's normal mode: the published
+ * layout, exactly what every viewer sees. The admin-only draft preview at
+ * /admin/visual-board/preview renders this same component with it set to
+ * false, so "what will this look like" is answered by the very code that
+ * decides what it actually looks like - rather than by eyeballing the
+ * editor's canvas against a copy of this board that's still showing the
+ * last Publish.
+ */
+export default function DisplayPage({ usePublished = true }) {
   const [candidates, setCandidates] =
     useState([]);
 
@@ -141,12 +161,10 @@ export default function DisplayPage() {
    * DISPLAY SETTINGS
    * =========================================================
    *
-   * The candidate carousel (right column) shows about 4 cards
-   * in its viewport at once, scrolling upward continuously
-   * rather than swapping discrete sets.
+   * The candidate carousel (right column) shows a configurable number of
+   * candidates across each row - see `perRow` on layout.candidates -
+   * scrolling upward continuously rather than swapping discrete sets.
    */
-
-  const CAROUSEL_VISIBLE_COUNT = 4;
 
   /* =========================================================
      LOAD CANDIDATES (live)
@@ -183,19 +201,36 @@ export default function DisplayPage() {
      LOAD ANNOUNCEMENTS (live)
   ========================================================= */
 
-  const [announcements, setAnnouncements] = useState([]);
+  const [rawAnnouncements, setRawAnnouncements] = useState([]);
   const [currentAnnouncement, setCurrentAnnouncement] = useState(0);
+  const [announcementStyle, setAnnouncementStyle] = useState(DEFAULT_ANNOUNCEMENT_STYLE);
 
   useEffect(() => {
-    return subscribeAnnouncements((rows) => {
-      setAnnouncements(
-        rows
-          .filter((announcement) => announcement.active !== false)
-          .sort(
-            (a, b) => new Date(a.created_at) - new Date(b.created_at)
-          )
-      );
-    });
+    return subscribeAnnouncements(setRawAnnouncements);
+  }, []);
+
+  /*
+   * A scheduled announcement's moment to start showing isn't itself a
+   * Firestore change, so nothing would otherwise prompt the board to
+   * re-check which announcements currently pass isShownOnBoard.
+   */
+  const [announcementsNow, setAnnouncementsNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setAnnouncementsNow(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const announcements = useMemo(
+    () =>
+      rawAnnouncements
+        .filter(isAnnouncementShownOnBoard)
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawAnnouncements, announcementsNow]
+  );
+
+  useEffect(() => {
+    return subscribeAnnouncementStyle(setAnnouncementStyle);
   }, []);
 
   useEffect(() => {
@@ -221,26 +256,15 @@ export default function DisplayPage() {
 
      Where the logo, every text block, and any photos or shapes sit
      - and whether each is shown at all - set from /admin/visual-board
-     and synced here the same way the theme is: a native 'storage'
-     event reaches this page in another tab or in the dashboard's
-     preview iframe, and LAYOUT_EVENT covers a listener in the very
-     same window.
+     and synced here through Firestore's own realtime updates, the
+     same way subscribeCandidates/subscribeAnnouncements work above.
   ========================================================= */
 
   const [layout, setLayout] = useState(DEFAULT_LAYOUT);
 
   useEffect(() => {
-    const load = () => setLayout(loadBoardLayout());
-
-    load();
-    window.addEventListener("storage", load);
-    window.addEventListener(LAYOUT_EVENT, load);
-
-    return () => {
-      window.removeEventListener("storage", load);
-      window.removeEventListener(LAYOUT_EVENT, load);
-    };
-  }, []);
+    return usePublished ? subscribeBoardLayout(setLayout) : subscribeDraftLayout(setLayout);
+  }, [usePublished]);
 
   useEffect(() => {
     if (isPreviewEmbed) return;
@@ -269,6 +293,26 @@ export default function DisplayPage() {
       window.removeEventListener("interview-board-settings-updated", loadTheme);
     };
   }, [isPreviewEmbed]);
+
+  /* Nothing else on the board means anything until the first candidate
+     snapshot lands, so the loading state is its own screen - just the
+     mark, spinning - rather than a skeleton of a board that isn't
+     there yet. */
+  if (loading) {
+    return (
+      <main
+        className={`grid h-dvh place-items-center ${
+          lightMode ? "bg-[#f4efed]" : "bg-[#0b0102]"
+        }`}
+      >
+        <img
+          src="/visual/HILLC-Petals.png"
+          alt=""
+          className="w-[12vw] max-w-[140px] min-w-[56px] animate-[board-loading-spin_1.6s_linear_infinite] drop-shadow-[0_0_18px_rgba(162,29,27,0.6)] motion-reduce:[animation-duration:2.4s]"
+        />
+      </main>
+    );
+  }
 
   /*
    * =========================================================
@@ -320,7 +364,9 @@ export default function DisplayPage() {
     );
   }
 
-  /* The announcement strip, as a positioned box that sizes to its text. */
+  /* The announcement strip, as a positioned, resizable box - the bordered
+     banner fills it (width and height alike), rather than just hugging its
+     own text, so dragging its corner in the editor has a visible effect. */
   function renderAnnouncementsLayer() {
     const box = layout.announcements;
     if (!isVisible(box) || announcements.length === 0) return null;
@@ -328,11 +374,12 @@ export default function DisplayPage() {
     return (
       <div
         key="announcements"
-        className="absolute flex justify-center"
+        className="absolute flex items-center justify-center"
         style={{
           left: `${box.x}%`,
           top: `${box.y}%`,
           width: `${box.width}%`,
+          height: `${box.height}%`,
           transform: "translate(-50%, -50%)",
         }}
       >
@@ -340,7 +387,8 @@ export default function DisplayPage() {
           key={announcements[currentAnnouncement]?.id}
           className={`
             flex
-            max-w-full
+            h-full
+            w-full
             items-center
             justify-center
             gap-2
@@ -356,7 +404,7 @@ export default function DisplayPage() {
         >
           <Megaphone size={18} className="shrink-0" aria-hidden="true" />
 
-          <p className="text-[clamp(13px,1.6vw,18px)] font-semibold leading-snug">
+          <p className="leading-snug" style={resolveAnnouncementStyle(announcementStyle)}>
             {announcements[currentAnnouncement]?.message}
           </p>
         </div>
@@ -399,7 +447,23 @@ export default function DisplayPage() {
     if (entry.kind === "shape") {
       const shape = layout.shapes.find((item) => item.id === entry.id);
       if (!shape || !isVisible(shape)) return null;
-      return <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)} />;
+      return (
+        <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)}>
+          {isCarousel(shape) ? (
+            <PhotoCarousel
+              photos={shape.photos}
+              direction={shape.animation.direction}
+              speed={shape.animation.speed}
+              fit={shape.fill.fit}
+            />
+          ) : (
+            <>
+              {shape.fill.type === "image" && <PhotoAdjuster fill={shape.fill} />}
+              {shape.fill.type === "video" && <VideoAdjuster fill={shape.fill} />}
+            </>
+          )}
+        </div>
+      );
     }
 
     if (entry.kind === "logo") {
@@ -409,7 +473,10 @@ export default function DisplayPage() {
           key="logo"
           src={layout.logo.url || "/visual/logo.png"}
           alt="Hyacinth"
-          style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
+          style={{
+            ...scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH),
+            ...resolveAnimationCss(layout.logo.animation),
+          }}
           className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.55)]"
         />
       );
@@ -423,8 +490,31 @@ export default function DisplayPage() {
           key={image.id}
           src={image.url}
           alt=""
-          style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
+          style={{
+            ...scaledPositionStyle(image, PHOTO_BASE_WIDTH),
+            ...resolveAnimationCss(image.animation),
+          }}
           className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
+        />
+      );
+    }
+
+    if (entry.kind === "video") {
+      const video = layout.videos.find((item) => item.id === entry.id);
+      if (!video || !isVisible(video)) return null;
+      return (
+        <video
+          key={video.id}
+          src={video.url}
+          style={{
+            ...scaledPositionStyle(video, PHOTO_BASE_WIDTH),
+            ...resolveAnimationCss(video.animation),
+          }}
+          className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
+          autoPlay
+          loop
+          muted
+          playsInline
         />
       );
     }
@@ -435,10 +525,14 @@ export default function DisplayPage() {
       return (
         <p
           key={text.id}
-          style={{ ...positionStyle(text), ...resolveTextStyle(text) }}
+          style={{
+            ...positionStyle(text),
+            ...resolveTextStyle(text),
+            ...resolveAnimationCss(text.animation),
+          }}
           className="absolute"
         >
-          {text.text}
+          <TextContent text={text} />
         </p>
       );
     }
@@ -458,14 +552,17 @@ export default function DisplayPage() {
     return rows;
   }
 
-  /* One candidate box for the carousel - photo on top, gold name bar below,
-     the board's original card look, just sized to sit two across.
-     `full` spans both grid columns, for a lone candidate closing out a row. */
-  function renderCandidateCard(candidate, key, full = false) {
+  /* One candidate box for the carousel - photo on top, gold name bar below.
+     The photo keeps a fixed aspect ratio rather than filling whatever
+     height its row is given, so a card's height simply follows from its
+     width - which is what makes `perRow` (below) "auto adjust" card size
+     just by changing how many sit across a row, with no separate height
+     setting to keep in sync. */
+  function renderCandidateCard(candidate, key) {
     return (
       <div
         key={key}
-        className={`flex flex-col overflow-hidden rounded-[3px] ${full ? "col-span-2" : ""} ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}`}
+        className={`flex flex-col overflow-hidden rounded-[3px] border ${lightMode ? "border-[#d8ab9c] bg-[#fdf6f3]" : "border-[#c9a03c] bg-[#2e0505]"}`}
       >
         <div
           className={`
@@ -491,13 +588,13 @@ export default function DisplayPage() {
           className={`
             relative
             flex
-            min-h-[clamp(48px,16cqh,84px)]
+            min-h-[clamp(30px,9cqh,55px)]
             flex-col
             items-center
             justify-center
             gap-0.5
             px-2
-            py-1.5
+            py-1
 
             bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
           `}
@@ -537,48 +634,19 @@ export default function DisplayPage() {
   }
 
   /* The right column's whole candidate board: a loading skeleton, an empty
-     message, or the looping carousel - two rows of two copies stacked so
-     translateY(-50%) always lands exactly on the seam between them. */
+     message, or the looping carousel - two copies of the candidate list
+     stacked so translateY(-50%) always lands exactly on the seam between
+     them, regardless of how tall each copy actually is.
+     `perRow` (set from the editor's Candidate Board panel, 2 by default)
+     is how many candidates sit across one row; a row's height then simply
+     follows its cards' own aspect ratio, so raising or lowering `perRow`
+     auto-adjusts card size to fit that many across instead of requiring a
+     separate height setting to keep in sync. A row shorter than `perRow`
+     (the last one, when the count doesn't divide evenly) gets its own
+     column count so its cards stretch to fill the row rather than leaving
+     empty cells. */
   function renderCandidateCarousel() {
-    if (loading) {
-      return (
-        <div className="grid h-full w-full auto-rows-[minmax(0,1fr)] grid-cols-2 gap-[2cqw] overflow-hidden [container-type:size]">
-          {Array.from({ length: CAROUSEL_VISIBLE_COUNT }).map((_, index) => (
-            <div
-              key={`skeleton-${index}`}
-              style={{ animationDelay: `${index * 0.12}s` }}
-              className={`
-                flex
-                flex-col
-                overflow-hidden
-                animate-[skeleton-in_.5s_ease-out_both]
-                ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}
-              `}
-            >
-              <div
-                className={`
-                  relative
-                  aspect-[11/10]
-                  animate-[pulse-glow_1.8s_ease-in-out_infinite]
-                  ${
-                    lightMode
-                      ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
-                      : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
-                  }
-                `}
-                style={{ animationDelay: `${index * 0.3}s` }}
-              />
-              <div
-                className={`
-                  min-h-[clamp(48px,16cqh,84px)]
-                  bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
-                `}
-              />
-            </div>
-          ))}
-        </div>
-      );
-    }
+    const perRow = layout.candidates.perRow ?? 2;
 
     if (candidates.length === 0) {
       return (
@@ -600,7 +668,7 @@ export default function DisplayPage() {
       );
     }
 
-    const rows = chunkIntoRows(candidates, 2);
+    const rows = chunkIntoRows(candidates, perRow);
 
     return (
       <div className="relative h-full w-full overflow-hidden [container-type:size]">
@@ -613,14 +681,11 @@ export default function DisplayPage() {
               {rows.map((row, rowIndex) => (
                 <div
                   key={rowIndex}
-                  className="grid shrink-0 grid-cols-2 gap-[2cqw]"
+                  className="grid shrink-0 gap-[2cqw]"
+                  style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}
                 >
                   {row.map((candidate, cellIndex) =>
-                    renderCandidateCard(
-                      candidate,
-                      `${copy}-${rowIndex}-${cellIndex}`,
-                      row.length === 1
-                    )
+                    renderCandidateCard(candidate, `${copy}-${rowIndex}-${cellIndex}`)
                   )}
                 </div>
               ))}
@@ -675,6 +740,22 @@ export default function DisplayPage() {
 
       <FullscreenSwitch />
 
+      {/*
+        A permanent, impossible-to-miss label while this is the draft
+        preview - it renders through the exact same code as the real
+        board, so nothing else on screen marks it as not-yet-published.
+      */}
+      {!usePublished && (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-[60] flex justify-center"
+          aria-hidden="true"
+        >
+          <span className="mt-2 rounded-full border border-[#f4ca5d]/50 bg-black/70 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-[#f4ca5d]">
+            Draft preview · not yet published
+          </span>
+        </div>
+      )}
+
       {/* Falling embers */}
 
       {SPARK_LAYERS.map(
@@ -704,15 +785,22 @@ export default function DisplayPage() {
       )}
 
       {/*
-        The board itself: one full-bleed surface that every element is
-        positioned against. It marks itself as the container-query basis,
-        so an element's cqw/cqh sizing is relative to the whole board
-        rather than to a column of it.
+        The board itself: a centered 16:9 frame, letterboxed against
+        whatever the screen's actual ratio is, with the video showing
+        through the bars. It marks itself as the container-query basis, so
+        an element's cqw/cqh sizing is relative to the whole board rather
+        than to a column of it - and, being locked to the same 16:9 ratio
+        as the editor's canvas, an element sits at the same spot here as it
+        does in the preview, regardless of the display's own aspect ratio.
       */}
 
       <div
-        style={{ containerType: "size" }}
-        className="absolute inset-0 z-[2]"
+        style={{
+          containerType: "size",
+          width: "min(100dvw, 100dvh * 16 / 9)",
+          height: "min(100dvh, 100dvw * 9 / 16)",
+        }}
+        className="absolute inset-0 z-[2] m-auto overflow-hidden"
       >
         {layout.layerOrder.map(renderLayer)}
       </div>

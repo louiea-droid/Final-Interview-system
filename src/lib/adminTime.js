@@ -75,6 +75,19 @@ export function formatCurrentDate(date, timeZone) {
   }).format(date);
 }
 
+/** A scheduled date and time, e.g. "Sep 9, 2026, 1:00 PM" - for the announcement scheduler. */
+export function formatScheduledTime(date, timeZone) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date);
+}
+
 /**
  * The Y-M-D of `value` as seen in `timeZone`, or null if it isn't a date.
  *

@@ -9,13 +9,24 @@
  * start the board off, but they can be restyled, moved, or removed like any
  * other text.
  *
- * Editing happens on a separate draft copy (its own localStorage key) so
- * the public board never shows work in progress - /visual only ever reads
- * the published copy, and stays completely unaware that a draft exists.
- * Publishing copies the draft over it and notifies other tabs the same way
- * interview-board-settings does: a 'storage' event reaches them on its own,
- * and LAYOUT_EVENT covers a listener in the same window.
+ * Editing happens on a separate draft document in Firestore so the public
+ * board never shows work in progress - /visual only ever reads the
+ * published document, and stays completely unaware that a draft exists.
+ * Publishing copies the draft over it. Both documents update live: /visual
+ * subscribes to the published one, and the admin editor loads the draft
+ * once when it opens (there is normally only one admin editing at a time).
  */
+
+import {
+  addDoc,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  setDoc,
+} from 'firebase/firestore';
+import { boardTemplatesCollection, boardLayoutDoc, boardLayoutDraftDoc } from './firebase/collections';
 
 import {
   DEFAULT_CLOSING_STYLE,
@@ -25,6 +36,7 @@ import {
   normalizeTextStyle,
 } from './textStyle';
 import { normalizeShapes } from './shapeStyle';
+import { DEFAULT_ANIMATION, normalizeAnimation } from './animationStyle';
 
 /*
  * Bumped when stored geometry stops meaning what it used to. Positions were
@@ -34,11 +46,6 @@ import { normalizeShapes } from './shapeStyle';
  * reinterpreted into a scramble.
  */
 export const LAYOUT_VERSION = 3;
-
-export const LAYOUT_KEY = 'interview-board-layout';
-export const DRAFT_KEY = 'interview-board-layout:draft';
-export const LAYOUT_EVENT = 'interview-board-layout-updated';
-export const TEMPLATES_KEY = 'interview-board-templates';
 
 /*
  * The candidate board and the announcement strip are boxes rather than
@@ -54,6 +61,11 @@ export const DEFAULT_CANDIDATES = {
   height: 74,
   /* Seconds the carousel spends per card - lower is faster. */
   secondsPerCard: 4,
+  /* How many candidate boxes sit across one row - the grid's column count.
+     Each card's height then follows from its width by its own aspect ratio,
+     so raising or lowering this auto-adjusts card size to fit that many
+     across, rather than changing how many candidates show per row. */
+  perRow: 2,
 };
 
 export const DEFAULT_ANNOUNCEMENTS = {
@@ -62,6 +74,7 @@ export const DEFAULT_ANNOUNCEMENTS = {
   x: 27,
   y: 78,
   width: 42,
+  height: 10,
 };
 
 /*
@@ -80,14 +93,14 @@ export const DEFAULT_DIVIDER = {
 
 export const DEFAULT_LAYOUT = {
   version: LAYOUT_VERSION,
-  logo: { visible: true, url: null, x: 24, y: 16, scale: 1 },
+  logo: { visible: true, url: null, x: 24, y: 16, scale: 1, animation: DEFAULT_ANIMATION },
   candidates: DEFAULT_CANDIDATES,
   announcements: DEFAULT_ANNOUNCEMENTS,
   // { id, text, x, y, fontSize, visible, style, locked?, groupId? }
   texts: [
     {
       id: 'heading',
-      text: 'Final Interview Applicants',
+      text: 'Final Interview\nApplicants',
       x: 27,
       y: 36,
       fontSize: DEFAULT_TEXT_SIZES.heading,
@@ -105,6 +118,7 @@ export const DEFAULT_LAYOUT = {
     },
   ],
   images: [], // { id, url, x, y, scale, visible, locked?, groupId? }
+  videos: [], // { id, url, x, y, scale, visible, locked?, groupId? }
   // { id, x, y, length, thickness, orientation, visible, locked?, groupId? }
   dividers: [{ ...DEFAULT_DIVIDER, id: 'divider-1' }],
   shapes: [], // { id, kind, x, y, width, height, rotation, radius, layer, fill, stroke, visible, locked?, groupId? }
@@ -139,9 +153,15 @@ function normalizeText(text, base = DEFAULT_EXTRA_TEXT_STYLE, baseSize = DEFAULT
       ? clamp(text.fontSize, 0.3, 40)
       : clamp(baseSize * (Number(text.scale) || 1), 0.3, 40),
     visible: text.visible !== false,
+    locked: text.locked === true,
     /* How wide the text may run before wrapping, as a share of the board. */
     boxWidth: clamp(text.boxWidth ?? 92, 5, 100),
+    /* Each non-empty line becomes its own bulleted item instead of one
+       wrapped block of running text - for a list like "Our Brands". */
+    bulletList: text.bulletList === true,
     style: normalizeTextStyle(text.style, base),
+    animation: normalizeAnimation(text.animation),
+    ...(text.groupId ? { groupId: text.groupId } : {}),
   };
 }
 
@@ -164,6 +184,7 @@ function normalizeLayerOrder(saved, layout) {
     ...layout.texts.map((item) => ({ kind: 'text', id: item.id })),
     ...layout.dividers.map((item) => ({ kind: 'divider', id: item.id })),
     ...layout.images.map((item) => ({ kind: 'image', id: item.id })),
+    ...layout.videos.map((item) => ({ kind: 'video', id: item.id })),
     ...layout.shapes.map((item) => ({ kind: 'shape', id: item.id })),
   ];
   const realKeys = new Set(real.map(layerKey));
@@ -235,7 +256,22 @@ function normalizeBox(box, defaults) {
             30
           ),
         }),
+    ...(defaults.perRow === undefined
+      ? {}
+      : {
+          perRow: Math.round(clamp(source.perRow ?? defaults.perRow, 1, 6)),
+        }),
   };
+}
+
+/* A dropped-in photo. Positions and sizing are left as loosely-checked as
+   they always were here - only `animation` is validated, since it's new. */
+function normalizeImages(images) {
+  if (!Array.isArray(images)) return [];
+
+  return images
+    .filter((image) => image && typeof image === 'object' && image.id)
+    .map((image) => ({ ...image, animation: normalizeAnimation(image.animation) }));
 }
 
 function normalizeLayout(parsed) {
@@ -276,12 +312,17 @@ function normalizeLayout(parsed) {
   const hasTextData = Boolean(parsed.heading || parsed.closing || Array.isArray(parsed.texts));
 
   const layout = {
-    logo: { ...DEFAULT_LAYOUT.logo, ...(parsed.logo ?? {}) },
+    logo: {
+      ...DEFAULT_LAYOUT.logo,
+      ...(parsed.logo ?? {}),
+      animation: normalizeAnimation(parsed.logo?.animation),
+    },
     candidates: normalizeBox(parsed.candidates, DEFAULT_CANDIDATES),
     announcements: normalizeBox(parsed.announcements, DEFAULT_ANNOUNCEMENTS),
     dividers: normalizeDividers(parsed),
     texts: hasTextData ? texts : DEFAULT_LAYOUT.texts,
-    images: Array.isArray(parsed.images) ? parsed.images : [],
+    images: normalizeImages(parsed.images),
+    videos: Array.isArray(parsed.videos) ? parsed.videos : [],
     shapes: normalizeShapes(parsed.shapes),
   };
 
@@ -291,23 +332,11 @@ function normalizeLayout(parsed) {
   return layout;
 }
 
-function readLayout(key) {
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw);
-
-    // geometry from before the free-form change cannot be carried over
-    if (parsed?.version !== LAYOUT_VERSION) {
-      window.localStorage.removeItem(key);
-      return null;
-    }
-
-    return normalizeLayout(parsed);
-  } catch {
-    return null;
-  }
+/* A layout document from before the free-form change, or from a schema
+   bump since, cannot be carried over - treated the same as no document. */
+function normalizeStoredLayout(data) {
+  if (!data || data.version !== LAYOUT_VERSION) return null;
+  return normalizeLayout(data);
 }
 
 /** Whether an element (the logo, headline, closing line, a photo, or a text block) is shown. */
@@ -315,48 +344,108 @@ export function isVisible(element) {
   return element.visible !== false;
 }
 
-/** The published layout - what /visual actually shows. */
-export function loadBoardLayout() {
-  return readLayout(LAYOUT_KEY) ?? DEFAULT_LAYOUT;
+/** The published layout - what /visual actually shows, as of right now. */
+export async function loadBoardLayout() {
+  const snapshot = await getDoc(boardLayoutDoc);
+  return normalizeStoredLayout(snapshot.data()) ?? DEFAULT_LAYOUT;
 }
 
 /**
- * The admin's working copy. Falls back to the published layout the first
- * time the editor is opened, so editing always starts from what is
- * currently live rather than the bare defaults.
+ * Calls `listener` with the published layout now and after each change -
+ * from any admin, tab, or device, since this rides Firestore's own realtime
+ * updates. Returns an unsubscribe function.
  */
-export function loadDraftLayout() {
-  return readLayout(DRAFT_KEY) ?? loadBoardLayout();
+export function subscribeBoardLayout(listener) {
+  return onSnapshot(boardLayoutDoc, (snapshot) => {
+    listener(normalizeStoredLayout(snapshot.data()) ?? DEFAULT_LAYOUT);
+  });
 }
+
+/**
+ * The admin's working copy, loaded once when the editor opens. Falls back
+ * to the published layout when there is no draft yet, so editing always
+ * starts from what is currently live rather than the bare defaults.
+ */
+export async function loadDraftLayout() {
+  const snapshot = await getDoc(boardLayoutDraftDoc);
+  return normalizeStoredLayout(snapshot.data()) ?? (await loadBoardLayout());
+}
+
+/**
+ * Calls `listener` with the admin's working copy now and after each change,
+ * falling back to the published layout the same way loadDraftLayout does
+ * when there is no draft yet. Backs the admin-only draft preview (see
+ * VisualBoard's `usePublished` prop) so "what will this look like" never
+ * has to mean "what did it look like as of the last Publish".
+ */
+export function subscribeDraftLayout(listener) {
+  return onSnapshot(boardLayoutDraftDoc, (snapshot) => {
+    const draft = normalizeStoredLayout(snapshot.data());
+    if (draft) {
+      listener(draft);
+    } else {
+      loadBoardLayout().then(listener);
+    }
+  });
+}
+
+/*
+ * Firestore rejects any field whose value is `undefined` outright (a
+ * synchronous throw, not a rejected promise) - unlike the old
+ * localStorage.setItem(JSON.stringify(layout)), where JSON.stringify
+ * silently dropped those keys. The editor sets fields like a duplicated
+ * element's `groupId` to `undefined` to mean "not in a group", so a layout
+ * has to be put through the same JSON round trip before it can be written,
+ * to strip them the same way JSON.stringify always did.
+ */
+function sanitizeForFirestore(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+/*
+ * Both saves below are fire-and-forget from the caller's point of view -
+ * the editor's own state already updated the moment the admin dragged or
+ * typed something, so nothing needs to wait on the network round trip
+ * before feeling responsive. A failure is logged, not thrown, matching how
+ * a failed localStorage write used to be handled - including a failure
+ * Firestore raises synchronously (invalid data), not just a rejected write.
+ */
 
 /** Saves the draft only - /visual never sees this until it's published. */
 export function saveDraftLayout(layout) {
   try {
-    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(layout));
-    return true;
+    setDoc(boardLayoutDraftDoc, sanitizeForFirestore(layout)).catch((error) => {
+      console.warn('Could not save the draft board layout:', error);
+    });
   } catch (error) {
     console.warn('Could not save the draft board layout:', error);
-    return false;
   }
-}
-
-/** Makes `layout` the published layout /visual reads, and notifies this tab. */
-export function saveBoardLayout(layout) {
-  try {
-    window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
-  } catch (error) {
-    console.warn('Could not save the board layout:', error);
-    return false;
-  }
-
-  window.dispatchEvent(new Event(LAYOUT_EVENT));
   return true;
 }
 
-/** Publishes the current draft: it becomes the live layout /visual shows. */
-export function publishBoardLayout(layout) {
-  saveDraftLayout(layout);
-  return saveBoardLayout(layout);
+/** Makes `layout` the published layout /visual reads. */
+export function saveBoardLayout(layout) {
+  try {
+    setDoc(boardLayoutDoc, sanitizeForFirestore(layout)).catch((error) => {
+      console.warn('Could not save the board layout:', error);
+    });
+  } catch (error) {
+    console.warn('Could not save the board layout:', error);
+  }
+  return true;
+}
+
+/*
+ * Publishes the current draft: it becomes the live layout /visual shows.
+ * Unlike the two saves above, this one is a deliberate admin action, not a
+ * side effect of every drag or keystroke - so it awaits both writes and
+ * throws if either fails (e.g. the layout, photos included, no longer fits
+ * Firestore's 1 MiB document limit), instead of failing silently while the
+ * editor still reports success.
+ */
+export async function publishBoardLayout(layout) {
+  const data = sanitizeForFirestore(layout);
+  await Promise.all([setDoc(boardLayoutDraftDoc, data), setDoc(boardLayoutDoc, data)]);
 }
 
 /*
@@ -365,50 +454,50 @@ export function publishBoardLayout(layout) {
  * saving one doesn't touch either, and applying one only replaces the draft.
  */
 
-function readTemplates() {
-  try {
-    const raw = window.localStorage.getItem(TEMPLATES_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+/**
+ * Calls `listener` with every saved template, newest first, now and after
+ * each change. Returns an unsubscribe function.
+ */
+export function subscribeTemplates(listener) {
+  return onSnapshot(boardTemplatesCollection, (snapshot) => {
+    const templates = snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+    templates.sort((a, b) => (a.savedAt < b.savedAt ? 1 : -1));
+    listener(templates);
+  });
 }
 
-function writeTemplates(templates) {
-  try {
-    window.localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
-    return true;
-  } catch (error) {
-    console.warn('Could not save templates:', error);
-    return false;
-  }
+/** Every saved template, newest first, fetched once. */
+export async function loadTemplates() {
+  const snapshot = await getDocs(boardTemplatesCollection);
+  const templates = snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+  templates.sort((a, b) => (a.savedAt < b.savedAt ? 1 : -1));
+  return templates;
 }
 
-/** Every saved template, newest first. */
-export function loadTemplates() {
-  return readTemplates();
-}
-
-/** Saves `layout` as a new named template; returns it. */
-export function saveTemplate(name, layout) {
+/** Saves `layout` as a new named template; returns it once Firestore confirms it. */
+export async function saveTemplate(name, layout) {
   const template = {
-    id: crypto.randomUUID(),
     name: name.trim() || 'Untitled template',
     savedAt: new Date().toISOString(),
-    layout,
+    layout: sanitizeForFirestore(layout),
   };
 
-  writeTemplates([template, ...readTemplates()]);
-  return template;
+  const docRef = await addDoc(boardTemplatesCollection, template);
+  return { id: docRef.id, ...template };
 }
 
-/** The normalized layout of a saved template, or null if it's gone. */
-export function applyTemplate(id) {
-  const template = readTemplates().find((item) => item.id === id);
+/**
+ * The normalized layout of one of the already-loaded `templates` (from
+ * `subscribeTemplates`/`loadTemplates`), or null if `id` isn't among them -
+ * a pure lookup, not a Firestore read, since the caller already has the list.
+ */
+export function applyTemplate(templates, id) {
+  const template = templates.find((item) => item.id === id);
   return template ? normalizeLayout(template.layout) : null;
 }
 
 export function deleteTemplate(id) {
-  writeTemplates(readTemplates().filter((template) => template.id !== id));
+  deleteDoc(doc(boardTemplatesCollection, id)).catch((error) => {
+    console.warn('Could not delete the template:', error);
+  });
 }

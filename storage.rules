@@ -1,12 +1,13 @@
 rules_version = '2';
 
-// Craft rules based on data in your Firestore database
-// allow write: if firestore.get(
-//    /databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin;
+// Candidate photos are public on the board and uploaded from the admin
+// pages, which have no real auth of their own yet (see localAuth.js) - so,
+// like firestore.rules, this is wide open for now and expires the same day.
+// Tighten this to a real admin check once sign-in moves to Firebase Auth.
 service firebase.storage {
   match /b/{bucket}/o {
     match /{allPaths=**} {
-      allow read, write: if false;
+      allow read, write: if request.time < timestamp.date(2026, 10, 7);
     }
   }
 }

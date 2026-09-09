@@ -33,6 +33,23 @@ createRoot(document.getElementById('root')).render(
           <Route path="/admin/login" element={<AdminLogin />} />
 
           {/*
+            The admin editor's "Preview" - the exact same board rendering as
+            /visual, but reading the draft instead of the published layout,
+            so it actually shows what unpublished changes will look like
+            instead of the stale live board. A sibling of the AdminLayout
+            group rather than nested in it, so it renders full-bleed like
+            /visual does, not inside the admin sidebar shell.
+          */}
+          <Route
+            path="/admin/visual-board/preview"
+            element={
+              <RequireAuth>
+                <VisualBoard usePublished={false} />
+              </RequireAuth>
+            }
+          />
+
+          {/*
             Replaces the old Next.js middleware guard. While we are running
             on the local backend this is a convenience redirect only - see
             the note in lib/localAuth.js.

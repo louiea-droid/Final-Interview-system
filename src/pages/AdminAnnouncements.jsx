@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlignVerticalSpaceAround,
+  CalendarClock,
   Megaphone,
   MoveHorizontal,
   Palette,
@@ -13,23 +14,45 @@ import {
 } from 'lucide-react';
 
 // local stand-in for the backend; same query API, no network
-import { localClient as supabase } from '../lib/localBackend';
-import { formatCurrentDate } from '../lib/adminTime';
+import { firebaseClient } from '../lib/firebaseBackend';
+import { formatCurrentDate, formatScheduledTime } from '../lib/adminTime';
 import TablePagination from '../components/TablePagination';
 import { useToast } from '../components/ToastProvider';
 import FillEditor from '../components/FillEditor';
 import {
   DEFAULT_ANNOUNCEMENT_STYLE,
-  loadAnnouncementStyle,
   normalizeAnnouncementStyle,
   resolveAnnouncementStyle,
   saveAnnouncementStyle,
+  subscribeAnnouncementStyle,
 } from '../lib/announcementStyle';
 import { CASE_OPTIONS, FONT_OPTIONS, SHADOW_OPTIONS, WEIGHT_OPTIONS } from '../lib/textStyle';
+import { isShownOnBoard, isUpcoming } from '../lib/announcementVisibility';
+import DateTimeField from '../components/DateTimeField';
 
-/** Whether an announcement should appear on the /visual board. */
-function isShownOnBoard(announcement) {
-  return announcement.active !== false;
+const TABLE_TIME_ZONE = 'Asia/Manila';
+
+/*
+ * <input type="datetime-local"> reads and writes local wall-clock time with
+ * no timezone info at all, so converting straight through `new Date(...)`
+ * (UTC-ish parsing) would silently shift the value by the browser's offset.
+ * These round-trip a Date through the browser's own local time instead.
+ */
+function toDateTimeLocal(isoString) {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+}
+
+function fromDateTimeLocal(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 /* One representative shade from each row of the fill editor's full palette,
@@ -45,18 +68,27 @@ export default function AdminAnnouncements() {
   const showToast = useToast();
 
   const [message, setMessage] = useState('');
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState('');
   const [posting, setPosting] = useState(false);
 
   const [editingId, setEditingId] = useState(null);
   const [editMessage, setEditMessage] = useState('');
+  const [editScheduleEnabled, setEditScheduleEnabled] = useState(false);
+  const [editScheduledAt, setEditScheduledAt] = useState('');
   const [announcementToDelete, setAnnouncementToDelete] = useState(null);
 
   /*
-   * How announcements look on the board - saved straight to localStorage as
+   * How announcements look on the board - saved straight to Firestore as
    * each control changes, same as the light/dark theme toggle, since there's
-   * no draft/publish step here.
+   * no draft/publish step here. subscribeAnnouncementStyle keeps this in
+   * sync with any other admin tab or device too.
    */
-  const [style, setStyle] = useState(() => loadAnnouncementStyle());
+  const [style, setStyle] = useState(DEFAULT_ANNOUNCEMENT_STYLE);
+
+  useEffect(() => {
+    return subscribeAnnouncementStyle(setStyle);
+  }, []);
   // The fill popover renders through a portal (see below) since the panel
   // it lives in clips overflow for its rounded corners - a plain absolutely
   // positioned child would be cut off instead of floating above the page.
@@ -116,7 +148,7 @@ export default function AdminAnnouncements() {
   async function loadAnnouncements() {
     setLoading(true);
 
-    const { data, error } = await supabase
+    const { data, error } = await firebaseClient
       .from('announcements')
       .select('*')
       .order('created_at', { ascending: false });
@@ -139,12 +171,14 @@ export default function AdminAnnouncements() {
 
     const trimmed = message.trim();
     if (!trimmed) return;
+    if (scheduleEnabled && !scheduledAt) return;
 
     setPosting(true);
 
-    const { error } = await supabase.from('announcements').insert({
+    const { error } = await firebaseClient.from('announcements').insert({
       message: trimmed,
       active: true,
+      scheduled_at: scheduleEnabled ? fromDateTimeLocal(scheduledAt) : null,
     });
 
     setPosting(false);
@@ -155,12 +189,18 @@ export default function AdminAnnouncements() {
     }
 
     setMessage('');
-    showToast.success('Announcement posted to the board.');
+    setScheduleEnabled(false);
+    setScheduledAt('');
+    showToast.success(
+      scheduleEnabled && scheduledAt
+        ? 'Announcement scheduled.'
+        : 'Announcement posted to the board.'
+    );
     await loadAnnouncements();
   }
 
   async function toggleActive(id, nextValue) {
-    const { error } = await supabase
+    const { error } = await firebaseClient
       .from('announcements')
       .update({ active: nextValue })
       .eq('id', id);
@@ -180,11 +220,15 @@ export default function AdminAnnouncements() {
   function startEditing(announcement) {
     setEditingId(announcement.id);
     setEditMessage(announcement.message);
+    setEditScheduleEnabled(Boolean(announcement.scheduled_at));
+    setEditScheduledAt(toDateTimeLocal(announcement.scheduled_at));
   }
 
   function cancelEditing() {
     setEditingId(null);
     setEditMessage('');
+    setEditScheduleEnabled(false);
+    setEditScheduledAt('');
   }
 
   async function saveEdit(event) {
@@ -193,10 +237,14 @@ export default function AdminAnnouncements() {
 
     const trimmed = editMessage.trim();
     if (!trimmed) return;
+    if (editScheduleEnabled && !editScheduledAt) return;
 
-    const { error } = await supabase
+    const { error } = await firebaseClient
       .from('announcements')
-      .update({ message: trimmed })
+      .update({
+        message: trimmed,
+        scheduled_at: editScheduleEnabled ? fromDateTimeLocal(editScheduledAt) : null,
+      })
       .eq('id', editingId);
 
     if (error) {
@@ -210,7 +258,7 @@ export default function AdminAnnouncements() {
   }
 
   async function removeAnnouncement(id) {
-    const { error } = await supabase.from('announcements').delete().eq('id', id);
+    const { error } = await firebaseClient.from('announcements').delete().eq('id', id);
 
     if (error) {
       showToast.error(error.message);
@@ -251,7 +299,7 @@ export default function AdminAnnouncements() {
             <div>
               <h2 className="panel-title">New Announcement</h2>
               <p className="panel-subtitle">
-                Posted announcements show on the board right away.
+                Posted announcements show on the board right away, unless scheduled for later.
               </p>
             </div>
           </div>
@@ -274,10 +322,37 @@ export default function AdminAnnouncements() {
             />
           </div>
 
+          <div className="form-group">
+            <label className="settings-option">
+              <span className="settings-option-label">
+                <CalendarClock size={13} />
+                Schedule for later
+              </span>
+              <input
+                type="checkbox"
+                checked={scheduleEnabled}
+                onChange={(event) => setScheduleEnabled(event.target.checked)}
+              />
+            </label>
+
+            {scheduleEnabled && (
+              <DateTimeField
+                value={scheduledAt}
+                onChange={setScheduledAt}
+                min={toDateTimeLocal(new Date().toISOString())}
+                placeholder="Select date and time"
+              />
+            )}
+          </div>
+
           <div className="settings-actions">
             <button type="submit" className="primary-button" disabled={posting}>
               <Plus size={13} />
-              {posting ? 'Posting...' : 'Post Announcement'}
+              {posting
+                ? 'Posting...'
+                : scheduleEnabled
+                  ? 'Schedule Announcement'
+                  : 'Post Announcement'}
             </button>
           </div>
         </form>
@@ -456,11 +531,7 @@ export default function AdminAnnouncements() {
           </div>
 
           <div className="announcement-style-preview">
-            <div className="announcement-style-preview-eyebrow">
-              <Megaphone size={14} />
-              <span>Announcement</span>
-            </div>
-            <span className="announcement-style-preview-rule" aria-hidden="true" />
+            <Megaphone size={18} className="announcement-style-preview-icon" aria-hidden="true" />
             <p style={resolveAnnouncementStyle(style)}>
               {message.trim() || 'Final interviews resume at 1:00 PM.'}
             </p>
@@ -495,33 +566,50 @@ export default function AdminAnnouncements() {
                 <tr>
                   <th>Message</th>
                   <th>Posted</th>
+                  <th>Schedule</th>
                   <th>Visual Board</th>
                   <th>Action</th>
                 </tr>
               </thead>
 
               <tbody>
-                {pagedAnnouncements.map((announcement) => (
+                {pagedAnnouncements.map((announcement) => {
+                  const active = announcement.active !== false;
+
+                  return (
                   <tr key={announcement.id}>
                     <td>{announcement.message}</td>
 
                     <td>{formatCurrentDate(new Date(announcement.created_at), 'Asia/Manila')}</td>
 
                     <td>
+                      {announcement.scheduled_at ? (
+                        <span
+                          className={`schedule-badge ${isUpcoming(announcement) ? 'upcoming' : 'passed'}`}
+                        >
+                          <CalendarClock size={12} />
+                          {formatScheduledTime(new Date(announcement.scheduled_at), TABLE_TIME_ZONE)}
+                        </span>
+                      ) : (
+                        <span className="schedule-badge-none">Immediately</span>
+                      )}
+                    </td>
+
+                    <td>
                       <button
                         type="button"
                         role="switch"
-                        aria-checked={isShownOnBoard(announcement)}
-                        className={`visual-toggle ${isShownOnBoard(announcement) ? 'on' : ''}`}
-                        onClick={() => toggleActive(announcement.id, !isShownOnBoard(announcement))}
-                        aria-label={`${isShownOnBoard(announcement) ? 'Hide' : 'Show'} this announcement on the visual board`}
+                        aria-checked={active}
+                        className={`visual-toggle ${active ? 'on' : ''}`}
+                        onClick={() => toggleActive(announcement.id, !active)}
+                        aria-label={`${active ? 'Hide' : 'Show'} this announcement on the visual board`}
                       >
                         <span className="visual-toggle-track">
                           <span className="visual-toggle-thumb" />
                         </span>
 
                         <span className="visual-toggle-label">
-                          {isShownOnBoard(announcement) ? 'Shown' : 'Hidden'}
+                          {isShownOnBoard(announcement) ? 'Shown' : active ? 'Scheduled' : 'Hidden'}
                         </span>
                       </button>
                     </td>
@@ -546,7 +634,8 @@ export default function AdminAnnouncements() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
 
                 {!pagedAnnouncements.length && (
                   <tr>
@@ -596,6 +685,27 @@ export default function AdminAnnouncements() {
               value={editMessage}
               onChange={(event) => setEditMessage(event.target.value)}
             />
+
+            <label className="settings-option">
+              <span className="settings-option-label">
+                <CalendarClock size={13} />
+                Schedule for later
+              </span>
+              <input
+                type="checkbox"
+                checked={editScheduleEnabled}
+                onChange={(event) => setEditScheduleEnabled(event.target.checked)}
+              />
+            </label>
+
+            {editScheduleEnabled && (
+              <DateTimeField
+                value={editScheduledAt}
+                onChange={setEditScheduledAt}
+                min={toDateTimeLocal(new Date().toISOString())}
+                placeholder="Select date and time"
+              />
+            )}
 
             <div className="confirmation-actions">
               <button type="button" className="secondary-button" onClick={cancelEditing}>

@@ -6,7 +6,8 @@
     "indexes": "firestore.indexes.json"
   },
   "hosting": {
-    "public": "public",
+      "site": "hyacinth-event-announcements",
+    "public": "dist",
     "ignore": [
       "firebase.json",
       "**/.*",

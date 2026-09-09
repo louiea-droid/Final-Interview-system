@@ -1,24 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  CalendarClock,
   CalendarDays,
   Clock3,
   ExternalLink,
   GripVertical,
+  Images,
   Megaphone,
   MonitorPlay,
+  Pencil,
+  UserPlus,
   UserRound,
   UsersRound,
 } from 'lucide-react';
 
 // local stand-in for the backend; same query API, no network
-import { localClient as supabase, subscribeAnnouncements } from '../lib/localBackend';
+import { firebaseClient, subscribeAnnouncements, subscribeCandidates } from '../lib/firebaseBackend';
 import {
   formatCurrentDate,
+  formatScheduledTime,
   getEasternBatchStart,
   isSameDay,
   toDayKey,
 } from '../lib/adminTime';
-import { isShownOnBoard } from '../lib/candidateVisibility';
+import { isShownOnBoard as isCandidateShownOnBoard } from '../lib/candidateVisibility';
+import { isShownOnBoard as isAnnouncementShownOnBoard, isUpcoming } from '../lib/announcementVisibility';
+import { isVisible, subscribeBoardLayout } from '../lib/boardLayout';
+import { isCarousel } from '../lib/shapeStyle';
 import CandidateDetailsModal from '../components/CandidateDetailsModal';
 import TablePagination from '../components/TablePagination';
 import { useToast } from '../components/ToastProvider';
@@ -32,7 +40,15 @@ const LIST_TIME_ZONE = 'America/New_York';
 export default function AdminPage() {
   const [candidates, setCandidates] = useState([]);
   const [totalCandidates, setTotalCandidates] = useState(0);
-  const [announcementsCount, setAnnouncementsCount] = useState(0);
+  const [announcements, setAnnouncements] = useState([]);
+  /*
+   * The table above only ever loads today's batch (see loadCandidates), but
+   * "shown on the visual board" and "added today" need every candidate
+   * regardless of batch, so those two stats ride the same live subscription
+   * the public board itself uses.
+   */
+  const [allCandidates, setAllCandidates] = useState([]);
+  const [boardLayout, setBoardLayout] = useState(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -46,13 +62,13 @@ export default function AdminPage() {
 
     const batchStart = getEasternBatchStart();
     const [batchResult, totalResult] = await Promise.all([
-      supabase
+      firebaseClient
         .from('candidates')
         .select('*')
         .or(`status.neq.Completed,created_at.gte.${batchStart.toISOString()}`)
         .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true }),
-      supabase
+      firebaseClient
         .from('candidates')
         .select('id', { count: 'exact', head: true }),
     ]);
@@ -90,7 +106,7 @@ export default function AdminPage() {
 
     const results = await Promise.all(
       orderedCandidates.map((candidate) =>
-        supabase
+        firebaseClient
           .from('candidates')
           .update({ sort_order: candidate.sort_order })
           .eq('id', candidate.id)
@@ -122,11 +138,31 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    return subscribeAnnouncements((rows) => setAnnouncementsCount(rows.length));
+    return subscribeAnnouncements(setAnnouncements);
+  }, []);
+
+  /*
+   * A scheduled announcement going live, or an upcoming one falling off the
+   * list, is purely a function of the clock - nothing about the Firestore
+   * data itself changes at that moment, so nothing would otherwise trigger
+   * a re-render right when it matters.
+   */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    return subscribeCandidates(setAllCandidates);
+  }, []);
+
+  useEffect(() => {
+    return subscribeBoardLayout(setBoardLayout);
   }, []);
 
   async function updateStatus(id, status) {
-    const { error } = await supabase
+    const { error } = await firebaseClient
       .from('candidates')
       .update({ status })
       .eq('id', id);
@@ -149,7 +185,7 @@ export default function AdminPage() {
     id,
     nextValue
   ) {
-    const { error } = await supabase
+    const { error } = await firebaseClient
       .from('candidates')
       .update({ show_in_visual: nextValue })
       .eq('id', id);
@@ -198,18 +234,59 @@ export default function AdminPage() {
   const stats = useMemo(() => {
     const total = totalCandidates;
 
-    const scheduled = candidates.filter(
-      (c) =>
-        c.status === 'Scheduled' ||
-        c.status === 'Waiting' ||
-        c.status === 'In Progress'
+    // Same rule the public board itself uses (isShownOnBoard), over every
+    // candidate rather than just today's batch - a candidate hidden from
+    // the board can still be part of today's list, and vice versa.
+    const shownOnBoard = allCandidates.filter(isCandidateShownOnBoard).length;
+
+    // Placeholder for the intern-tracking page that's coming later - for
+    // now, "new" means added today.
+    const newInterns = allCandidates.filter((c) =>
+      isSameDay(c.created_at, new Date(), LIST_TIME_ZONE)
     ).length;
 
     return {
       total,
-      scheduled,
+      shownOnBoard,
+      newInterns,
     };
-  }, [candidates, totalCandidates]);
+  }, [allCandidates, totalCandidates]);
+
+  // Photos held by every visible photo-frame shape on the board - a static
+  // frame counts its one photo, a carousel frame counts every photo it
+  // cycles through.
+  const picturesShown = useMemo(() => {
+    if (!boardLayout) return 0;
+
+    return boardLayout.shapes
+      .filter((shape) => shape.kind === 'frame' && isVisible(shape))
+      .reduce((sum, shape) => {
+        if (isCarousel(shape)) return sum + shape.photos.length;
+        return sum + (shape.fill?.type === 'image' && shape.fill.url ? 1 : 0);
+      }, 0);
+  }, [boardLayout]);
+
+  // The board itself rotates through every announcement that's currently
+  // live (on and, if scheduled, past its time), oldest first - the one
+  // it's showing (or about to show) right now is whichever sorts first
+  // under that same rule.
+  const currentAnnouncement = useMemo(() => {
+    const live = announcements
+      .filter(isAnnouncementShownOnBoard)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    return live[0] ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [announcements, now]);
+
+  // Switched on but still waiting on their scheduled time, soonest first -
+  // set from the scheduler on the Announcements page.
+  const upcomingAnnouncements = useMemo(() => {
+    return announcements
+      .filter(isUpcoming)
+      .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [announcements, now]);
 
   const interviewDateBreakdown = useMemo(() => {
     const counts = new Map();
@@ -248,7 +325,7 @@ export default function AdminPage() {
               <UsersRound size={14} strokeWidth={2.2} />
             </div>
 
-            Total Candidates
+            Total Interview Candidates
           </div>
 
           <div className="metric-value-row">
@@ -270,17 +347,17 @@ export default function AdminPage() {
               <Clock3 size={14} />
             </div>
 
-            Active Interviews
+            Interview Candidates Shown
           </div>
 
           <div className="metric-value-row">
             <div className="metric-value">
-              {stats.scheduled}
+              {stats.shownOnBoard}
             </div>
           </div>
 
           <div className="metric-description">
-            Scheduled or currently being interviewed
+            Currently being showed in the Visual
           </div>
 
         </div>
@@ -289,20 +366,94 @@ export default function AdminPage() {
 
           <div className="metric-top">
             <div className="metric-icon">
-              <Megaphone size={14} strokeWidth={2.2} />
+              <Images size={14} strokeWidth={2.2} />
             </div>
 
-            Announcements
+            Pictures Shown
           </div>
 
           <div className="metric-value-row">
             <div className="metric-value">
-              {announcementsCount}
+              {picturesShown}
             </div>
           </div>
 
           <div className="metric-description">
-            Posted to the visual board
+            Photos in frames on the Visual
+          </div>
+
+        </div>
+
+        <div className="metric-card">
+
+          <div className="metric-top">
+            <div className="metric-icon">
+              <UserPlus size={14} strokeWidth={2.2} />
+            </div>
+
+            New Interns
+          </div>
+
+          <div className="metric-value-row">
+            <div className="metric-value">
+              {stats.newInterns}
+            </div>
+          </div>
+
+          <div className="metric-description">
+            Added today
+          </div>
+
+        </div>
+
+        <div className="metric-stack">
+
+          <div className="metric-card">
+
+            <div className="metric-top">
+              <div className="metric-icon">
+                <Megaphone size={14} strokeWidth={2.2} />
+              </div>
+
+              Announcements
+            </div>
+
+            <div className="metric-announcement">
+              {currentAnnouncement?.message || 'No announcement posted'}
+            </div>
+
+            <div className="metric-description">
+              {currentAnnouncement ? 'Currently on the visual board' : 'Nothing showing on the visual board'}
+            </div>
+
+          </div>
+
+          <div className="metric-card upcoming-announcements">
+
+            <div className="metric-top">
+              <div className="metric-icon">
+                <CalendarClock size={14} strokeWidth={2.2} />
+              </div>
+
+              Upcoming Announcements
+            </div>
+
+            {upcomingAnnouncements.length ? (
+              <ul className="upcoming-announcements-list">
+                {upcomingAnnouncements.map((announcement) => (
+                  <li key={announcement.id} className="upcoming-announcement-item">
+                    <div className="upcoming-announcement-message">{announcement.message}</div>
+                    <div className="upcoming-announcement-time">
+                      <CalendarClock size={11} />
+                      {formatScheduledTime(new Date(announcement.scheduled_at), 'Asia/Manila')}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="upcoming-announcements-empty">Nothing scheduled</div>
+            )}
+
           </div>
 
         </div>
@@ -317,15 +468,22 @@ export default function AdminPage() {
               <span className="visual-preview-live-label">Live</span>
             </div>
 
-            <a
-              href="/visual"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="visual-preview-link"
-            >
-              Open
-              <ExternalLink size={11} />
-            </a>
+            <div className="visual-preview-actions">
+              <a href="/admin/visual-board" className="visual-preview-link">
+                <Pencil size={11} />
+                Edit
+              </a>
+
+              <a
+                href="/visual"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="visual-preview-link"
+              >
+                Open
+                <ExternalLink size={11} />
+              </a>
+            </div>
           </div>
 
           <div className="visual-preview-frame-wrap">

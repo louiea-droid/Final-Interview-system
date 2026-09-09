@@ -101,7 +101,7 @@
   }
 }
 
-/* ---- loading skeleton for the visual board ---- */
+/* ---- loading state for the visual board ---- */
 
 /* gold sheen sweeping left to right across a placeholder */
 @keyframes shimmer {
@@ -113,25 +113,13 @@
   }
 }
 
-/* soft breathing glow so the empty frames don't sit dead still */
-@keyframes pulse-glow {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-/* each skeleton frame eases in slightly after the one before it */
-@keyframes skeleton-in {
+/* the board's own loading state: the petals logo spinning in place,
+   matching the login screen's spinner (see login.css's login-logo-spin) */
+@keyframes board-loading-spin {
   from {
-    opacity: 0;
-    transform: translateY(10px);
+    transform: rotate(0deg);
   }
   to {
-    opacity: 1;
-    transform: translateY(0);
+    transform: rotate(360deg);
   }
 }

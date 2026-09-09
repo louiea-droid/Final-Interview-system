@@ -10,6 +10,7 @@
  */
 
 import { fillBoxCss, imageFill, normalizeFill, solidFill } from './fill';
+import { DEFAULT_ANIMATION, normalizeAnimation, resolveAnimationCss } from './animationStyle';
 
 export const SHAPE_KINDS = [
   { value: 'rectangle', label: 'Rectangle' },
@@ -17,6 +18,7 @@ export const SHAPE_KINDS = [
   { value: 'triangle', label: 'Triangle' },
   { value: 'line', label: 'Line' },
   { value: 'frame', label: 'Photo frame' },
+  { value: 'box', label: 'Box' },
 ];
 
 export const FIT_OPTIONS = [
@@ -34,6 +36,7 @@ const BASE_SHAPE = {
   radius: 6,
   stroke: { color: '#c9a03c', width: 0 },
   visible: true,
+  animation: DEFAULT_ANIMATION,
 };
 
 /* What each kind starts out as when it is dropped on the board. */
@@ -42,12 +45,32 @@ const SHAPE_PRESETS = {
   ellipse: { width: 16, height: 16, radius: 0, fill: solidFill('#d45d59', 0.85) },
   triangle: { width: 16, height: 14, radius: 0, fill: solidFill('#f4ca5d', 0.9) },
   line: { width: 30, height: 0.6, radius: 999, fill: solidFill('#c9a03c', 1) },
+  /*
+   * `photos` backs the carousel animation (see PhotoCarousel.jsx) - a frame
+   * with two or more of them and animation.type 'carousel' slides between
+   * them instead of showing `fill`'s single image. Empty otherwise, so an
+   * ordinary frame behaves exactly as it always has.
+   */
   frame: {
     width: 16,
     height: 20,
     radius: 4,
     fill: imageFill(),
+    photos: [],
     stroke: { color: '#c9a03c', width: 2 },
+  },
+  /*
+   * A panel meant to sit behind other elements (usually text) rather than
+   * stand on its own - a dark, mostly-transparent card with a soft gold
+   * edge, sized to comfortably frame a cluster of content. Send it to the
+   * back of the layer order after adding it (see the Layers panel).
+   */
+  box: {
+    width: 34,
+    height: 46,
+    radius: 10,
+    fill: solidFill('#1a0605', 0.55),
+    stroke: { color: '#c9a03c', width: 1 },
   },
 };
 
@@ -69,6 +92,11 @@ export function shapeLabel(shape) {
 
 export function isFrame(shape) {
   return shape.kind === 'frame';
+}
+
+/** Whether a frame should render as a sliding photo carousel rather than its static `fill`. */
+export function isCarousel(shape) {
+  return isFrame(shape) && shape.animation?.type === 'carousel' && (shape.photos?.length ?? 0) > 1;
 }
 
 function clamp(value, min, max) {
@@ -101,6 +129,10 @@ export function normalizeShapes(shapes) {
           width: clamp(shape.stroke?.width ?? 0, 0, 40),
         },
         fill: normalizeFill(shape.fill, SHAPE_PRESETS[kind]?.fill ?? BASE_SHAPE.fill),
+        photos: kind === 'frame' && Array.isArray(shape.photos)
+          ? shape.photos.filter((url) => typeof url === 'string' && url)
+          : [],
+        animation: normalizeAnimation(shape.animation),
       };
     });
 }
@@ -120,6 +152,8 @@ export function resolveShapeStyle(shape) {
     ...(shape.kind === 'triangle'
       ? { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }
       : {}),
-    ...fillBoxCss(shape.fill),
+    // a carousel frame paints its photos itself (see PhotoCarousel.jsx), not through `fill`
+    ...(isCarousel(shape) ? {} : fillBoxCss(shape.fill)),
+    ...resolveAnimationCss(shape.animation),
   };
 }

@@ -1,0 +1,4687 @@
+diff --git a/src/lib/boardGeometry.js b/src/lib/boardGeometry.js
+new file mode 100644
+index 0000000..5cc30a5
+--- /dev/null
++++ b/src/lib/boardGeometry.js
+@@ -0,0 +1,31 @@
++/*
++ * How an element's stored geometry becomes CSS.
++ *
++ * Sizes are expressed in container query units against the board's own box -
++ * cqw for widths, cqh for type - so the live board (a full viewport) and the
++ * editor's canvas (a 16:9 panel) lay elements out identically. Both mark
++ * themselves as the query container; everything here is relative to that.
++ */
++
++/* Logo and photo widths at 100%, as a share of the board's width. */
++export const LOGO_BASE_WIDTH = 20;
++export const PHOTO_BASE_WIDTH = 11.5;
++
++/** Centres an element on its stored percentage position. */
++export function positionStyle(element) {
++  return {
++    left: `${element.x}%`,
++    top: `${element.y}%`,
++    transform: 'translate(-50%, -50%)',
++  };
++}
++
++/** The same, for elements whose size is a multiplier of a base width. */
++export function scaledPositionStyle(element, baseWidth) {
++  return {
++    left: `${element.x}%`,
++    top: `${element.y}%`,
++    transform: `translate(-50%, -50%) scale(${element.scale})`,
++    width: `${baseWidth}cqw`,
++  };
++}
+diff --git a/src/lib/boardLayout.js b/src/lib/boardLayout.js
+new file mode 100644
+index 0000000..01af48a
+--- /dev/null
++++ b/src/lib/boardLayout.js
+@@ -0,0 +1,414 @@
++/*
++ * Free-form layout of the elements on /visual - the logo, every text block,
++ * any photos, and any shapes or photo frames the admin drops in. Positions
++ * are percentages of the board's width/height and type is sized against its
++ * height, so a layout holds up on any display; each element carries its own
++ * `visible` flag so one can be turned off without losing its place.
++ *
++ * The headline and the closing line are ordinary entries in `texts` - they
++ * start the board off, but they can be restyled, moved, or removed like any
++ * other text.
++ *
++ * Editing happens on a separate draft copy (its own localStorage key) so
++ * the public board never shows work in progress - /visual only ever reads
++ * the published copy, and stays completely unaware that a draft exists.
++ * Publishing copies the draft over it and notifies other tabs the same way
++ * interview-board-settings does: a 'storage' event reaches them on its own,
++ * and LAYOUT_EVENT covers a listener in the same window.
++ */
++
++import {
++  DEFAULT_CLOSING_STYLE,
++  DEFAULT_EXTRA_TEXT_STYLE,
++  DEFAULT_HEADING_STYLE,
++  DEFAULT_TEXT_SIZES,
++  normalizeTextStyle,
++} from './textStyle';
++import { normalizeShapes } from './shapeStyle';
++
++/*
++ * Bumped when stored geometry stops meaning what it used to. Positions were
++ * once percentages of a middle column that took about half the board's
++ * width; on one free-form surface those same numbers point somewhere else
++ * entirely, so a layout from before the change is dropped rather than
++ * reinterpreted into a scramble.
++ */
++export const LAYOUT_VERSION = 3;
++
++export const LAYOUT_KEY = 'interview-board-layout';
++export const DRAFT_KEY = 'interview-board-layout:draft';
++export const LAYOUT_EVENT = 'interview-board-layout-updated';
++export const TEMPLATES_KEY = 'interview-board-templates';
++
++/*
++ * The candidate board and the announcement strip are boxes rather than
++ * points: they carry a width and height as percentages of the board, so
++ * they can be placed and sized anywhere instead of being pinned to a
++ * column. Both default to roughly where the old fixed layout put them.
++ */
++export const DEFAULT_CANDIDATES = {
++  visible: true,
++  x: 68,
++  y: 56,
++  width: 58,
++  height: 74,
++  /* Seconds the carousel spends per card - lower is faster. */
++  secondsPerCard: 4,
++};
++
++export const DEFAULT_ANNOUNCEMENTS = {
++  /* off by default - turn it on from the Layers panel when it is wanted */
++  visible: false,
++  x: 27,
++  y: 78,
++  width: 42,
++};
++
++/*
++ * The soft gold rules that used to be the column edges. They are ordinary
++ * list elements now - as many as you like, each with its own position,
++ * length, thickness and direction - so nothing about them is capped.
++ */
++export const DEFAULT_DIVIDER = {
++  x: 50,
++  y: 50,
++  length: 78,
++  thickness: 1,
++  orientation: 'vertical',
++  visible: true,
++};
++
++export const DEFAULT_LAYOUT = {
++  version: LAYOUT_VERSION,
++  logo: { visible: true, url: null, x: 24, y: 16, scale: 1 },
++  candidates: DEFAULT_CANDIDATES,
++  announcements: DEFAULT_ANNOUNCEMENTS,
++  // { id, text, x, y, fontSize, visible, style, locked?, groupId? }
++  texts: [
++    {
++      id: 'heading',
++      text: 'Final Interview Applicants',
++      x: 27,
++      y: 36,
++      fontSize: DEFAULT_TEXT_SIZES.heading,
++      visible: true,
++      style: DEFAULT_HEADING_STYLE,
++    },
++    {
++      id: 'closing',
++      text: 'Best of Luck!',
++      x: 27,
++      y: 92,
++      fontSize: DEFAULT_TEXT_SIZES.closing,
++      visible: true,
++      style: DEFAULT_CLOSING_STYLE,
++    },
++  ],
++  images: [], // { id, url, x, y, scale, visible, locked?, groupId? }
++  // { id, x, y, length, thickness, orientation, visible, locked?, groupId? }
++  dividers: [{ ...DEFAULT_DIVIDER, id: 'divider-1' }],
++  shapes: [], // { id, kind, x, y, width, height, rotation, radius, layer, fill, stroke, visible, locked?, groupId? }
++  /*
++   * Paint order, back to front, across every kind at once - the layers
++   * panel lists it in reverse (front first) and reorders it directly. The
++   * logo and the candidate board are always present; every other entry
++   * names a real element by (kind, id).
++   */
++  layerOrder: [
++    { kind: 'logo', id: null },
++    { kind: 'divider', id: 'divider-1' },
++    { kind: 'candidates', id: null },
++    { kind: 'announcements', id: null },
++    { kind: 'text', id: 'heading' },
++    { kind: 'text', id: 'closing' },
++  ],
++};
++
++function clamp(value, min, max) {
++  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
++}
++
++function normalizeText(text, base = DEFAULT_EXTRA_TEXT_STYLE, baseSize = DEFAULT_TEXT_SIZES.extra) {
++  return {
++    id: text.id ?? crypto.randomUUID(),
++    text: typeof text.text === 'string' ? text.text : '',
++    x: clamp(text.x, 0, 100),
++    y: clamp(text.y, 0, 100),
++    // `scale` was a multiplier of a per-role base size before sizes were stored outright
++    fontSize: Number.isFinite(text.fontSize)
++      ? clamp(text.fontSize, 0.3, 40)
++      : clamp(baseSize * (Number(text.scale) || 1), 0.3, 40),
++    visible: text.visible !== false,
++    /* How wide the text may run before wrapping, as a share of the board. */
++    boxWidth: clamp(text.boxWidth ?? 92, 5, 100),
++    style: normalizeTextStyle(text.style, base),
++  };
++}
++
++function layerKey(entry) {
++  return `${entry.kind}:${entry.id ?? ''}`;
++}
++
++/*
++ * Rebuilds the paint order against the elements that actually exist: drops
++ * any entry naming something that was deleted, then appends the logo, the
++ * candidate board, and any element (old data, or one added after the saved
++ * order) that isn't in it yet - new things paint on top, which is where
++ * they'd have landed had layerOrder always existed.
++ */
++function normalizeLayerOrder(saved, layout) {
++  const real = [
++    { kind: 'logo', id: null },
++    { kind: 'candidates', id: null },
++    { kind: 'announcements', id: null },
++    ...layout.texts.map((item) => ({ kind: 'text', id: item.id })),
++    ...layout.dividers.map((item) => ({ kind: 'divider', id: item.id })),
++    ...layout.images.map((item) => ({ kind: 'image', id: item.id })),
++    ...layout.shapes.map((item) => ({ kind: 'shape', id: item.id })),
++  ];
++  const realKeys = new Set(real.map(layerKey));
++
++  const ordered = Array.isArray(saved)
++    ? saved.filter((entry) => entry && realKeys.has(layerKey(entry)))
++    : [];
++
++  const seen = new Set(ordered.map(layerKey));
++
++  for (const entry of real) {
++    if (!seen.has(layerKey(entry))) {
++      ordered.push(entry);
++      seen.add(layerKey(entry));
++    }
++  }
++
++  return ordered;
++}
++
++/*
++ * Every divider on the board. A layout from when there was only ever one
++ * carries it over as the first entry of the list.
++ */
++function normalizeDividers(parsed) {
++  const source = Array.isArray(parsed.dividers)
++    ? parsed.dividers
++    : parsed.divider
++      ? [parsed.divider]
++      : [];
++
++  return source
++    .filter((item) => item && typeof item === 'object')
++    .map((item) => ({
++      id: item.id ?? crypto.randomUUID(),
++      x: clamp(item.x ?? DEFAULT_DIVIDER.x, 0, 100),
++      y: clamp(item.y ?? DEFAULT_DIVIDER.y, 0, 100),
++      // `height` was the field before dividers could also run across
++      length: clamp(item.length ?? item.height ?? DEFAULT_DIVIDER.length, 2, 100),
++      thickness: clamp(item.thickness ?? DEFAULT_DIVIDER.thickness, 1, 24),
++      orientation: item.orientation === 'horizontal' ? 'horizontal' : 'vertical',
++      visible: item.visible !== false,
++      locked: item.locked === true,
++      ...(item.groupId ? { groupId: item.groupId } : {}),
++    }));
++}
++
++/* A positioned, sized box - the candidate board and the announcement strip. */
++function normalizeBox(box, defaults) {
++  const source = box && typeof box === 'object' ? box : {};
++
++  return {
++    visible: source.visible !== false,
++    locked: source.locked === true,
++    x: clamp(source.x ?? defaults.x, 0, 100),
++    y: clamp(source.y ?? defaults.y, 0, 100),
++    ...(defaults.width === undefined
++      ? {}
++      : { width: clamp(source.width ?? defaults.width, 1, 100) }),
++    ...(defaults.height === undefined
++      ? {}
++      : { height: clamp(source.height ?? defaults.height, 8, 100) }),
++    ...(defaults.secondsPerCard === undefined
++      ? {}
++      : {
++          secondsPerCard: clamp(
++            source.secondsPerCard ?? defaults.secondsPerCard,
++            0.5,
++            30
++          ),
++        }),
++  };
++}
++
++function normalizeLayout(parsed) {
++  const texts = [];
++
++  /*
++   * Layouts saved before this kept the headline and the closing line as
++   * fixed singletons; they become the first two entries of the text list,
++   * where they can now be edited and removed like any other.
++   */
++  if (parsed.heading) {
++    texts.push(
++      normalizeText(
++        { ...parsed.heading, id: 'heading' },
++        DEFAULT_HEADING_STYLE,
++        DEFAULT_TEXT_SIZES.heading
++      )
++    );
++  }
++
++  if (parsed.closing) {
++    texts.push(
++      normalizeText(
++        { ...parsed.closing, id: 'closing' },
++        DEFAULT_CLOSING_STYLE,
++        DEFAULT_TEXT_SIZES.closing
++      )
++    );
++  }
++
++  if (Array.isArray(parsed.texts)) {
++    for (const text of parsed.texts) {
++      if (text && typeof text === 'object') texts.push(normalizeText(text));
++    }
++  }
++
++  // an admin who removed every text keeps an empty board, rather than the defaults
++  const hasTextData = Boolean(parsed.heading || parsed.closing || Array.isArray(parsed.texts));
++
++  const layout = {
++    logo: { ...DEFAULT_LAYOUT.logo, ...(parsed.logo ?? {}) },
++    candidates: normalizeBox(parsed.candidates, DEFAULT_CANDIDATES),
++    announcements: normalizeBox(parsed.announcements, DEFAULT_ANNOUNCEMENTS),
++    dividers: normalizeDividers(parsed),
++    texts: hasTextData ? texts : DEFAULT_LAYOUT.texts,
++    images: Array.isArray(parsed.images) ? parsed.images : [],
++    shapes: normalizeShapes(parsed.shapes),
++  };
++
++  layout.version = LAYOUT_VERSION;
++  layout.layerOrder = normalizeLayerOrder(parsed.layerOrder, layout);
++
++  return layout;
++}
++
++function readLayout(key) {
++  try {
++    const raw = window.localStorage.getItem(key);
++    if (!raw) return null;
++
++    const parsed = JSON.parse(raw);
++
++    // geometry from before the free-form change cannot be carried over
++    if (parsed?.version !== LAYOUT_VERSION) {
++      window.localStorage.removeItem(key);
++      return null;
++    }
++
++    return normalizeLayout(parsed);
++  } catch {
++    return null;
++  }
++}
++
++/** Whether an element (the logo, headline, closing line, a photo, or a text block) is shown. */
++export function isVisible(element) {
++  return element.visible !== false;
++}
++
++/** The published layout - what /visual actually shows. */
++export function loadBoardLayout() {
++  return readLayout(LAYOUT_KEY) ?? DEFAULT_LAYOUT;
++}
++
++/**
++ * The admin's working copy. Falls back to the published layout the first
++ * time the editor is opened, so editing always starts from what is
++ * currently live rather than the bare defaults.
++ */
++export function loadDraftLayout() {
++  return readLayout(DRAFT_KEY) ?? loadBoardLayout();
++}
++
++/** Saves the draft only - /visual never sees this until it's published. */
++export function saveDraftLayout(layout) {
++  try {
++    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(layout));
++    return true;
++  } catch (error) {
++    console.warn('Could not save the draft board layout:', error);
++    return false;
++  }
++}
++
++/** Makes `layout` the published layout /visual reads, and notifies this tab. */
++export function saveBoardLayout(layout) {
++  try {
++    window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
++  } catch (error) {
++    console.warn('Could not save the board layout:', error);
++    return false;
++  }
++
++  window.dispatchEvent(new Event(LAYOUT_EVENT));
++  return true;
++}
++
++/** Publishes the current draft: it becomes the live layout /visual shows. */
++export function publishBoardLayout(layout) {
++  saveDraftLayout(layout);
++  return saveBoardLayout(layout);
++}
++
++/*
++ * Named snapshots of a layout, saved on the side so an admin can come back
++ * to a look they liked without it living on the live board or the draft -
++ * saving one doesn't touch either, and applying one only replaces the draft.
++ */
++
++function readTemplates() {
++  try {
++    const raw = window.localStorage.getItem(TEMPLATES_KEY);
++    const parsed = raw ? JSON.parse(raw) : [];
++    return Array.isArray(parsed) ? parsed : [];
++  } catch {
++    return [];
++  }
++}
++
++function writeTemplates(templates) {
++  try {
++    window.localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
++    return true;
++  } catch (error) {
++    console.warn('Could not save templates:', error);
++    return false;
++  }
++}
++
++/** Every saved template, newest first. */
++export function loadTemplates() {
++  return readTemplates();
++}
++
++/** Saves `layout` as a new named template; returns it. */
++export function saveTemplate(name, layout) {
++  const template = {
++    id: crypto.randomUUID(),
++    name: name.trim() || 'Untitled template',
++    savedAt: new Date().toISOString(),
++    layout,
++  };
++
++  writeTemplates([template, ...readTemplates()]);
++  return template;
++}
++
++/** The normalized layout of a saved template, or null if it's gone. */
++export function applyTemplate(id) {
++  const template = readTemplates().find((item) => item.id === id);
++  return template ? normalizeLayout(template.layout) : null;
++}
++
++export function deleteTemplate(id) {
++  writeTemplates(readTemplates().filter((template) => template.id !== id));
++}
+diff --git a/src/lib/candidateVisibility.js b/src/lib/candidateVisibility.js
+new file mode 100644
+index 0000000..5f5bf03
+--- /dev/null
++++ b/src/lib/candidateVisibility.js
+@@ -0,0 +1,10 @@
++/*
++ * Whether a candidate should appear on the /visual board.
++ *
++ * show_in_visual is optional so rows saved before that column
++ * existed keep working everywhere it's read — a missing value
++ * counts as shown.
++ */
++export function isShownOnBoard(candidate) {
++  return candidate.show_in_visual !== false;
++}
+diff --git a/src/lib/shapeStyle.js b/src/lib/shapeStyle.js
+new file mode 100644
+index 0000000..2697264
+--- /dev/null
++++ b/src/lib/shapeStyle.js
+@@ -0,0 +1,125 @@
++/*
++ * Shapes and photo frames. Both are boxes on the board: positioned by the
++ * same centre percentages every other element uses, sized as a percentage of
++ * the board so they hold up at any screen size, and painted with the shared
++ * fill model (a solid colour, a gradient, or - for a frame - a photo).
++ *
++ * A frame is just a box whose fill is an image, which is why it lives here
++ * rather than in its own list: everything except its label and its starting
++ * fill behaves exactly like a rectangle.
++ */
++
++import { fillBoxCss, imageFill, normalizeFill, solidFill } from './fill';
++
++export const SHAPE_KINDS = [
++  { value: 'rectangle', label: 'Rectangle' },
++  { value: 'ellipse', label: 'Ellipse' },
++  { value: 'triangle', label: 'Triangle' },
++  { value: 'line', label: 'Line' },
++  { value: 'frame', label: 'Photo frame' },
++];
++
++export const FIT_OPTIONS = [
++  { value: 'cover', label: 'Fill' },
++  { value: 'contain', label: 'Fit' },
++];
++
++const BASE_SHAPE = {
++  kind: 'rectangle',
++  x: 50,
++  y: 50,
++  width: 22,
++  height: 14,
++  rotation: 0,
++  radius: 6,
++  stroke: { color: '#c9a03c', width: 0 },
++  visible: true,
++};
++
++/* What each kind starts out as when it is dropped on the board. */
++const SHAPE_PRESETS = {
++  rectangle: { fill: solidFill('#c9a03c', 0.85) },
++  ellipse: { width: 16, height: 16, radius: 0, fill: solidFill('#d45d59', 0.85) },
++  triangle: { width: 16, height: 14, radius: 0, fill: solidFill('#f4ca5d', 0.9) },
++  line: { width: 30, height: 0.6, radius: 999, fill: solidFill('#c9a03c', 1) },
++  frame: {
++    width: 16,
++    height: 20,
++    radius: 4,
++    fill: imageFill(),
++    stroke: { color: '#c9a03c', width: 2 },
++  },
++};
++
++export function createShape(kind = 'rectangle') {
++  const preset = SHAPE_PRESETS[kind] ?? SHAPE_PRESETS.rectangle;
++
++  return {
++    ...BASE_SHAPE,
++    ...preset,
++    kind,
++    id: crypto.randomUUID(),
++    stroke: { ...(preset.stroke ?? BASE_SHAPE.stroke) },
++  };
++}
++
++export function shapeLabel(shape) {
++  return SHAPE_KINDS.find((entry) => entry.value === shape.kind)?.label ?? 'Shape';
++}
++
++export function isFrame(shape) {
++  return shape.kind === 'frame';
++}
++
++function clamp(value, min, max) {
++  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
++}
++
++/* Shapes come back from storage, so every field is checked before it is used. */
++export function normalizeShapes(shapes) {
++  if (!Array.isArray(shapes)) return [];
++
++  return shapes
++    .filter((shape) => shape && typeof shape === 'object' && shape.id)
++    .map((shape) => {
++      const kind = SHAPE_KINDS.some((entry) => entry.value === shape.kind)
++        ? shape.kind
++        : 'rectangle';
++
++      return {
++        ...BASE_SHAPE,
++        ...shape,
++        kind,
++        x: clamp(shape.x, 0, 100),
++        y: clamp(shape.y, 0, 100),
++        width: clamp(shape.width, 0.2, 200),
++        height: clamp(shape.height, 0.2, 200),
++        rotation: clamp(shape.rotation ?? 0, -180, 180),
++        radius: clamp(shape.radius ?? 0, 0, 999),
++        stroke: {
++          color: shape.stroke?.color ?? BASE_SHAPE.stroke.color,
++          width: clamp(shape.stroke?.width ?? 0, 0, 40),
++        },
++        fill: normalizeFill(shape.fill, SHAPE_PRESETS[kind]?.fill ?? BASE_SHAPE.fill),
++      };
++    });
++}
++
++/** Builds the inline `style` object that draws a shape or frame. */
++export function resolveShapeStyle(shape) {
++  return {
++    left: `${shape.x}%`,
++    top: `${shape.y}%`,
++    width: `${shape.width}%`,
++    height: `${shape.height}%`,
++    transform: `translate(-50%, -50%) rotate(${shape.rotation}deg)`,
++    borderRadius: shape.kind === 'ellipse' ? '50%' : `${shape.radius}px`,
++    ...(shape.stroke.width > 0
++      ? { border: `${shape.stroke.width}px solid ${shape.stroke.color}` }
++      : {}),
++    ...(shape.kind === 'triangle'
++      ? { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }
++      : {}),
++    ...fillBoxCss(shape.fill),
++  };
++}
+diff --git a/src/lib/textStyle.js b/src/lib/textStyle.js
+new file mode 100644
+index 0000000..03f6b58
+--- /dev/null
++++ b/src/lib/textStyle.js
+@@ -0,0 +1,154 @@
++/*
++ * Typography for the headline, closing line, and any extra text blocks -
++ * shared between the real board (VisualBoard.jsx) and the admin editor's
++ * canvas (AdminVisualBoard.jsx), so a style choice looks exactly the same in
++ * both places. Resolved to a plain inline `style` object rather than Tailwind
++ * classes, since fonts, colors, and gradients are free-form and Tailwind can
++ * only generate classes it can see literally written in source.
++ */
++
++import { BOARD_GOLD_FILL, fillTextCss, normalizeFill, solidFill } from './fill';
++
++export const FONT_OPTIONS = [
++  { value: 'poppins', label: 'Poppins', stack: "'Poppins', 'Inter', system-ui, sans-serif" },
++  { value: 'inter', label: 'Inter', stack: "'Inter', system-ui, sans-serif" },
++  { value: 'montserrat', label: 'Montserrat', stack: "'Montserrat', 'Inter', sans-serif" },
++  { value: 'oswald', label: 'Oswald', stack: "'Oswald', 'Inter', sans-serif" },
++  { value: 'bebas', label: 'Bebas Neue', stack: "'Bebas Neue', 'Oswald', sans-serif" },
++  { value: 'playfair', label: 'Playfair Display', stack: "'Playfair Display', Georgia, serif" },
++  { value: 'lora', label: 'Lora', stack: "'Lora', Georgia, serif" },
++  { value: 'greatvibes', label: 'Great Vibes', stack: "'Great Vibes', 'Brush Script MT', cursive" },
++  { value: 'styleformal', label: 'Style Formal', stack: "'StyleFormal', 'Brush Script MT', cursive" },
++  { value: 'magneton', label: 'Magneton', stack: "'Magneton', 'Brush Script MT', cursive" },
++];
++
++export const FONT_STACKS = Object.fromEntries(FONT_OPTIONS.map((font) => [font.value, font.stack]));
++
++/* The three fonts the first version of this editor shipped with. */
++const LEGACY_FONTS = { display: 'poppins', script: 'styleformal', simple: 'inter' };
++
++export const WEIGHT_OPTIONS = [
++  { value: 400, label: 'Regular' },
++  { value: 500, label: 'Medium' },
++  { value: 600, label: 'Semibold' },
++  { value: 700, label: 'Bold' },
++  { value: 800, label: 'Heavy' },
++  { value: 900, label: 'Black' },
++];
++
++export const ALIGN_OPTIONS = [
++  { value: 'left', label: 'Left' },
++  { value: 'center', label: 'Center' },
++  { value: 'right', label: 'Right' },
++];
++
++export const CASE_OPTIONS = [
++  { value: 'none', label: 'As typed' },
++  { value: 'uppercase', label: 'UPPERCASE' },
++  { value: 'lowercase', label: 'lowercase' },
++  { value: 'capitalize', label: 'Capitalize' },
++];
++
++export const SHADOW_OPTIONS = [
++  { value: 'none', label: 'None' },
++  { value: 'soft', label: 'Soft' },
++  { value: 'hard', label: 'Hard' },
++  { value: 'gold', label: 'Gold' },
++  { value: 'glow', label: 'Glow' },
++];
++
++export const SHADOW_FILTERS = {
++  none: 'none',
++  soft: 'drop-shadow(0 2px 8px rgba(0,0,0,.55))',
++  hard: 'drop-shadow(0 3px 0 rgba(0,0,0,.65))',
++  gold: 'drop-shadow(0 2px 8px rgba(244,194,74,.6))',
++  glow: 'drop-shadow(0 2px 10px rgba(244,194,74,.55)) drop-shadow(0 0 22px rgba(227,179,91,.4))',
++};
++
++/*
++ * Font sizes are a share of the board's height, so a size holds its
++ * proportions on any display - and reads the same in the editor's canvas.
++ */
++export const DEFAULT_TEXT_SIZES = { heading: 6.8, closing: 4.4, extra: 2.4 };
++
++export const DEFAULT_HEADING_STYLE = {
++  fontFamily: 'poppins',
++  weight: 800,
++  align: 'center',
++  textCase: 'uppercase',
++  letterSpacing: -0.012,
++  lineHeight: 1.05,
++  shadow: 'glow',
++  fill: BOARD_GOLD_FILL,
++};
++
++export const DEFAULT_CLOSING_STYLE = {
++  fontFamily: 'styleformal',
++  weight: 400,
++  align: 'center',
++  textCase: 'none',
++  letterSpacing: 0,
++  lineHeight: 1.4,
++  shadow: 'gold',
++  fill: BOARD_GOLD_FILL,
++};
++
++export const DEFAULT_EXTRA_TEXT_STYLE = {
++  fontFamily: 'inter',
++  weight: 600,
++  align: 'center',
++  textCase: 'none',
++  letterSpacing: 0,
++  lineHeight: 1.35,
++  shadow: 'soft',
++  fill: solidFill('#f0d689'),
++};
++
++/*
++ * Text styles come back from storage, where they may predate the font list,
++ * the case/spacing controls, or fills (an earlier version stored a plain
++ * `color`, with null standing for the gold gradient).
++ */
++export function normalizeTextStyle(style, base) {
++  const merged = { ...base, ...(style ?? {}) };
++
++  merged.fontFamily = LEGACY_FONTS[merged.fontFamily] ?? merged.fontFamily;
++  if (!FONT_STACKS[merged.fontFamily]) merged.fontFamily = base.fontFamily;
++
++  if (!merged.fill) {
++    merged.fill = merged.color ? solidFill(merged.color) : BOARD_GOLD_FILL;
++  }
++  merged.fill = normalizeFill(merged.fill);
++  delete merged.color;
++
++  return merged;
++}
++
++/**
++ * The complete inline `style` for a text element - typography, fill, and the
++ * board-relative font size. The live board and the editor's canvas both use
++ * this, so what you set is what shows.
++ */
++export function resolveTextStyle(text) {
++  const style = text.style;
++
++  return {
++    fontFamily: FONT_STACKS[style.fontFamily] ?? FONT_STACKS.inter,
++    fontSize: `${text.fontSize}cqh`,
++    fontWeight: style.weight,
++    lineHeight: style.lineHeight ?? 1.35,
++    textAlign: style.align,
++    textTransform: style.textCase === 'none' ? 'none' : style.textCase,
++    letterSpacing: `${style.letterSpacing ?? 0}em`,
++    whiteSpace: 'pre-line',
++    /*
++     * max-width is ignored on a non-replaced inline element, and the editor
++     * renders text in a span - so without this the heading never wrapped and
++     * ran straight off its box.
++     */
++    display: 'inline-block',
++    maxWidth: `${text.boxWidth ?? 92}cqw`,
++    filter: SHADOW_FILTERS[style.shadow] ?? 'none',
++    ...fillTextCss(style.fill),
++  };
++}
+diff --git a/src/lib/useBoardLayoutEditor.js b/src/lib/useBoardLayoutEditor.js
+new file mode 100644
+index 0000000..08ceced
+--- /dev/null
++++ b/src/lib/useBoardLayoutEditor.js
+@@ -0,0 +1,881 @@
++import { useReducer, useRef, useState } from 'react';
++
++import { DEFAULT_LAYOUT, isVisible, saveDraftLayout } from './boardLayout';
++import { DEFAULT_EXTRA_TEXT_STYLE, DEFAULT_TEXT_SIZES } from './textStyle';
++import { createShape } from './shapeStyle';
++import { imageFill } from './fill';
++
++/* Photos and the logo are capped on the long edge so several fit in the quota. */
++const MAX_IMAGE_EDGE = 800;
++
++/* Which list each addressable kind lives in; anything else is a singleton. */
++const LIST_BY_KIND = {
++  image: 'images',
++  text: 'texts',
++  shape: 'shapes',
++  divider: 'dividers',
++};
++
++/* Undo history: how many steps are kept, and how close together in time
++   edits have to be to collapse into a single step - a drag or a slider
++   fires dozens of updates a second, and each of those should undo as one
++   move rather than one step per pixel. */
++const HISTORY_LIMIT = 50;
++const HISTORY_BURST_MS = 500;
++
++/* Snapping: how close (in board percent) a drag has to land to a guide
++   before it catches, and the spacing of the grid lines it can snap to. */
++const SNAP_THRESHOLD = 1.2;
++const SNAP_GRID_STEP = 5;
++
++function clampPercent(value) {
++  return Math.min(97, Math.max(3, Number.isFinite(value) ? value : 50));
++}
++
++/* Every positioned element on the board, tagged with its kind - the set a
++   drag can snap against. */
++function collectPositionedElements(layout) {
++  return [
++    { kind: 'logo', id: null, ...layout.logo },
++    { kind: 'candidates', id: null, ...layout.candidates },
++    { kind: 'announcements', id: null, ...layout.announcements },
++    ...layout.texts.map((item) => ({ kind: 'text', ...item })),
++    ...layout.images.map((item) => ({ kind: 'image', ...item })),
++    ...layout.shapes.map((item) => ({ kind: 'shape', ...item })),
++    ...layout.dividers.map((item) => ({ kind: 'divider', ...item })),
++  ];
++}
++
++/* Guide values a drag on `axis` can snap to: the center, both edges, the
++   grid lines, and every other element's own position - not the element
++   being dragged. */
++function collectSnapTargets(layout, kind, id, axis) {
++  const targets = new Set([3, 50, 97]);
++
++  for (let line = 0; line <= 100; line += SNAP_GRID_STEP) targets.add(line);
++
++  for (const element of collectPositionedElements(layout)) {
++    const isSelf = element.kind === kind && (kind === 'logo' || element.id === id);
++    if (isSelf) continue;
++    targets.add(axis === 'x' ? element.x : element.y);
++  }
++
++  return targets;
++}
++
++/* The closest guide within the threshold, or `value` unchanged. */
++function snapAxis(value, targets, threshold) {
++  let closest = value;
++  let closestDistance = threshold;
++
++  for (const target of targets) {
++    const distance = Math.abs(value - target);
++    if (distance < closestDistance) {
++      closestDistance = distance;
++      closest = target;
++    }
++  }
++
++  return closest;
++}
++
++function downscaleToDataUrl(file) {
++  return new Promise((resolve, reject) => {
++    const reader = new FileReader();
++
++    reader.onerror = () => reject(new Error('Could not read the image file.'));
++    reader.onload = () => {
++      const image = new Image();
++
++      image.onerror = () => reject(new Error('Could not decode the image file.'));
++      image.onload = () => {
++        const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(image.width, image.height));
++
++        const canvas = document.createElement('canvas');
++        canvas.width = Math.round(image.width * scale);
++        canvas.height = Math.round(image.height * scale);
++
++        canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
++        resolve(canvas.toDataURL('image/png'));
++      };
++
++      image.src = reader.result;
++    };
++
++    reader.readAsDataURL(file);
++  });
++}
++
++/** The element a (kind, id) pair names, or undefined. */
++export function findElement(layout, kind, id) {
++  const list = LIST_BY_KIND[kind];
++  if (!list) return layout[kind];
++  return layout[list]?.find((item) => item.id === id);
++}
++
++function patchElement(layout, kind, id, patch) {
++  const list = LIST_BY_KIND[kind];
++
++  if (!list) {
++    return { ...layout, [kind]: { ...layout[kind], ...patch } };
++  }
++
++  return {
++    ...layout,
++    [list]: layout[list].map((item) => (item.id === id ? { ...item, ...patch } : item)),
++  };
++}
++
++/*
++ * All the editing actions for the board's draft layout - dragging, resizing,
++ * show/hide, sizing, positioning, text, fills, photos, and shapes - built on
++ * top of a `layout` value and its setter the caller already owns, and
++ * persisted through `persist` (the admin editor's draft, saveDraftLayout by
++ * default - never the published layout /visual reads directly).
++ */
++export function useBoardLayoutEditor(
++  layout,
++  setLayout,
++  boundsRef,
++  { onError, onSuccess, persist = saveDraftLayout, snapEnabled = false } = {}
++) {
++  const latestLayoutRef = useRef(layout);
++  const saveScheduledRef = useRef(false);
++  const historyRef = useRef({ undo: [], redo: [] });
++  const historyBurstRef = useRef(null);
++  const [, bumpHistory] = useReducer((count) => count + 1, 0);
++
++  /* Which axis a drag currently reads as centered on - drives the canvas's
++     center guide lines. */
++  const [centerGuide, setCenterGuide] = useState({ x: false, y: false });
++
++  function reportError(error) {
++    if (onError) onError(error);
++    else console.warn(error);
++  }
++
++  function reportSuccess(message) {
++    onSuccess?.(message);
++  }
++
++  /*
++   * Records `latestLayoutRef` onto the undo stack, but only once per burst
++   * of rapid edits (a drag, a slider) - each call within HISTORY_BURST_MS of
++   * the last resets the timer instead of pushing again, so one gesture is
++   * one undo step rather than one per pointermove or keystroke.
++   */
++  function recordHistory() {
++    if (historyBurstRef.current) {
++      clearTimeout(historyBurstRef.current);
++    } else {
++      const { undo } = historyRef.current;
++      undo.push(latestLayoutRef.current);
++      if (undo.length > HISTORY_LIMIT) undo.shift();
++      historyRef.current.redo = [];
++      bumpHistory();
++    }
++
++    historyBurstRef.current = setTimeout(() => {
++      historyBurstRef.current = null;
++    }, HISTORY_BURST_MS);
++  }
++
++  function undo() {
++    if (historyBurstRef.current) {
++      clearTimeout(historyBurstRef.current);
++      historyBurstRef.current = null;
++    }
++
++    const { undo: undoStack, redo: redoStack } = historyRef.current;
++    if (!undoStack.length) return;
++
++    const previous = undoStack.pop();
++    redoStack.push(latestLayoutRef.current);
++    latestLayoutRef.current = previous;
++    setLayout(previous);
++    persist(previous);
++    bumpHistory();
++  }
++
++  function redo() {
++    if (historyBurstRef.current) {
++      clearTimeout(historyBurstRef.current);
++      historyBurstRef.current = null;
++    }
++
++    const { undo: undoStack, redo: redoStack } = historyRef.current;
++    if (!redoStack.length) return;
++
++    const next = redoStack.pop();
++    undoStack.push(latestLayoutRef.current);
++    latestLayoutRef.current = next;
++    setLayout(next);
++    persist(next);
++    bumpHistory();
++  }
++
++  /*
++   * Every drag move updates state immediately for a smooth handle, but only
++   * queues one write per animation frame - writing on every pointermove
++   * event would be a lot of redundant JSON.stringify calls once a photo is
++   * on the canvas.
++   */
++  function commitFrom(updater, { immediate = true } = {}) {
++    recordHistory();
++
++    setLayout((current) => {
++      const next = updater(current);
++      latestLayoutRef.current = next;
++
++      if (immediate) {
++        persist(next);
++      } else if (!saveScheduledRef.current) {
++        saveScheduledRef.current = true;
++        requestAnimationFrame(() => {
++          saveScheduledRef.current = false;
++          persist(latestLayoutRef.current);
++        });
++      }
++
++      return next;
++    });
++  }
++
++  function updateElement(kind, id, patch) {
++    commitFrom((current) => patchElement(current, kind, id, patch));
++  }
++
++  /* Turns a pointer position into board percentages. */
++  function pointToPercent(event, rect) {
++    return {
++      x: clampPercent(((event.clientX - rect.left) / rect.width) * 100),
++      y: clampPercent(((event.clientY - rect.top) / rect.height) * 100),
++    };
++  }
++
++  function dragWith(onMove, onEnd) {
++    const bounds = boundsRef.current;
++    if (!bounds) return;
++
++    function move(moveEvent) {
++      onMove(moveEvent, bounds.getBoundingClientRect());
++    }
++
++    function up() {
++      window.removeEventListener('pointermove', move);
++      window.removeEventListener('pointerup', up);
++      onEnd?.();
++    }
++
++    window.addEventListener('pointermove', move);
++    window.addEventListener('pointerup', up);
++  }
++
++  /*
++   * Resizes the candidate board or the announcement strip by dragging its
++   * corner. Width follows the pointer's distance from the box's centre,
++   * doubled because the box is centred on its position; height does the
++   * same where the box has one.
++   */
++  function beginResizeBox(kind) {
++    return (event) => {
++      const box = findElement(latestLayoutRef.current, kind, null);
++      if (box?.locked) return;
++
++      event.preventDefault();
++      event.stopPropagation();
++
++      const hasHeight = box.height !== undefined;
++
++      dragWith((moveEvent, rect) => {
++        const { x, y } = pointToPercent(moveEvent, rect);
++
++        commitFrom((current) => {
++          const target = current[kind];
++          const size = (value) => Math.min(100, Math.max(8, value));
++          const patch = { width: size(Math.abs(x - target.x) * 2) };
++
++          if (hasHeight) {
++            patch.height = size(Math.abs(y - target.y) * 2);
++          }
++
++          return patchElement(current, kind, null, patch);
++        });
++      });
++    };
++  }
++
++  function beginDrag(kind, id) {
++    return (event) => {
++      const element = findElement(latestLayoutRef.current, kind, id);
++      if (element?.locked) return;
++
++      event.preventDefault();
++
++      const groupId = element?.groupId;
++      const groupStart = groupId
++        ? collectPositionedElements(latestLayoutRef.current).filter((item) => item.groupId === groupId)
++        : null;
++      let dragOrigin = null;
++
++      dragWith(
++        (moveEvent, rect) => {
++          let { x, y } = pointToPercent(moveEvent, rect);
++
++          if (groupStart) {
++            /* A grouped element moves by the same delta as every other
++               member, rather than snapping its own center to the pointer. */
++            dragOrigin ??= { x, y };
++            const dx = x - dragOrigin.x;
++            const dy = y - dragOrigin.y;
++
++            setCenterGuide({ x: false, y: false });
++            commitFrom(
++              (current) => {
++                let next = current;
++                for (const member of groupStart) {
++                  next = patchElement(next, member.kind, member.id, {
++                    x: clampPercent(member.x + dx),
++                    y: clampPercent(member.y + dy),
++                  });
++                }
++                return next;
++              },
++              { immediate: false }
++            );
++            return;
++          }
++
++          if (snapEnabled) {
++            const current = latestLayoutRef.current;
++            x = clampPercent(snapAxis(x, collectSnapTargets(current, kind, id, 'x'), SNAP_THRESHOLD));
++            y = clampPercent(snapAxis(y, collectSnapTargets(current, kind, id, 'y'), SNAP_THRESHOLD));
++          }
++
++          setCenterGuide({ x: Math.abs(x - 50) < 0.5, y: Math.abs(y - 50) < 0.5 });
++          commitFrom((current) => patchElement(current, kind, id, { x, y }), {
++            immediate: false,
++          });
++        },
++        () => setCenterGuide({ x: false, y: false })
++      );
++    };
++  }
++
++  /*
++   * Resizing a shape holds its centre still, so the corner handle stays under
++   * the cursor: half the box is the distance from the centre to the pointer.
++   */
++  /*
++   * Resizes the logo or a photo by dragging its corner. Both are sized as a
++   * multiplier of a base width, so the drag reads the half-width the pointer
++   * is asking for and divides by the base to get the multiplier.
++   */
++  function beginScaleResize(kind, id, baseWidth) {
++    return (event) => {
++      event.preventDefault();
++      event.stopPropagation();
++
++      const element = findElement(latestLayoutRef.current, kind, id);
++      if (!element || element.locked) return;
++
++      dragWith((moveEvent, rect) => {
++        const centerX = rect.left + (element.x / 100) * rect.width;
++        const halfWidth = (Math.abs(moveEvent.clientX - centerX) * 100) / rect.width;
++
++        commitFrom(
++          (current) =>
++            patchElement(current, kind, id, {
++              scale: Math.min(6, Math.max(0.1, (halfWidth * 2) / baseWidth)),
++            }),
++          { immediate: false }
++        );
++      });
++    };
++  }
++
++  /*
++   * Resizes a text block by dragging its corner. Type is sized against the
++   * board's height, so the drag measures vertically from the block's centre.
++   */
++  function beginFontResize(id) {
++    return (event) => {
++      event.preventDefault();
++      event.stopPropagation();
++
++      const text = findElement(latestLayoutRef.current, 'text', id);
++      if (!text || text.locked) return;
++
++      dragWith((moveEvent, rect) => {
++        const centerY = rect.top + (text.y / 100) * rect.height;
++        const halfHeight = (Math.abs(moveEvent.clientY - centerY) * 100) / rect.height;
++
++        commitFrom(
++          (current) =>
++            patchElement(current, 'text', id, {
++              fontSize: Math.min(40, Math.max(0.3, halfHeight * 2)),
++            }),
++          { immediate: false }
++        );
++      });
++    };
++  }
++
++  function beginResize(id) {
++    return (event) => {
++      event.preventDefault();
++      event.stopPropagation();
++
++      const shape = findElement(latestLayoutRef.current, 'shape', id);
++      if (!shape || shape.locked) return;
++
++      dragWith((moveEvent, rect) => {
++        const centerX = rect.left + (shape.x / 100) * rect.width;
++        const centerY = rect.top + (shape.y / 100) * rect.height;
++
++        const width = (Math.abs(moveEvent.clientX - centerX) * 2 * 100) / rect.width;
++        const height = (Math.abs(moveEvent.clientY - centerY) * 2 * 100) / rect.height;
++
++        commitFrom(
++          (current) =>
++            patchElement(current, 'shape', id, {
++              width: Math.min(200, Math.max(0.4, width)),
++              height: Math.min(200, Math.max(0.4, height)),
++            }),
++          { immediate: false }
++        );
++      });
++    };
++  }
++
++  function setPosition(kind, id, x, y) {
++    updateElement(kind, id, { x: clampPercent(x), y: clampPercent(y) });
++  }
++
++  /* A new element paints on top of everything else; a removed one just
++     drops out of the order. */
++  function appendLayer(current, kind, id) {
++    return { ...current, layerOrder: [...current.layerOrder, { kind, id }] };
++  }
++
++  function removeLayer(current, kind, id) {
++    return {
++      ...current,
++      layerOrder: current.layerOrder.filter((entry) => !(entry.kind === kind && entry.id === id)),
++    };
++  }
++
++  function layerKey(entry) {
++    return `${entry.kind}:${entry.id ?? ''}`;
++  }
++
++  /*
++   * Moves a layer through layerOrder, which runs back to front - so 'up'
++   * and 'front' move later in the array. The layers panel lists it
++   * reversed, front first, which is why its buttons read the other way.
++   *
++   *   'up'    one step toward the front      'front'  all the way to the front
++   *   'down'  one step toward the back       'back'   all the way to the back
++   */
++  function moveLayer(kind, id, direction) {
++    commitFrom((current) => {
++      const order = current.layerOrder;
++      const target = layerKey({ kind, id: kind === 'logo' || kind === 'candidates' ? null : id });
++      const index = order.findIndex((entry) => layerKey(entry) === target);
++
++      if (index < 0) return current;
++
++      const entry = order[index];
++      const rest = order.filter((_, i) => i !== index);
++
++      if (direction === 'front') {
++        if (index === order.length - 1) return current;
++        return { ...current, layerOrder: [...rest, entry] };
++      }
++
++      if (direction === 'back') {
++        if (index === 0) return current;
++        return { ...current, layerOrder: [entry, ...rest] };
++      }
++
++      const swapWith = direction === 'up' ? index + 1 : index - 1;
++      if (swapWith < 0 || swapWith >= order.length) return current;
++
++      const nextOrder = [...order];
++      [nextOrder[index], nextOrder[swapWith]] = [nextOrder[swapWith], nextOrder[index]];
++
++      return { ...current, layerOrder: nextOrder };
++    });
++  }
++
++  function setLocked(kind, id, locked) {
++    updateElement(kind, id, { locked });
++  }
++
++  /* Ties every element in `selections` ({kind, id} pairs) to one new group,
++     so dragging any of them moves them all together; returns the group id. */
++  function groupElements(selections) {
++    if (selections.length < 2) return null;
++
++    const groupId = crypto.randomUUID();
++
++    commitFrom((current) => {
++      let next = current;
++      for (const selection of selections) {
++        if (selection.kind === 'candidates') continue;
++        next = patchElement(next, selection.kind, selection.id, { groupId });
++      }
++      return next;
++    });
++
++    return groupId;
++  }
++
++  function ungroup(groupId) {
++    commitFrom((current) => {
++      let next = current;
++      for (const element of collectPositionedElements(next)) {
++        if (element.groupId === groupId) {
++          next = patchElement(next, element.kind, element.id, { groupId: null });
++        }
++      }
++      return next;
++    });
++  }
++
++  function toggleVisible(kind, id) {
++    commitFrom((current) => {
++      const element = findElement(current, kind, id);
++      if (!element) return current;
++      return patchElement(current, kind, id, { visible: !isVisible(element) });
++    });
++  }
++
++  /* A new divider, dropped in the middle of the board. */
++  function addDivider(orientation = 'vertical') {
++    const id = crypto.randomUUID();
++
++    commitFrom((current) => ({
++      ...current,
++      dividers: [
++        ...current.dividers,
++        { id, x: 50, y: 50, length: 70, thickness: 1, orientation, visible: true },
++      ],
++      layerOrder: [...current.layerOrder, { kind: 'divider', id }],
++    }));
++
++    return id;
++  }
++
++  /* Drag a divider's end to set how long it is. */
++  function beginDividerResize(id) {
++    return (event) => {
++      event.preventDefault();
++      event.stopPropagation();
++
++      const divider = findElement(latestLayoutRef.current, 'divider', id);
++      if (!divider || divider.locked) return;
++
++      dragWith((moveEvent, rect) => {
++        const vertical = divider.orientation !== 'horizontal';
++
++        const center = vertical
++          ? rect.top + (divider.y / 100) * rect.height
++          : rect.left + (divider.x / 100) * rect.width;
++        const pointer = vertical ? moveEvent.clientY : moveEvent.clientX;
++        const extent = vertical ? rect.height : rect.width;
++
++        const length = (Math.abs(pointer - center) * 2 * 100) / extent;
++
++        commitFrom(
++          (current) =>
++            patchElement(current, 'divider', id, {
++              length: Math.min(100, Math.max(2, length)),
++            }),
++          { immediate: false }
++        );
++      });
++    };
++  }
++
++  /*
++   * Copies an element and drops the copy slightly down and to the right of
++   * the original, on top of the paint order. Only the kinds that can exist
++   * more than once are copyable - the logo, the candidate board, the
++   * announcement strip and the divider are each one of a kind.
++   */
++  function duplicateElement(kind, id) {
++    const list = LIST_BY_KIND[kind];
++    if (!list) return null;
++
++    const source = findElement(latestLayoutRef.current, kind, id);
++    if (!source) return null;
++
++    const copy = {
++      ...source,
++      id: crypto.randomUUID(),
++      x: clampPercent(source.x + 3),
++      y: clampPercent(source.y + 3),
++      locked: false,
++      /* a copy is its own element, not a member of the original's group */
++      groupId: undefined,
++    };
++
++    commitFrom((current) => ({
++      ...current,
++      [list]: [...current[list], copy],
++      layerOrder: [...current.layerOrder, { kind, id: copy.id }],
++    }));
++
++    return copy.id;
++  }
++
++  /*
++   * Takes an element off the board. The kinds that live in a list are
++   * deleted outright; the one-of-a-kind ones are hidden instead, since
++   * there would be no way to add them back - the layers panel still lists
++   * them, so they can be turned on again.
++   */
++  function removeElement(kind, id) {
++    const list = LIST_BY_KIND[kind];
++
++    if (!list) {
++      updateElement(kind, id, { visible: false });
++      return 'hidden';
++    }
++
++    commitFrom((current) => ({
++      ...current,
++      [list]: current[list].filter((item) => item.id !== id),
++      layerOrder: current.layerOrder.filter(
++        (entry) => !(entry.kind === kind && entry.id === id)
++      ),
++    }));
++
++    return 'removed';
++  }
++
++  /* Logo and photo size - a multiplier of their base width. */
++  function setScale(kind, id, scale) {
++    updateElement(kind, id, { scale });
++  }
++
++  /* A text element's size - its font size, as a share of the board's height. */
++  function setFontSize(id, fontSize) {
++    updateElement('text', id, { fontSize });
++  }
++
++  function setTextContent(id, text) {
++    updateElement('text', id, { text });
++  }
++
++  /* Merges `patch` into the typography settings of a text-bearing element. */
++  function setTextStyle(kind, id, patch) {
++    commitFrom((current) => {
++      const element = findElement(current, kind, id);
++      if (!element) return current;
++      return patchElement(current, kind, id, { style: { ...element.style, ...patch } });
++    });
++  }
++
++  /* Replaces the fill of a text element (through its style) or of a shape. */
++  function setFill(kind, id, fill) {
++    if (kind === 'shape') {
++      updateElement('shape', id, { fill });
++      return;
++    }
++
++    setTextStyle(kind, id, { fill });
++  }
++
++  async function handleLogoUpload(file) {
++    if (!file) return;
++
++    try {
++      const dataUrl = await downscaleToDataUrl(file);
++      updateElement('logo', null, { url: dataUrl });
++      reportSuccess('Logo updated.');
++    } catch (error) {
++      reportError(error);
++    }
++  }
++
++  function resetLogo() {
++    updateElement('logo', null, { url: null });
++  }
++
++  async function handleAddPhoto(file) {
++    if (!file) return null;
++
++    try {
++      const dataUrl = await downscaleToDataUrl(file);
++      const id = crypto.randomUUID();
++
++      commitFrom((current) =>
++        appendLayer(
++          { ...current, images: [...current.images, { id, url: dataUrl, x: 50, y: 50, scale: 1, visible: true }] },
++          'image',
++          id
++        )
++      );
++      reportSuccess('Photo added to the board.');
++
++      return id;
++    } catch (error) {
++      reportError(error);
++      return null;
++    }
++  }
++
++  function removePhoto(id) {
++    commitFrom((current) =>
++      removeLayer(
++        { ...current, images: current.images.filter((image) => image.id !== id) },
++        'image',
++        id
++      )
++    );
++  }
++
++  function addText() {
++    const id = crypto.randomUUID();
++
++    commitFrom((current) =>
++      appendLayer(
++        {
++          ...current,
++          texts: [
++            ...current.texts,
++            {
++              id,
++              text: 'New text',
++              x: 50,
++              y: 50,
++              fontSize: DEFAULT_TEXT_SIZES.extra,
++              visible: true,
++              style: { ...DEFAULT_EXTRA_TEXT_STYLE },
++            },
++          ],
++        },
++        'text',
++        id
++      )
++    );
++
++    return id;
++  }
++
++  function removeText(id) {
++    commitFrom((current) =>
++      removeLayer({ ...current, texts: current.texts.filter((text) => text.id !== id) }, 'text', id)
++    );
++  }
++
++  function addShape(kind) {
++    const shape = createShape(kind);
++
++    commitFrom((current) =>
++      appendLayer({ ...current, shapes: [...current.shapes, shape] }, 'shape', shape.id)
++    );
++
++    return shape.id;
++  }
++
++  function removeShape(id) {
++    commitFrom((current) =>
++      removeLayer(
++        { ...current, shapes: current.shapes.filter((shape) => shape.id !== id) },
++        'shape',
++        id
++      )
++    );
++  }
++
++  function setShapeStroke(id, patch) {
++    commitFrom((current) => {
++      const shape = findElement(current, 'shape', id);
++      if (!shape) return current;
++      return patchElement(current, 'shape', id, { stroke: { ...shape.stroke, ...patch } });
++    });
++  }
++
++  /* Drops a photo into a frame - the frame's fill *is* the photo. */
++  async function handleFramePhoto(id, file) {
++    if (!file) return;
++
++    try {
++      const dataUrl = await downscaleToDataUrl(file);
++
++      commitFrom((current) => {
++        const shape = findElement(current, 'shape', id);
++        if (!shape) return current;
++
++        const fit = shape.fill?.type === 'image' ? shape.fill.fit : 'cover';
++        return patchElement(current, 'shape', id, { fill: imageFill(dataUrl, fit) });
++      });
++      reportSuccess('Photo added to the frame.');
++    } catch (error) {
++      reportError(error);
++    }
++  }
++
++  function resetLayout() {
++    commitFrom(() => ({
++      logo: { ...DEFAULT_LAYOUT.logo },
++      texts: DEFAULT_LAYOUT.texts.map((text) => ({ ...text, style: { ...text.style } })),
++      images: [],
++      shapes: [],
++      layerOrder: DEFAULT_LAYOUT.layerOrder.map((entry) => ({ ...entry })),
++    }));
++    reportSuccess('Layout reset to the default.');
++  }
++
++  /** Replaces the whole draft, e.g. when a saved template is applied. */
++  function replaceLayout(nextLayout) {
++    commitFrom(() => nextLayout);
++  }
++
++  return {
++    undo,
++    redo,
++    canUndo: historyRef.current.undo.length > 0,
++    canRedo: historyRef.current.redo.length > 0,
++    centerGuide,
++    beginDrag,
++    beginResizeBox,
++    beginResize,
++    beginScaleResize,
++    beginFontResize,
++    duplicateElement,
++    removeElement,
++    addDivider,
++    beginDividerResize,
++    updateDivider: (id, patch) => updateElement('divider', id, patch),
++    setPosition,
++    toggleVisible,
++    setScale,
++    setFontSize,
++    setTextContent,
++    setTextStyle,
++    setFill,
++    handleLogoUpload,
++    resetLogo,
++    handleAddPhoto,
++    removePhoto,
++    addText,
++    removeText,
++    addShape,
++    removeShape,
++    updateShape: (id, patch) => updateElement('shape', id, patch),
++    /* the candidate board and the announcement strip are patched directly */
++    updateElement,
++    setShapeStroke,
++    handleFramePhoto,
++    resetLayout,
++    replaceLayout,
++    moveLayer,
++    setLocked,
++    groupElements,
++    ungroup,
++  };
++}
+diff --git a/src/pages/AdminVisualBoard.jsx b/src/pages/AdminVisualBoard.jsx
+new file mode 100644
+index 0000000..0dcdbb2
+--- /dev/null
++++ b/src/pages/AdminVisualBoard.jsx
+@@ -0,0 +1,2303 @@
++import { useEffect, useRef, useState } from 'react';
++import {
++  AlignCenter,
++  AlignLeft,
++  AlignRight,
++  ChevronDown,
++  ChevronUp,
++  ChevronsDown,
++  ChevronsUp,
++  Copy,
++  Circle,
++  Crown,
++  ExternalLink,
++  Eye,
++  EyeOff,
++  FolderOpen,
++  Frame,
++  Grid3x3,
++  Group,
++  Image as ImageIcon,
++  ImagePlus,
++  Layers,
++  LayoutTemplate,
++  Megaphone,
++  SeparatorHorizontal,
++  SeparatorVertical,
++  Lock,
++  LockOpen,
++  Magnet,
++  Maximize,
++  Minimize,
++  Minus,
++  Plus,
++  Redo2,
++  RotateCcw,
++  Save,
++  Shapes,
++  Square,
++  Trash2,
++  Triangle,
++  Type,
++  Undo2,
++  Ungroup,
++  UploadCloud,
++  UsersRound,
++  X,
++} from 'lucide-react';
++
++import {
++  applyTemplate,
++  deleteTemplate,
++  isVisible,
++  loadBoardLayout,
++  loadDraftLayout,
++  loadTemplates,
++  publishBoardLayout,
++  saveTemplate,
++} from '../lib/boardLayout';
++import { useBoardLayoutEditor, findElement } from '../lib/useBoardLayoutEditor';
++import {
++  ALIGN_OPTIONS,
++  CASE_OPTIONS,
++  FONT_OPTIONS,
++  SHADOW_OPTIONS,
++  WEIGHT_OPTIONS,
++  resolveTextStyle,
++} from '../lib/textStyle';
++import { SHAPE_KINDS, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
++import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from '../lib/boardGeometry';
++import FillEditor from '../components/FillEditor';
++import { subscribeCandidates } from '../lib/localBackend';
++import { isShownOnBoard } from '../lib/candidateVisibility';
++import { useToast } from '../components/ToastProvider';
++
++const ALIGN_ICONS = { left: AlignLeft, center: AlignCenter, right: AlignRight };
++
++const SHAPE_ICONS = {
++  rectangle: Square,
++  ellipse: Circle,
++  triangle: Triangle,
++  line: Minus,
++  frame: Frame,
++};
++
++/* The left rail's tabs - each switches which panel sits beside it. */
++const RAIL_TABS = [
++  { id: 'elements', label: 'Elements', icon: Shapes },
++  { id: 'text', label: 'Text', icon: Type },
++  { id: 'brand', label: 'Brand', icon: Crown },
++  { id: 'uploads', label: 'Uploads', icon: UploadCloud },
++  { id: 'layers', label: 'Layers', icon: Layers },
++];
++
++/* Which rail tab owns a given kind of element, so selecting one on the
++   canvas brings its panel forward too. */
++/* The elements that are positioned boxes rather than points. */
++const BOX_KINDS = {
++  candidates: {
++    label: 'Candidate Board',
++    hint: 'Drag it anywhere, or drag its corner to resize. What it shows comes from Records.',
++  },
++  announcements: {
++    label: 'Announcements',
++    hint: 'Drag it anywhere, or drag its corner to set its width. What it shows comes from Announcements.',
++  },
++};
++
++const PANEL_BY_KIND = {
++  logo: 'brand',
++  candidates: 'brand',
++  text: 'text',
++  image: 'uploads',
++  shape: 'elements',
++};
++
++/* The zoom toolbar's fixed presets; 'fit' is computed instead of literal. */
++const ZOOM_OPTIONS = [
++  { value: '0.5', label: '50%' },
++  { value: '0.75', label: '75%' },
++  { value: '1', label: '100%' },
++  { value: 'fit', label: 'Fit to screen' },
++];
++
++function propertiesTitle(kind, shape) {
++  switch (kind) {
++    case 'logo':
++      return 'Logo';
++    case 'image':
++      return 'Photo';
++    case 'text':
++      return 'Text';
++    case 'shape':
++      return shape ? shapeLabel(shape) : 'Shape';
++    case 'divider':
++      return 'Divider';
++    default:
++      return '';
++  }
++}
++
++/* "Rectangle 1", "Photo frame 2" - numbered within their own kind. */
++function labelShapes(shapes) {
++  const counts = {};
++
++  return shapes.map((shape) => {
++    counts[shape.kind] = (counts[shape.kind] ?? 0) + 1;
++    return `${shapeLabel(shape)} ${counts[shape.kind]}`;
++  });
++}
++
++export default function AdminVisualBoard() {
++  const [layout, setLayout] = useState(() => loadDraftLayout());
++  const [selected, setSelected] = useState(null); // { kind, id? } | null
++  const [multiSelected, setMultiSelected] = useState([]); // [{ kind, id }] - shift-click grouping
++  const [activePanel, setActivePanel] = useState('elements');
++  const [candidates, setCandidates] = useState([]);
++
++  /* { kind, id, x, y } while the right-click order menu is open */
++  const [orderMenu, setOrderMenu] = useState(null);
++
++  /* The element Ctrl+C remembered, for Ctrl+V to copy. */
++  const [clipboard, setClipboard] = useState(null);
++  const [isDirty, setIsDirty] = useState(false);
++
++  // '0.5' | '0.75' | '1' | 'fit' - a share of the stage's height
++  const [zoom, setZoom] = useState('fit');
++  const [showGrid, setShowGrid] = useState(false);
++  const [snapEnabled, setSnapEnabled] = useState(false);
++  const [isFullscreen, setIsFullscreen] = useState(false);
++  const [fitPercent, setFitPercent] = useState(100);
++
++  const [templateModal, setTemplateModal] = useState(null); // null | 'save' | 'apply'
++  const [templateName, setTemplateName] = useState('');
++  const [templates, setTemplates] = useState(() => loadTemplates());
++
++  const canvasRef = useRef(null);
++  const middleColumnRef = useRef(null);
++  const stageRef = useRef(null);
++  const layoutRef = useRef(null);
++  const publishedSnapshotRef = useRef(JSON.stringify(loadBoardLayout()));
++  const showToast = useToast();
++
++  /*
++   * Free-form elements (logo, text, shapes) are bounded by the middle
++   * column specifically, not the whole canvas - it's the column they
++   * actually render within on the live board, so dragging one to x:50
++   * centers it in that column, not the full three-column width.
++   */
++  const editor = useBoardLayoutEditor(layout, setLayout, middleColumnRef, {
++    onError: (error) => showToast.error(error.message),
++    onSuccess: (message) => showToast.success(message),
++    snapEnabled,
++  });
++
++  useEffect(() => {
++    return subscribeCandidates((rows) => {
++      setCandidates(rows.filter((candidate) => isShownOnBoard(candidate)));
++    });
++  }, []);
++
++  useEffect(() => {
++    setIsDirty(JSON.stringify(layout) !== publishedSnapshotRef.current);
++  }, [layout]);
++
++  /*
++   * "Fit to screen" only has real work to do in fullscreen, where the stage
++   * is a fixed, known-size viewport - outside it the stage's height simply
++   * follows the canvas, so there is nothing independent to fit against and
++   * 100% width is already the fit.
++   */
++  useEffect(() => {
++    function recomputeFit() {
++      setIsFullscreen(Boolean(document.fullscreenElement));
++
++      if (!document.fullscreenElement) {
++        setFitPercent(100);
++        return;
++      }
++
++      const ratio = (window.innerHeight * 16) / (9 * window.innerWidth);
++      setFitPercent(Math.min(100, ratio * 100));
++    }
++
++    recomputeFit();
++    window.addEventListener('resize', recomputeFit);
++    document.addEventListener('fullscreenchange', recomputeFit);
++
++    return () => {
++      window.removeEventListener('resize', recomputeFit);
++      document.removeEventListener('fullscreenchange', recomputeFit);
++    };
++  }, []);
++
++  /* Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y to redo - but not
++     while the user is typing in a field. */
++  useEffect(() => {
++    function handleKeydown(event) {
++      const isEditing = event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]');
++      if (isEditing) return;
++
++      const isMeta = event.ctrlKey || event.metaKey;
++
++      /* Delete needs no modifier - it is the obvious key for it. */
++      if (!isMeta && (event.key === 'Delete' || event.key === 'Backspace')) {
++        if (!selected) return;
++        event.preventDefault();
++        removeSelected();
++        return;
++      }
++
++      if (!isMeta) return;
++
++      const key = event.key.toLowerCase();
++
++      if (key === 'z' && event.shiftKey) {
++        event.preventDefault();
++        editor.redo();
++      } else if (key === 'z') {
++        event.preventDefault();
++        editor.undo();
++      } else if (key === 'y') {
++        event.preventDefault();
++        editor.redo();
++      } else if (key === 'c') {
++        /* Copy remembers the selection; paste puts a copy of it down. */
++        if (!selected) return;
++        event.preventDefault();
++        setClipboard(selected);
++      } else if (key === 'v') {
++        if (!clipboard) return;
++        event.preventDefault();
++        const copyId = editor.duplicateElement(clipboard.kind, clipboard.id);
++        if (copyId) setSelected({ kind: clipboard.kind, id: copyId });
++        else showToast(`There can only be one ${describe(clipboard).toLowerCase()}.`);
++      } else if (key === 'd') {
++        if (!selected) return;
++        event.preventDefault();
++        duplicateSelected();
++      }
++    }
++
++    window.addEventListener('keydown', handleKeydown);
++    return () => window.removeEventListener('keydown', handleKeydown);
++  }, [editor, selected, clipboard, layout]);
++
++  /*
++   * Sizes the workspace to whatever is left below the header and toolbar,
++   * measured rather than guessed: a hard-coded offset drifts the moment the
++   * chrome above changes height, and being a few pixels out is the
++   * difference between reaching the bottom and putting a scrollbar on the
++   * page.
++   */
++  useEffect(() => {
++    const node = layoutRef.current;
++    if (!node) return;
++
++    function fit() {
++      if (document.fullscreenElement) {
++        node.style.removeProperty('--vb-chrome');
++        return;
++      }
++
++      const top = node.getBoundingClientRect().top + window.scrollY;
++
++      /*
++       * The page's own bottom padding sits below the workspace, so it has
++       * to come out of the height too - leaving it in is what put a nine
++       * pixel scrollbar on the page.
++       */
++      const container = node.closest('.dashboard-content');
++      const gap = container
++        ? parseFloat(getComputedStyle(container).paddingBottom) || 0
++        : 18;
++
++      /* rounded up, so a sub-pixel offset cannot leave a 1px scrollbar */
++      node.style.setProperty('--vb-chrome', `${Math.ceil(top) + Math.ceil(gap) + 1}px`);
++    }
++
++    fit();
++
++    const observer = new ResizeObserver(fit);
++    observer.observe(document.documentElement);
++    document.addEventListener('fullscreenchange', fit);
++
++    return () => {
++      observer.disconnect();
++      document.removeEventListener('fullscreenchange', fit);
++    };
++  }, []);
++
++  /*
++   * Fullscreen takes the whole workspace rather than the canvas alone.
++   * Only the canvas used to go fullscreen, which left the element rail and
++   * the properties panel outside the fullscreen element and therefore
++   * invisible - nothing could be selected or changed until you came back
++   * out again.
++   */
++  function toggleFullscreen() {
++    if (document.fullscreenElement) {
++      document.exitFullscreen();
++    } else {
++      layoutRef.current?.requestFullscreen();
++    }
++  }
++
++  function select(kind, id) {
++    setSelected({ kind, id });
++    setMultiSelected([]);
++    if (PANEL_BY_KIND[kind]) setActivePanel(PANEL_BY_KIND[kind]);
++  }
++
++  function isSelected(kind, id) {
++    if (!selected || selected.kind !== kind) return false;
++    return id === undefined || selected.id === id;
++  }
++
++  function isMultiSelected(kind, id) {
++    return multiSelected.some((item) => item.kind === kind && item.id === id);
++  }
++
++  /*
++   * A shift-click toggles an element into the multi-selection instead of
++   * replacing the single selection - a plain click clears it and drags as
++   * usual. The first shift-click folds whatever was already singly selected
++   * into the group too, so "click A, shift-click B" ends with both selected
++   * rather than just B.
++   */
++  function handlePointerDown(kind, id) {
++    return (event) => {
++      if (event.shiftKey) {
++        event.preventDefault();
++        event.stopPropagation();
++        setMultiSelected((current) => {
++          const base = current.length > 0 ? current : selected ? [selected] : [];
++          const exists = base.some((item) => item.kind === kind && item.id === id);
++          return exists
++            ? base.filter((item) => !(item.kind === kind && item.id === id))
++            : [...base, { kind, id }];
++        });
++        setSelected(null);
++        return;
++      }
++
++      if (multiSelected.length > 0) setMultiSelected([]);
++      grab(kind, id)(event);
++    };
++  }
++
++  /*
++   * Right-clicking an element selects it and opens the order menu at the
++   * pointer, so layering is reachable on the canvas rather than only in the
++   * layers panel.
++   */
++  useEffect(() => {
++    if (!orderMenu) return;
++
++    const close = () => setOrderMenu(null);
++    const onKey = (event) => {
++      if (event.key === 'Escape') close();
++    };
++
++    // capture, so the menu closes even if the target stops propagation
++    window.addEventListener('pointerdown', close, true);
++    window.addEventListener('scroll', close, true);
++    window.addEventListener('keydown', onKey);
++
++    return () => {
++      window.removeEventListener('pointerdown', close, true);
++      window.removeEventListener('scroll', close, true);
++      window.removeEventListener('keydown', onKey);
++    };
++  }, [orderMenu]);
++
++  /*
++   * Arrow keys nudge whatever is selected. This is what makes an element
++   * that something larger is sitting on top of still movable: pick it in
++   * the layers panel, then walk it out from under the thing covering it.
++   * Shift takes bigger steps.
++   */
++  useEffect(() => {
++    if (!selected) return;
++
++    function onKeyDown(event) {
++      const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[
++        event.key
++      ];
++      if (!step) return;
++
++      // never steal the arrows from a field being typed in
++      const tag = event.target?.tagName;
++      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable) {
++        return;
++      }
++
++      const element = findElement(layout, selected.kind, selected.id);
++      if (!element || element.locked) return;
++
++      event.preventDefault();
++
++      const distance = event.shiftKey ? 5 : 0.5;
++      editor.setPosition(
++        selected.kind,
++        selected.id,
++        element.x + step[0] * distance,
++        element.y + step[1] * distance
++      );
++    }
++
++    window.addEventListener('keydown', onKeyDown);
++    return () => window.removeEventListener('keydown', onKeyDown);
++  }, [selected, layout, editor]);
++
++  function handleContextMenu(kind, id) {
++    return (event) => {
++      event.preventDefault();
++      event.stopPropagation();
++
++      select(kind, id);
++      setMultiSelected([]);
++      setOrderMenu({ kind, id, x: event.clientX, y: event.clientY });
++    };
++  }
++
++  function orderAndClose(direction) {
++    if (!orderMenu) return;
++    editor.moveLayer(orderMenu.kind, orderMenu.id, direction);
++    setOrderMenu(null);
++  }
++
++  function handleGroup() {
++    if (multiSelected.length < 2) return;
++    editor.groupElements(multiSelected);
++    setMultiSelected([]);
++  }
++
++  function handleSaveTemplate(event) {
++    event.preventDefault();
++    if (!templateName.trim()) return;
++
++    saveTemplate(templateName, layout);
++    setTemplates(loadTemplates());
++    setTemplateName('');
++    setTemplateModal(null);
++    showToast.success('Template saved.');
++  }
++
++  function handleApplyTemplate(id) {
++    const nextLayout = applyTemplate(id);
++    if (!nextLayout) {
++      showToast.error('That template is gone.');
++      return;
++    }
++
++    editor.replaceLayout(nextLayout);
++    setSelected(null);
++    setMultiSelected([]);
++    setTemplateModal(null);
++    showToast.success('Template applied to your draft.');
++  }
++
++  function handleDeleteTemplate(id) {
++    deleteTemplate(id);
++    setTemplates(loadTemplates());
++  }
++
++  /* Deselects first if the removed element was the one being edited. */
++  function deselectIfSelected(kind, id) {
++    setSelected((current) => (current?.kind === kind && current.id === id ? null : current));
++  }
++
++  function publish() {
++    publishBoardLayout(layout);
++    publishedSnapshotRef.current = JSON.stringify(layout);
++    setIsDirty(false);
++    showToast.success('Published to the live board.');
++  }
++
++  async function addPhotoAndSelect(file) {
++    const id = await editor.handleAddPhoto(file);
++    if (id) select('image', id);
++  }
++
++  function addTextAndSelect() {
++    select('text', editor.addText());
++  }
++
++  function addDividerAndSelect(orientation) {
++    select('divider', editor.addDivider(orientation));
++  }
++
++  function addShapeAndSelect(kind) {
++    select('shape', editor.addShape(kind));
++  }
++
++  function removePhoto(id) {
++    editor.removePhoto(id);
++    deselectIfSelected('image', id);
++  }
++
++  function removeText(id) {
++    editor.removeText(id);
++    deselectIfSelected('text', id);
++  }
++
++  function removeShape(id) {
++    editor.removeShape(id);
++    deselectIfSelected('shape', id);
++  }
++
++  function removeSelected() {
++    if (!selected) return;
++
++    const element = findElement(layout, selected.kind, selected.id);
++    if (element?.locked) {
++      showToast('That element is locked.');
++      return;
++    }
++
++    const outcome = editor.removeElement(selected.kind, selected.id);
++
++    if (outcome === 'hidden') {
++      showToast(`${describe(selected)} hidden - turn it back on from Layers.`);
++    }
++
++    setSelected(null);
++    setMultiSelected([]);
++  }
++
++  /* Copies the selected element, and selects the copy. */
++  function duplicateSelected() {
++    if (!selected) return;
++
++    const copyId = editor.duplicateElement(selected.kind, selected.id);
++
++    if (!copyId) {
++      showToast(`There can only be one ${describe(selected).toLowerCase()}.`);
++      return;
++    }
++
++    setSelected({ kind: selected.kind, id: copyId });
++    setMultiSelected([]);
++  }
++
++  /* A readable name for a selection, for messages. */
++  function describe(target) {
++    if (BOX_KINDS[target.kind]) return BOX_KINDS[target.kind].label;
++    if (target.kind === 'logo') return 'Logo';
++    return target.kind.charAt(0).toUpperCase() + target.kind.slice(1);
++  }
++
++  /*
++   * A divider's CSS. The grab area is padded out to a usable thickness even
++   * when the rule itself is a hairline, so a 1px line is still easy to hit.
++   */
++  function dividerStyle(divider) {
++    const vertical = divider.orientation !== 'horizontal';
++    const grab = Math.max(divider.thickness, 10);
++
++    return {
++      left: `${divider.x}%`,
++      top: `${divider.y}%`,
++      width: vertical ? `${grab}px` : `${divider.length}%`,
++      height: vertical ? `${divider.length}%` : `${grab}px`,
++      transform: 'translate(-50%, -50%)',
++    };
++  }
++
++  /* A positioned box's CSS - centred on its position, sized in percentages. */
++  function boxStyle(box) {
++    return {
++      left: `${box.x}%`,
++      top: `${box.y}%`,
++      width: `${box.width}%`,
++      ...(box.height === undefined ? {} : { height: `${box.height}%` }),
++      transform: 'translate(-50%, -50%)',
++    };
++  }
++
++  /* Selecting on the canvas and starting a drag are the same gesture. */
++  function grab(kind, id) {
++    return (event) => {
++      select(kind, id);
++      editor.beginDrag(kind, id)(event);
++    };
++  }
++
++  /* The layers panel's label, icon, and underlying data object for one
++     layerOrder entry - null if it names something that no longer exists. */
++  function layerInfo(entry) {
++    if (entry.kind === 'logo') {
++      return { label: 'Logo', Icon: ImageIcon, element: layout.logo };
++    }
++
++    if (entry.kind === 'candidates') {
++      return { label: 'Candidate Board', Icon: UsersRound, element: layout.candidates };
++    }
++
++    if (entry.kind === 'announcements') {
++      return { label: 'Announcements', Icon: Megaphone, element: layout.announcements };
++    }
++
++    if (entry.kind === 'divider') {
++      const index = layout.dividers.findIndex((item) => item.id === entry.id);
++      if (index < 0) return null;
++      return {
++        label: `Divider ${index + 1}`,
++        Icon: SeparatorVertical,
++        element: layout.dividers[index],
++      };
++    }
++
++    if (entry.kind === 'text') {
++      const index = layout.texts.findIndex((item) => item.id === entry.id);
++      if (index < 0) return null;
++      return { label: `Text ${index + 1}`, Icon: Type, element: layout.texts[index] };
++    }
++
++    if (entry.kind === 'image') {
++      const index = layout.images.findIndex((item) => item.id === entry.id);
++      if (index < 0) return null;
++      return { label: `Photo ${index + 1}`, Icon: ImagePlus, element: layout.images[index] };
++    }
++
++    if (entry.kind === 'shape') {
++      const index = layout.shapes.findIndex((item) => item.id === entry.id);
++      if (index < 0) return null;
++      const shape = layout.shapes[index];
++      return { label: shapeLabels[index], Icon: SHAPE_ICONS[shape.kind] ?? Square, element: shape };
++    }
++
++    return null;
++  }
++
++  /*
++   * One entry of layerOrder, drawn on the canvas - 'candidates' is handled
++   * separately inline, since its markup is a fixed, non-draggable block.
++   */
++  function renderLayerEntry(entry) {
++    if (entry.kind === 'divider') {
++      const divider = layout.dividers.find((item) => item.id === entry.id);
++      if (!divider || !isVisible(divider)) return null;
++
++      const selectedOnCanvas = isSelected('divider', divider.id);
++
++      return (
++        <div
++          key={divider.id}
++          className={`vb-box vb-divider-box ${
++            divider.orientation === 'horizontal' ? 'is-horizontal' : ''
++          } ${selectedOnCanvas ? 'selected' : ''} ${
++            isMultiSelected('divider', divider.id) ? 'multi-selected' : ''
++          }`}
++          style={dividerStyle(divider)}
++          onPointerDown={handlePointerDown('divider', divider.id)}
++          onContextMenu={handleContextMenu('divider', divider.id)}
++        >
++          <span className="vb-divider-line" aria-hidden="true" />
++
++          {selectedOnCanvas && (
++            <span
++              className="vb-shape-resize"
++              title="Drag to set its length"
++              onPointerDown={editor.beginDividerResize(divider.id)}
++            />
++          )}
++        </div>
++      );
++    }
++
++    if (entry.kind === 'candidates') {
++      const box = layout.candidates;
++      if (!isVisible(box)) return null;
++
++      const selectedOnCanvas = isSelected('candidates');
++
++      return (
++        <div
++          key="candidates"
++          className={`vb-box vb-candidates ${selectedOnCanvas ? 'selected' : ''} ${
++            isMultiSelected('candidates') ? 'multi-selected' : ''
++          }`}
++          style={boxStyle(box)}
++          onPointerDown={handlePointerDown('candidates', null)}
++          onContextMenu={handleContextMenu('candidates', null)}
++        >
++          {candidates.length === 0 ? (
++            <span className="vb-candidates-empty">No candidates currently shown</span>
++          ) : (
++            <div className="vb-candidate-preview-grid">
++              {candidates.slice(0, 4).map((candidate) => (
++                <div key={candidate.id} className="vb-candidate-preview-card">
++                  <div className="vb-candidate-preview-photo">
++                    {candidate.photo_url ? (
++                      <img src={candidate.photo_url} alt="" />
++                    ) : (
++                      <UsersRound size={14} />
++                    )}
++                  </div>
++                  <div className="vb-candidate-preview-name">{candidate.name}</div>
++                </div>
++              ))}
++            </div>
++          )}
++
++          {selectedOnCanvas && (
++            <span
++              className="vb-shape-resize"
++              title="Drag to resize"
++              onPointerDown={editor.beginResizeBox('candidates')}
++            />
++          )}
++        </div>
++      );
++    }
++
++    if (entry.kind === 'announcements') {
++      const box = layout.announcements;
++      if (!isVisible(box)) return null;
++
++      const selectedOnCanvas = isSelected('announcements');
++
++      return (
++        <div
++          key="announcements"
++          className={`vb-box vb-announcements ${selectedOnCanvas ? 'selected' : ''} ${
++            isMultiSelected('announcements') ? 'multi-selected' : ''
++          }`}
++          style={boxStyle(box)}
++          onPointerDown={handlePointerDown('announcements', null)}
++          onContextMenu={handleContextMenu('announcements', null)}
++        >
++          <Megaphone size={14} aria-hidden="true" />
++          <span>Announcements</span>
++
++          {selectedOnCanvas && (
++            <span
++              className="vb-shape-resize"
++              title="Drag to resize"
++              onPointerDown={editor.beginResizeBox('announcements')}
++            />
++          )}
++        </div>
++      );
++    }
++
++    if (entry.kind === 'logo') {
++      if (!isVisible(layout.logo)) return null;
++
++      return (
++        <button
++          key="logo"
++          type="button"
++          className={`vb-element ${isSelected('logo') ? 'selected' : ''} ${
++            isMultiSelected('logo') ? 'multi-selected' : ''
++          }`}
++          style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
++          onPointerDown={handlePointerDown('logo')}
++          onContextMenu={handleContextMenu('logo', null)}
++        >
++          <img src={layout.logo.url || '/visual/logo.png'} alt="" className="vb-logo-img" />
++
++          {isSelected('logo') && (
++            <span
++              className="vb-shape-resize"
++              title="Drag to resize"
++              onPointerDown={editor.beginScaleResize('logo', null, LOGO_BASE_WIDTH)}
++            />
++          )}
++        </button>
++      );
++    }
++
++    if (entry.kind === 'text') {
++      const text = layout.texts.find((item) => item.id === entry.id);
++      if (!text || !isVisible(text)) return null;
++
++      return (
++        <button
++          key={text.id}
++          type="button"
++          className={`vb-element ${isSelected('text', text.id) ? 'selected' : ''} ${
++            isMultiSelected('text', text.id) ? 'multi-selected' : ''
++          }`}
++          style={positionStyle(text)}
++          onPointerDown={handlePointerDown('text', text.id)}
++          onContextMenu={handleContextMenu('text', text.id)}
++        >
++          <span style={resolveTextStyle(text)}>{text.text}</span>
++
++          {isSelected('text', text.id) && (
++            <span
++              className="vb-shape-resize"
++              title="Drag to resize"
++              onPointerDown={editor.beginFontResize(text.id)}
++            />
++          )}
++        </button>
++      );
++    }
++
++    if (entry.kind === 'image') {
++      const image = layout.images.find((item) => item.id === entry.id);
++      if (!image || !isVisible(image)) return null;
++
++      return (
++        <button
++          key={image.id}
++          type="button"
++          className={`vb-element ${isSelected('image', image.id) ? 'selected' : ''} ${
++            isMultiSelected('image', image.id) ? 'multi-selected' : ''
++          }`}
++          style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
++          onPointerDown={handlePointerDown('image', image.id)}
++          onContextMenu={handleContextMenu('image', image.id)}
++        >
++          <img src={image.url} alt="" className="vb-photo-img" />
++
++          {isSelected('image', image.id) && (
++            <span
++              className="vb-shape-resize"
++              title="Drag to resize"
++              onPointerDown={editor.beginScaleResize('image', image.id, PHOTO_BASE_WIDTH)}
++            />
++          )}
++        </button>
++      );
++    }
++
++    if (entry.kind === 'shape') {
++      const shape = layout.shapes.find((item) => item.id === entry.id);
++      if (!shape || !isVisible(shape)) return null;
++
++      const isEmptyFrame = shape.fill.type === 'image' && !shape.fill.url;
++      const selectedOnCanvas = isSelected('shape', shape.id);
++
++      return (
++        <div
++          key={shape.id}
++          className={`vb-shape ${selectedOnCanvas ? 'selected' : ''} ${
++            isEmptyFrame ? 'is-empty-frame' : ''
++          } ${isMultiSelected('shape', shape.id) ? 'multi-selected' : ''}`}
++          style={resolveShapeStyle(shape)}
++          onPointerDown={handlePointerDown('shape', shape.id)}
++          onContextMenu={handleContextMenu('shape', shape.id)}
++        >
++          {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
++
++          {selectedOnCanvas && (
++            <span
++              className="vb-shape-resize"
++              title="Drag to resize"
++              onPointerDown={editor.beginResize(shape.id)}
++            />
++          )}
++        </div>
++      );
++    }
++
++    return null;
++  }
++
++  const selectedImage =
++    selected?.kind === 'image' ? layout.images.find((image) => image.id === selected.id) : null;
++  const selectedText =
++    selected?.kind === 'text' ? layout.texts.find((text) => text.id === selected.id) : null;
++  const selectedShape =
++    selected?.kind === 'shape' ? layout.shapes.find((shape) => shape.id === selected.id) : null;
++
++  const selectedDivider =
++    selected?.kind === 'divider'
++      ? layout.dividers.find((divider) => divider.id === selected.id)
++      : null;
++
++  const selectedElement =
++    selected?.kind === 'logo'
++      ? layout.logo
++      : selected?.kind === 'image'
++        ? selectedImage
++        : selected?.kind === 'text'
++          ? selectedText
++          : selected?.kind === 'divider'
++            ? selectedDivider
++            : selectedShape;
++
++  const isTextSelected = selected?.kind === 'text';
++  const shapeLabels = labelShapes(layout.shapes);
++
++  return (
++    <>
++      <header className="dashboard-header">
++        <div>
++        
++        </div>
++      </header>
++
++      <section className="panel table-panel">
++        <div className="panel-header">
++          <div className="panel-title-area">
++            <div className="panel-title-icon">
++              <LayoutTemplate size={12} strokeWidth={2.2} />
++            </div>
++            <div>
++              <h2 className="panel-title">Visual Board</h2>
++              <p className={`panel-subtitle ${isDirty ? 'vb-unpublished' : ''}`}>
++                {isDirty ? 'Unpublished changes' : 'Up to date with the live board'}
++              </p>
++            </div>
++          </div>
++
++          <div className="panel-actions">
++            <button type="button" className="secondary-button" onClick={editor.resetLayout}>
++              <RotateCcw size={12} />
++              Reset
++            </button>
++            <a href="/visual" target="_blank" rel="noopener noreferrer" className="secondary-button">
++              Preview
++              <ExternalLink size={11} />
++            </a>
++            <button type="button" className="primary-button" onClick={publish} disabled={!isDirty}>
++              Publish
++            </button>
++          </div>
++        </div>
++
++        {/* ================= TOOLBAR ================= */}
++
++        <div className="vb-toolbar">
++          <div className="vb-toolbar-group">
++            <button
++              type="button"
++              className="vb-toolbar-button"
++              onClick={editor.undo}
++              disabled={!editor.canUndo}
++              title="Undo"
++              aria-label="Undo"
++            >
++              <Undo2 size={15} />
++            </button>
++            <button
++              type="button"
++              className="vb-toolbar-button"
++              onClick={editor.redo}
++              disabled={!editor.canRedo}
++              title="Redo"
++              aria-label="Redo"
++            >
++              <Redo2 size={15} />
++            </button>
++          </div>
++
++          <span className="vb-toolbar-divider" aria-hidden="true" />
++
++          <select
++            className="form-select vb-toolbar-zoom"
++            value={zoom}
++            onChange={(event) => setZoom(event.target.value)}
++            aria-label="Zoom"
++          >
++            {ZOOM_OPTIONS.map((option) => (
++              <option key={option.value} value={option.value}>
++                {option.label}
++              </option>
++            ))}
++          </select>
++
++          <span className="vb-toolbar-divider" aria-hidden="true" />
++
++          <div className="vb-toolbar-group">
++            <button
++              type="button"
++              className={`vb-toolbar-button ${showGrid ? 'active' : ''}`}
++              onClick={() => setShowGrid((current) => !current)}
++              aria-pressed={showGrid}
++              title="Toggle grid"
++            >
++              <Grid3x3 size={15} />
++              <span>Grid</span>
++            </button>
++            <button
++              type="button"
++              className={`vb-toolbar-button ${snapEnabled ? 'active' : ''}`}
++              onClick={() => setSnapEnabled((current) => !current)}
++              aria-pressed={snapEnabled}
++              title="Snap to center, edges, grid, and other elements"
++            >
++              <Magnet size={15} />
++              <span>Snap</span>
++            </button>
++          </div>
++
++          <span className="vb-toolbar-spacer" />
++
++          <button
++            type="button"
++            className="vb-toolbar-button"
++            onClick={() => setTemplateModal('save')}
++            title="Save the current board as a template"
++          >
++            <Save size={15} />
++            <span>Save Template</span>
++          </button>
++          <button
++            type="button"
++            className="vb-toolbar-button"
++            onClick={() => setTemplateModal('apply')}
++            title="Apply a saved template"
++          >
++            <FolderOpen size={15} />
++            <span>Apply Template</span>
++          </button>
++
++          <span className="vb-toolbar-divider" aria-hidden="true" />
++
++          <button
++            type="button"
++            className="vb-toolbar-button"
++            onClick={toggleFullscreen}
++            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
++          >
++            {isFullscreen ? <Minimize size={15} /> : <Maximize size={15} />}
++            <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
++          </button>
++        </div>
++
++        <div className="vb-layout" ref={layoutRef}>
++          {/* ================= ELEMENTS ================= */}
++
++          <div className="vb-elements-col">
++            <div className="vb-rail">
++              {RAIL_TABS.map((tab) => {
++                const Icon = tab.icon;
++                return (
++                  <button
++                    key={tab.id}
++                    type="button"
++                    className={`vb-rail-button ${activePanel === tab.id ? 'active' : ''}`}
++                    onClick={() => setActivePanel(tab.id)}
++                  >
++                    <Icon size={18} strokeWidth={1.8} />
++                    <span>{tab.label}</span>
++                  </button>
++                );
++              })}
++            </div>
++
++            <div className="vb-panel">
++              {activePanel === 'elements' && (
++                <>
++                  <p className="vb-panel-label">Add a divider</p>
++                  <div className="vb-shape-grid">
++                    <button
++                      type="button"
++                      className="vb-shape-grid-button"
++                      onClick={() => addDividerAndSelect('vertical')}
++                    >
++                      <SeparatorVertical size={16} />
++                      <span>Vertical</span>
++                    </button>
++                    <button
++                      type="button"
++                      className="vb-shape-grid-button"
++                      onClick={() => addDividerAndSelect('horizontal')}
++                    >
++                      <SeparatorHorizontal size={16} />
++                      <span>Horizontal</span>
++                    </button>
++                  </div>
++
++                  <p className="vb-panel-label">Add a shape</p>
++                  <div className="vb-shape-grid">
++                    {SHAPE_KINDS.map((option) => {
++                      const Icon = SHAPE_ICONS[option.value] ?? Square;
++                      return (
++                        <button
++                          key={option.value}
++                          type="button"
++                          className="vb-shape-grid-button"
++                          onClick={() => addShapeAndSelect(option.value)}
++                        >
++                          <Icon size={16} />
++                          <span>{option.label}</span>
++                        </button>
++                      );
++                    })}
++                  </div>
++
++                  {layout.shapes.length > 0 && (
++                    <>
++                      <p className="vb-panel-label">On the board</p>
++                      {layout.shapes.map((shape, index) => {
++                        const Icon = SHAPE_ICONS[shape.kind] ?? Square;
++
++                        return (
++                          <div
++                            key={shape.id}
++                            className={`vb-element-row-wrap ${isSelected('shape', shape.id) ? 'active' : ''}`}
++                          >
++                            <button
++                              type="button"
++                              className={`vb-element-row ${isVisible(shape) ? '' : 'is-hidden'}`}
++                              onClick={() => select('shape', shape.id)}
++                            >
++                              <Icon size={14} />
++                              {shapeLabels[index]}
++                            </button>
++                            <button
++                              type="button"
++                              className="vb-element-remove"
++                              onClick={() => removeShape(shape.id)}
++                              aria-label={`Remove ${shapeLabels[index]}`}
++                            >
++                              <X size={12} />
++                            </button>
++                          </div>
++                        );
++                      })}
++                    </>
++                  )}
++                </>
++              )}
++
++              {activePanel === 'text' && (
++                <>
++                  <button type="button" className="vb-panel-add" onClick={addTextAndSelect}>
++                    <Plus size={14} />
++                    Add Text
++                  </button>
++
++                  {layout.texts.length > 0 && (
++                    <>
++                      <p className="vb-panel-label">On the board</p>
++                      {layout.texts.map((text, index) => (
++                        <div
++                          key={text.id}
++                          className={`vb-element-row-wrap ${isSelected('text', text.id) ? 'active' : ''}`}
++                        >
++                          <button
++                            type="button"
++                            className={`vb-element-row ${isVisible(text) ? '' : 'is-hidden'}`}
++                            onClick={() => select('text', text.id)}
++                          >
++                            <Type size={14} />
++                            Text {index + 1}
++                          </button>
++                          <button
++                            type="button"
++                            className="vb-element-remove"
++                            onClick={() => removeText(text.id)}
++                            aria-label={`Remove Text ${index + 1}`}
++                          >
++                            <X size={12} />
++                          </button>
++                        </div>
++                      ))}
++                    </>
++                  )}
++                </>
++              )}
++
++              {activePanel === 'brand' && (
++                <>
++                  <p className="vb-panel-label">Board identity</p>
++
++                  <button
++                    type="button"
++                    className={`vb-element-row ${isSelected('logo') ? 'active' : ''} ${
++                      isVisible(layout.logo) ? '' : 'is-hidden'
++                    }`}
++                    onClick={() => select('logo')}
++                  >
++                    <ImageIcon size={14} />
++                    Logo
++                  </button>
++
++                  <button
++                    type="button"
++                    className={`vb-element-row ${isSelected('candidates') ? 'active' : ''}`}
++                    onClick={() => select('candidates')}
++                  >
++                    <UsersRound size={14} />
++                    Candidate Board
++                  </button>
++                </>
++              )}
++
++              {activePanel === 'uploads' && (
++                <>
++                  <label htmlFor="vb-add-photo" className="vb-panel-add">
++                    <Plus size={14} />
++                    Add Photo
++                  </label>
++                  <input
++                    id="vb-add-photo"
++                    type="file"
++                    accept="image/png,image/jpeg,image/webp"
++                    style={{ display: 'none' }}
++                    onChange={(event) => {
++                      void addPhotoAndSelect(event.target.files?.[0] ?? null);
++                      event.target.value = '';
++                    }}
++                  />
++
++                  {layout.images.length > 0 && (
++                    <>
++                      <p className="vb-panel-label">Uploaded</p>
++                      {layout.images.map((image, index) => (
++                        <div
++                          key={image.id}
++                          className={`vb-element-row-wrap ${isSelected('image', image.id) ? 'active' : ''}`}
++                        >
++                          <button
++                            type="button"
++                            className={`vb-element-row ${isVisible(image) ? '' : 'is-hidden'}`}
++                            onClick={() => select('image', image.id)}
++                          >
++                            <ImagePlus size={14} />
++                            Photo {index + 1}
++                          </button>
++                          <button
++                            type="button"
++                            className="vb-element-remove"
++                            onClick={() => removePhoto(image.id)}
++                            aria-label={`Remove Photo ${index + 1}`}
++                          >
++                            <X size={12} />
++                          </button>
++                        </div>
++                      ))}
++                    </>
++                  )}
++                </>
++              )}
++
++              {activePanel === 'layers' && (
++                <>
++                  <p className="vb-panel-label">Front to back</p>
++                  {[...layout.layerOrder].reverse().map((entry, displayIndex, list) => {
++                    const info = layerInfo(entry);
++                    if (!info) return null;
++
++                    const key = `${entry.kind}:${entry.id ?? ''}`;
++                    const canLockOrHide = true;
++                    const visible = info.element ? isVisible(info.element) : true;
++                    const locked = info.element?.locked ?? false;
++                    const Icon = info.Icon;
++
++                    return (
++                      <div
++                        key={key}
++                        className={`vb-layer-row ${isSelected(entry.kind, entry.id) ? 'active' : ''}`}
++                      >
++                        <button
++                          type="button"
++                          className="vb-layer-icon-button"
++                          disabled={!canLockOrHide}
++                          onClick={() => editor.toggleVisible(entry.kind, entry.id)}
++                          aria-label={visible ? `Hide ${info.label}` : `Show ${info.label}`}
++                        >
++                          {visible ? <Eye size={13} /> : <EyeOff size={13} />}
++                        </button>
++
++                        <button
++                          type="button"
++                          className="vb-layer-icon-button"
++                          disabled={!canLockOrHide}
++                          onClick={() => editor.setLocked(entry.kind, entry.id, !locked)}
++                          aria-label={locked ? `Unlock ${info.label}` : `Lock ${info.label}`}
++                        >
++                          {locked ? <Lock size={13} /> : <LockOpen size={13} />}
++                        </button>
++
++                        <button
++                          type="button"
++                          className="vb-layer-name"
++                          onClick={() => select(entry.kind, entry.id)}
++                        >
++                          <Icon size={13} />
++                          <span>{info.label}</span>
++                        </button>
++
++                        <div className="vb-layer-move">
++                          <button
++                            type="button"
++                            className="vb-layer-icon-button"
++                            disabled={displayIndex === 0}
++                            onClick={() => editor.moveLayer(entry.kind, entry.id, 'front')}
++                            aria-label={`Bring ${info.label} to front`}
++                            title="Bring to front"
++                          >
++                            <ChevronsUp size={13} />
++                          </button>
++                          <button
++                            type="button"
++                            className="vb-layer-icon-button"
++                            disabled={displayIndex === 0}
++                            onClick={() => editor.moveLayer(entry.kind, entry.id, 'up')}
++                            aria-label={`Bring ${info.label} forward`}
++                            title="Bring forward"
++                          >
++                            <ChevronUp size={13} />
++                          </button>
++                          <button
++                            type="button"
++                            className="vb-layer-icon-button"
++                            disabled={displayIndex === list.length - 1}
++                            onClick={() => editor.moveLayer(entry.kind, entry.id, 'down')}
++                            aria-label={`Send ${info.label} backward`}
++                            title="Send backward"
++                          >
++                            <ChevronDown size={13} />
++                          </button>
++                          <button
++                            type="button"
++                            className="vb-layer-icon-button"
++                            disabled={displayIndex === list.length - 1}
++                            onClick={() => editor.moveLayer(entry.kind, entry.id, 'back')}
++                            aria-label={`Send ${info.label} to back`}
++                            title="Send to back"
++                          >
++                            <ChevronsDown size={13} />
++                          </button>
++                        </div>
++                      </div>
++                    );
++                  })}
++                </>
++              )}
++            </div>
++          </div>
++
++          {/* ================= CANVAS ================= */}
++
++          <div className="vb-canvas-col">
++            <div className="vb-canvas-stage" ref={stageRef}>
++              <div
++                className={`vb-canvas ${showGrid ? 'show-grid' : ''}`}
++                ref={canvasRef}
++                /*
++                 * Height-driven, so the board fills the stage down to the
++                 * bottom and its 16:9 ratio gives the width. Zoom scales
++                 * that height; "fit" is simply all of it.
++                 */
++                style={{ height: `${zoom === 'fit' ? 100 : Number(zoom) * 100}%` }}
++              >
++                {/*
++                  One free-form surface, matching the live board: every
++                  element is positioned against it, and pressing the empty
++                  canvas clears the selection.
++
++                  This listens for pointerdown rather than click because a
++                  click that starts on an element and ends on the background
++                  is reported against their common ancestor, which would drop
++                  the selection every time an element was dragged into space.
++                */}
++                <div
++                  className="vb-canvas-surface"
++                  ref={middleColumnRef}
++                  onPointerDown={(event) => {
++                    if (event.target === event.currentTarget) {
++                      setSelected(null);
++                      setMultiSelected([]);
++                    }
++                  }}
++                >
++                  {layout.layerOrder.map(renderLayerEntry)}
++
++                  {editor.centerGuide.x && <div className="vb-guide vb-guide-vertical" aria-hidden="true" />}
++                  {editor.centerGuide.y && <div className="vb-guide vb-guide-horizontal" aria-hidden="true" />}
++                </div>
++              </div>
++            </div>
++
++            <p className="vb-canvas-hint">
++              Click an element to select it, drag to move it, and drag a selected shape's corner
++              to resize it. Changes save to your draft as you go - click Publish to put them on
++              the live board.
++            </p>
++          </div>
++
++          {/* ================= PROPERTIES ================= */}
++
++          <div className="vb-properties">
++            {multiSelected.length >= 2 ? (
++              <>
++                <h3 className="vb-properties-title">{multiSelected.length} Elements Selected</h3>
++                <p className="vb-properties-hint">
++                  Group them so dragging any one moves the rest together.
++                </p>
++                <button type="button" className="primary-button vb-group-button" onClick={handleGroup}>
++                  <Group size={13} />
++                  Group Selected
++                </button>
++              </>
++            ) : !selected ? (
++              <div className="vb-properties-empty">
++                <LayoutTemplate size={22} />
++                <p>
++                  Select an element on the canvas or from the list on the left. Shift-click to
++                  select more than one and group them.
++                </p>
++              </div>
++            ) : BOX_KINDS[selected.kind] ? (
++              (() => {
++                const box = layout[selected.kind];
++
++                return (
++                  <>
++                    <h3 className="vb-properties-title">
++                      {BOX_KINDS[selected.kind].label}
++                    </h3>
++                    <p className="vb-properties-hint">
++                      {BOX_KINDS[selected.kind].hint}
++                    </p>
++
++                    <div className="vb-field-row">
++                      <label htmlFor="vb-box-x">
++                        X %
++                        <input
++                          id="vb-box-x"
++                          className="form-input"
++                          type="number"
++                          min="0"
++                          max="100"
++                          step="0.5"
++                          value={Number(box.x.toFixed(1))}
++                          onChange={(event) =>
++                            editor.updateElement(selected.kind, null, {
++                              x: Number(event.target.value),
++                            })
++                          }
++                        />
++                      </label>
++                      <label htmlFor="vb-box-y">
++                        Y %
++                        <input
++                          id="vb-box-y"
++                          className="form-input"
++                          type="number"
++                          min="0"
++                          max="100"
++                          step="0.5"
++                          value={Number(box.y.toFixed(1))}
++                          onChange={(event) =>
++                            editor.updateElement(selected.kind, null, {
++                              y: Number(event.target.value),
++                            })
++                          }
++                        />
++                      </label>
++                    </div>
++
++                    <div className="vb-field-row">
++                      {box.width !== undefined && (
++                        <label htmlFor="vb-box-w">
++                          W %
++                          <input
++                            id="vb-box-w"
++                            className="form-input"
++                            type="number"
++                            min="1"
++                            max="100"
++                            step="0.5"
++                            value={Number(box.width.toFixed(1))}
++                            onChange={(event) =>
++                              editor.updateElement(selected.kind, null, {
++                                width: Number(event.target.value),
++                              })
++                            }
++                          />
++                        </label>
++                      )}
++
++                      {box.height !== undefined && (
++                        <label htmlFor="vb-box-h">
++                          H %
++                          <input
++                            id="vb-box-h"
++                            className="form-input"
++                            type="number"
++                            min="8"
++                            max="100"
++                            step="0.5"
++                            value={Number(box.height.toFixed(1))}
++                            onChange={(event) =>
++                              editor.updateElement(selected.kind, null, {
++                                height: Number(event.target.value),
++                              })
++                            }
++                          />
++                        </label>
++                      )}
++                    </div>
++
++                    {box.secondsPerCard !== undefined && (
++                      <div className="vb-field-row">
++                        <label htmlFor="vb-carousel-speed">
++                          Carousel seconds per card
++                          <input
++                            id="vb-carousel-speed"
++                            className="form-input"
++                            type="number"
++                            min="0.5"
++                            max="30"
++                            step="0.5"
++                            value={box.secondsPerCard}
++                            onChange={(event) =>
++                              editor.updateElement(selected.kind, null, {
++                                secondsPerCard: Number(event.target.value),
++                              })
++                            }
++                          />
++                        </label>
++                      </div>
++                    )}
++
++                    {box.secondsPerCard !== undefined && (
++                      <input
++                        className="vb-range"
++                        type="range"
++                        min="0.5"
++                        max="12"
++                        step="0.5"
++                        value={box.secondsPerCard}
++                        aria-label="Carousel speed"
++                        onChange={(event) =>
++                          editor.updateElement(selected.kind, null, {
++                            secondsPerCard: Number(event.target.value),
++                          })
++                        }
++                      />
++                    )}
++
++                    <div className="vb-element-actions">
++                      <button
++                        type="button"
++                        className="delete-button vb-remove-button"
++                        onClick={removeSelected}
++                        title="Remove (Delete)"
++                      >
++                        <Trash2 size={12} />
++                        Remove from board
++                      </button>
++                    </div>
++                  </>
++                );
++              })()
++            ) : !selectedElement ? (
++              <div className="vb-properties-empty">
++                <LayoutTemplate size={22} />
++                <p>That element is no longer on the board.</p>
++              </div>
++            ) : (
++              <>
++                <h3 className="vb-properties-title">
++                  {propertiesTitle(selected.kind, selectedShape)}
++                </h3>
++
++                <label className="settings-option">
++                  <span>
++                    <strong>Visible on board</strong>
++                  </span>
++                  <input
++                    type="checkbox"
++                    checked={isVisible(selectedElement)}
++                    onChange={() => editor.toggleVisible(selected.kind, selected.id)}
++                  />
++                </label>
++
++                {selectedElement.groupId && (
++                  <div className="vb-group-note">
++                    <p>Grouped - dragging this moves the whole group together.</p>
++                    <button
++                      type="button"
++                      className="secondary-button"
++                      onClick={() => editor.ungroup(selectedElement.groupId)}
++                    >
++                      <Ungroup size={13} />
++                      Ungroup
++                    </button>
++                  </div>
++                )}
++
++                {selected.kind === 'text' && (
++                  <div className="form-group">
++                    <label className="form-label" htmlFor="vb-extra-text">
++                      Text
++                    </label>
++                    <textarea
++                      id="vb-extra-text"
++                      className="form-input form-textarea"
++                      rows={3}
++                      value={selectedText.text}
++                      onChange={(event) => editor.setTextContent(selected.id, event.target.value)}
++                    />
++                  </div>
++                )}
++
++                {selected.kind === 'logo' && (
++                  <div className="form-group">
++                    <label className="form-label" htmlFor="vb-logo-upload">
++                      Image
++                    </label>
++                    <div className="photo-upload">
++                      <label htmlFor="vb-logo-upload" className="photo-upload-box">
++                        <input
++                          id="vb-logo-upload"
++                          type="file"
++                          accept="image/png,image/jpeg,image/webp"
++                          onChange={(event) => {
++                            void editor.handleLogoUpload(event.target.files?.[0] ?? null);
++                            event.target.value = '';
++                          }}
++                        />
++                        <div className="photo-upload-content">
++                          <span className="photo-upload-title">
++                            {layout.logo.url ? 'Replace logo' : 'Upload a custom logo'}
++                          </span>
++                          <span className="photo-upload-subtitle">PNG, JPG or WEBP</span>
++                        </div>
++                      </label>
++
++                      {layout.logo.url && (
++                        <button type="button" className="secondary-button" onClick={editor.resetLogo}>
++                          Use default
++                        </button>
++                      )}
++                    </div>
++                  </div>
++                )}
++
++                {selected.kind === 'image' && (
++                  <img src={selectedImage.url} alt="" className="vb-properties-thumb" />
++                )}
++
++                {selected.kind === 'shape' && (
++                  <>
++                    <div className="form-group">
++                      <label className="form-label" htmlFor="vb-shape-kind">
++                        Shape
++                      </label>
++                      <select
++                        id="vb-shape-kind"
++                        className="form-select"
++                        value={selectedShape.kind}
++                        onChange={(event) =>
++                          editor.updateShape(selected.id, { kind: event.target.value })
++                        }
++                      >
++                        {SHAPE_KINDS.map((option) => (
++                          <option key={option.value} value={option.value}>
++                            {option.label}
++                          </option>
++                        ))}
++                      </select>
++                    </div>
++                  </>
++                )}
++
++                {isTextSelected && (
++                  <>
++                    <div className="form-group">
++                      <label className="form-label" htmlFor="vb-font">
++                        Font
++                      </label>
++                      <select
++                        id="vb-font"
++                        className="form-select"
++                        value={selectedElement.style.fontFamily}
++                        onChange={(event) =>
++                          editor.setTextStyle(selected.kind, selected.id, {
++                            fontFamily: event.target.value,
++                          })
++                        }
++                      >
++                        {FONT_OPTIONS.map((option) => (
++                          <option key={option.value} value={option.value} style={{ fontFamily: option.stack }}>
++                            {option.label}
++                          </option>
++                        ))}
++                      </select>
++                    </div>
++
++                    <div className="vb-field-row">
++                      <label htmlFor="vb-weight">
++                        Weight
++                        <select
++                          id="vb-weight"
++                          className="form-select"
++                          value={selectedElement.style.weight}
++                          onChange={(event) =>
++                            editor.setTextStyle(selected.kind, selected.id, {
++                              weight: Number(event.target.value),
++                            })
++                          }
++                        >
++                          {WEIGHT_OPTIONS.map((option) => (
++                            <option key={option.value} value={option.value}>
++                              {option.label}
++                            </option>
++                          ))}
++                        </select>
++                      </label>
++
++                      <label htmlFor="vb-case">
++                        Case
++                        <select
++                          id="vb-case"
++                          className="form-select"
++                          value={selectedElement.style.textCase}
++                          onChange={(event) =>
++                            editor.setTextStyle(selected.kind, selected.id, {
++                              textCase: event.target.value,
++                            })
++                          }
++                        >
++                          {CASE_OPTIONS.map((option) => (
++                            <option key={option.value} value={option.value}>
++                              {option.label}
++                            </option>
++                          ))}
++                        </select>
++                      </label>
++                    </div>
++
++                    <div className="form-group">
++                      <label className="form-label">Letter spacing</label>
++                      <div className="scale-field">
++                        <input
++                          type="range"
++                          min="-0.05"
++                          max="0.4"
++                          step="0.005"
++                          value={selectedElement.style.letterSpacing ?? 0}
++                          onChange={(event) =>
++                            editor.setTextStyle(selected.kind, selected.id, {
++                              letterSpacing: Number(event.target.value),
++                            })
++                          }
++                        />
++                        <span className="scale-field-value">
++                          {(selectedElement.style.letterSpacing ?? 0).toFixed(3)}em
++                        </span>
++                      </div>
++                    </div>
++
++                    <div className="form-group">
++                      <label className="form-label">Line height</label>
++                      <div className="scale-field">
++                        <input
++                          type="range"
++                          min="0.9"
++                          max="2"
++                          step="0.05"
++                          value={selectedElement.style.lineHeight ?? 1.35}
++                          onChange={(event) =>
++                            editor.setTextStyle(selected.kind, selected.id, {
++                              lineHeight: Number(event.target.value),
++                            })
++                          }
++                        />
++                        <span className="scale-field-value">
++                          {(selectedElement.style.lineHeight ?? 1.35).toFixed(2)}
++                        </span>
++                      </div>
++                    </div>
++
++                    <div className="form-group">
++                      <label className="form-label">Alignment</label>
++                      <div className="vb-segment">
++                        {ALIGN_OPTIONS.map((option) => {
++                          const Icon = ALIGN_ICONS[option.value];
++                          return (
++                            <button
++                              key={option.value}
++                              type="button"
++                              className={`vb-segment-button ${
++                                selectedElement.style.align === option.value ? 'active' : ''
++                              }`}
++                              title={option.label}
++                              aria-label={option.label}
++                              onClick={() =>
++                                editor.setTextStyle(selected.kind, selected.id, {
++                                  align: option.value,
++                                })
++                              }
++                            >
++                              <Icon size={14} />
++                            </button>
++                          );
++                        })}
++                      </div>
++                    </div>
++                  </>
++                )}
++
++                {(isTextSelected || selected.kind === 'shape') && (
++                  <div className="form-group">
++                    <label className="form-label">Fill</label>
++                    <FillEditor
++                      fill={
++                        selected.kind === 'shape'
++                          ? selectedShape.fill
++                          : selectedElement.style.fill
++                      }
++                      allowImage={selected.kind === 'shape'}
++                      uploadId="vb-fill-photo"
++                      onUploadImage={(file) => editor.handleFramePhoto(selected.id, file)}
++                      onChange={(fill) => editor.setFill(selected.kind, selected.id, fill)}
++                    />
++                  </div>
++                )}
++
++                {isTextSelected && (
++                  <div className="form-group">
++                    <label className="form-label" htmlFor="vb-shadow">
++                      Shadow
++                    </label>
++                    <select
++                      id="vb-shadow"
++                      className="form-select"
++                      value={selectedElement.style.shadow}
++                      onChange={(event) =>
++                        editor.setTextStyle(selected.kind, selected.id, {
++                          shadow: event.target.value,
++                        })
++                      }
++                    >
++                      {SHADOW_OPTIONS.map((option) => (
++                        <option key={option.value} value={option.value}>
++                          {option.label}
++                        </option>
++                      ))}
++                    </select>
++                  </div>
++                )}
++
++                {selected.kind === 'text' && selectedElement && (
++                  <div className="vb-field-row">
++                    <label htmlFor="vb-text-box-width">
++                      Box width %
++                      <input
++                        id="vb-text-box-width"
++                        className="form-input"
++                        type="number"
++                        min="5"
++                        max="100"
++                        step="1"
++                        value={Number((selectedElement.boxWidth ?? 92).toFixed(0))}
++                        onChange={(event) =>
++                          editor.updateElement('text', selected.id, {
++                            boxWidth: Number(event.target.value),
++                          })
++                        }
++                      />
++                    </label>
++                  </div>
++                )}
++
++                {selected.kind === 'divider' && selectedElement && (
++                  <>
++                    <div className="vb-field-row">
++                      <label htmlFor="vb-divider-dir">
++                        Direction
++                        <select
++                          id="vb-divider-dir"
++                          className="form-select"
++                          value={selectedElement.orientation}
++                          onChange={(event) =>
++                            editor.updateDivider(selected.id, {
++                              orientation: event.target.value,
++                            })
++                          }
++                        >
++                          <option value="vertical">Vertical</option>
++                          <option value="horizontal">Horizontal</option>
++                        </select>
++                      </label>
++                    </div>
++
++                    <div className="vb-field-row">
++                      <label htmlFor="vb-divider-len">
++                        Length %
++                        <input
++                          id="vb-divider-len"
++                          className="form-input"
++                          type="number"
++                          min="2"
++                          max="100"
++                          step="1"
++                          value={Number(selectedElement.length.toFixed(1))}
++                          onChange={(event) =>
++                            editor.updateDivider(selected.id, {
++                              length: Number(event.target.value),
++                            })
++                          }
++                        />
++                      </label>
++                      <label htmlFor="vb-divider-thick">
++                        Thickness
++                        <input
++                          id="vb-divider-thick"
++                          className="form-input"
++                          type="number"
++                          min="1"
++                          max="24"
++                          step="1"
++                          value={selectedElement.thickness}
++                          onChange={(event) =>
++                            editor.updateDivider(selected.id, {
++                              thickness: Number(event.target.value),
++                            })
++                          }
++                        />
++                      </label>
++                    </div>
++                  </>
++                )}
++
++                {selected.kind === 'shape' && (
++                  <>
++                    <div className="vb-field-row">
++                      <label htmlFor="vb-width">
++                        W %
++                        <input
++                          id="vb-width"
++                          className="form-input"
++                          type="number"
++                          min="0.4"
++                          max="200"
++                          step="0.5"
++                          value={Number(selectedShape.width.toFixed(1))}
++                          onChange={(event) =>
++                            editor.updateShape(selected.id, { width: Number(event.target.value) })
++                          }
++                        />
++                      </label>
++                      <label htmlFor="vb-height">
++                        H %
++                        <input
++                          id="vb-height"
++                          className="form-input"
++                          type="number"
++                          min="0.4"
++                          max="200"
++                          step="0.5"
++                          value={Number(selectedShape.height.toFixed(1))}
++                          onChange={(event) =>
++                            editor.updateShape(selected.id, { height: Number(event.target.value) })
++                          }
++                        />
++                      </label>
++                    </div>
++
++                    <div className="vb-field-row">
++                      <label htmlFor="vb-radius">
++                        Corner
++                        <input
++                          id="vb-radius"
++                          className="form-input"
++                          type="number"
++                          min="0"
++                          max="999"
++                          value={Math.round(selectedShape.radius)}
++                          onChange={(event) =>
++                            editor.updateShape(selected.id, { radius: Number(event.target.value) })
++                          }
++                        />
++                      </label>
++                      <label htmlFor="vb-rotation">
++                        Rotate
++                        <input
++                          id="vb-rotation"
++                          className="form-input"
++                          type="number"
++                          min="-180"
++                          max="180"
++                          value={Math.round(selectedShape.rotation)}
++                          onChange={(event) =>
++                            editor.updateShape(selected.id, {
++                              rotation: Number(event.target.value),
++                            })
++                          }
++                        />
++                      </label>
++                    </div>
++
++                    <div className="form-group">
++                      <label className="form-label">Border</label>
++                      <div className="vb-stroke-field">
++                        <input
++                          type="color"
++                          className="vb-color-input"
++                          value={selectedShape.stroke.color}
++                          aria-label="Border colour"
++                          onChange={(event) =>
++                            editor.setShapeStroke(selected.id, { color: event.target.value })
++                          }
++                        />
++                        <input
++                          type="range"
++                          min="0"
++                          max="16"
++                          step="1"
++                          value={selectedShape.stroke.width}
++                          aria-label="Border width"
++                          onChange={(event) =>
++                            editor.setShapeStroke(selected.id, {
++                              width: Number(event.target.value),
++                            })
++                          }
++                        />
++                        <span className="scale-field-value">{selectedShape.stroke.width}px</span>
++                      </div>
++                    </div>
++                  </>
++                )}
++
++                {selected.kind === 'text' && (
++                  <div className="form-group">
++                    <label className="form-label">Size</label>
++                    <div className="scale-field">
++                      <input
++                        type="range"
++                        min="0.6"
++                        max="14"
++                        step="0.1"
++                        value={selectedElement.fontSize}
++                        onChange={(event) =>
++                          editor.setFontSize(selected.id, Number(event.target.value))
++                        }
++                      />
++                      <span className="scale-field-value">{selectedElement.fontSize.toFixed(1)}</span>
++                    </div>
++                  </div>
++                )}
++
++                {(selected.kind === 'logo' || selected.kind === 'image') && (
++                  <div className="form-group">
++                    <label className="form-label">Size</label>
++                    <div className="scale-field">
++                      <input
++                        type="range"
++                        min="0.3"
++                        max="2.5"
++                        step="0.05"
++                        value={selectedElement.scale}
++                        onChange={(event) =>
++                          editor.setScale(selected.kind, selected.id, Number(event.target.value))
++                        }
++                      />
++                      <span className="scale-field-value">
++                        {Math.round(selectedElement.scale * 100)}%
++                      </span>
++                    </div>
++                  </div>
++                )}
++
++                {selected.kind === 'text' && selected.id === 'heading' ? (
++                  <p className="vb-properties-hint">
++                    This is the board's headline, so it's fixed at the top of the candidate
++                    column instead of being freely positioned.
++                  </p>
++                ) : (
++                  <div className="form-group">
++                    <label className="form-label">Position</label>
++                    <div className="vb-field-row">
++                      <label htmlFor="vb-pos-x">
++                        X
++                        <input
++                          id="vb-pos-x"
++                          className="form-input"
++                          type="number"
++                          min="0"
++                          max="100"
++                          value={Math.round(selectedElement.x)}
++                          onChange={(event) =>
++                            editor.setPosition(
++                              selected.kind,
++                              selected.id,
++                              Number(event.target.value),
++                              selectedElement.y
++                            )
++                          }
++                        />
++                      </label>
++                      <label htmlFor="vb-pos-y">
++                        Y
++                        <input
++                          id="vb-pos-y"
++                          className="form-input"
++                          type="number"
++                          min="0"
++                          max="100"
++                          value={Math.round(selectedElement.y)}
++                          onChange={(event) =>
++                            editor.setPosition(
++                              selected.kind,
++                              selected.id,
++                              selectedElement.x,
++                              Number(event.target.value)
++                            )
++                          }
++                        />
++                      </label>
++                    </div>
++                  </div>
++                )}
++
++                <div className="vb-element-actions">
++                  {(selected.kind === 'image' ||
++                    selected.kind === 'text' ||
++                    selected.kind === 'shape' ||
++                    selected.kind === 'divider') && (
++                    <button
++                      type="button"
++                      className="secondary-button vb-duplicate-button"
++                      onClick={duplicateSelected}
++                      title="Duplicate (Ctrl+D)"
++                    >
++                      <Copy size={12} />
++                      Duplicate
++                    </button>
++                  )}
++
++                  <button
++                    type="button"
++                    className="delete-button vb-remove-button"
++                    onClick={removeSelected}
++                    title="Remove (Delete)"
++                  >
++                    <Trash2 size={12} />
++                    Remove
++                  </button>
++                </div>
++              </>
++            )}
++          </div>
++        </div>
++      </section>
++
++      {templateModal === 'save' && (
++        <div className="confirmation-overlay" role="presentation">
++          <form
++            className="candidate-edit-popup"
++            onSubmit={handleSaveTemplate}
++            aria-labelledby="vb-save-template-title"
++          >
++            <h2 id="vb-save-template-title">Save as Template</h2>
++
++            <label className="form-label" htmlFor="vb-template-name">
++              Template name
++            </label>
++            <input
++              id="vb-template-name"
++              className="form-input"
++              required
++              autoFocus
++              placeholder="e.g. Holiday theme"
++              value={templateName}
++              onChange={(event) => setTemplateName(event.target.value)}
++            />
++
++            <div className="confirmation-actions">
++              <button
++                type="button"
++                className="secondary-button"
++                onClick={() => setTemplateModal(null)}
++              >
++                Cancel
++              </button>
++              <button type="submit" className="primary-button">
++                Save
++              </button>
++            </div>
++          </form>
++        </div>
++      )}
++
++      {templateModal === 'apply' && (
++        <div className="confirmation-overlay" role="presentation">
++          <div
++            className="candidate-edit-popup vb-template-popup"
++            role="dialog"
++            aria-labelledby="vb-apply-template-title"
++          >
++            <div className="modal-heading-row">
++              <h2 id="vb-apply-template-title">Apply a Template</h2>
++              <button
++                type="button"
++                className="modal-close-button"
++                onClick={() => setTemplateModal(null)}
++                aria-label="Close"
++              >
++                &times;
++              </button>
++            </div>
++
++            {templates.length === 0 ? (
++              <p className="vb-properties-hint">
++                No templates saved yet - use Save Template on the toolbar first.
++              </p>
++            ) : (
++              <div className="vb-template-list">
++                {templates.map((template) => (
++                  <div key={template.id} className="vb-template-row">
++                    <div className="vb-template-row-info">
++                      <strong>{template.name}</strong>
++                      <span>{new Date(template.savedAt).toLocaleString()}</span>
++                    </div>
++                    <div className="vb-template-row-actions">
++                      <button
++                        type="button"
++                        className="secondary-button"
++                        onClick={() => handleApplyTemplate(template.id)}
++                      >
++                        Apply
++                      </button>
++                      <button
++                        type="button"
++                        className="delete-button"
++                        onClick={() => handleDeleteTemplate(template.id)}
++                        aria-label={`Delete ${template.name}`}
++                      >
++                        <Trash2 size={12} />
++                      </button>
++                    </div>
++                  </div>
++                ))}
++              </div>
++            )}
++          </div>
++        </div>
++      )}
++
++      {orderMenu && (
++        <div
++          className="vb-order-menu"
++          style={{ left: orderMenu.x, top: orderMenu.y }}
++          /* the dismiss listener runs in capture, so keep it off this menu */
++          onPointerDown={(event) => event.stopPropagation()}
++          role="menu"
++        >
++          <button type="button" role="menuitem" onClick={() => orderAndClose('front')}>
++            <ChevronsUp size={13} />
++            <span>Bring to front</span>
++          </button>
++          <button type="button" role="menuitem" onClick={() => orderAndClose('up')}>
++            <ChevronUp size={13} />
++            <span>Bring forward</span>
++          </button>
++          <button type="button" role="menuitem" onClick={() => orderAndClose('down')}>
++            <ChevronDown size={13} />
++            <span>Send backward</span>
++          </button>
++          <button type="button" role="menuitem" onClick={() => orderAndClose('back')}>
++            <ChevronsDown size={13} />
++            <span>Send to back</span>
++          </button>
++        </div>
++      )}
++    </>
++  );
++}
+diff --git a/src/pages/VisualBoard.jsx b/src/pages/VisualBoard.jsx
+new file mode 100644
+index 0000000..584da44
+--- /dev/null
++++ b/src/pages/VisualBoard.jsx
+@@ -0,0 +1,721 @@
++import { useEffect, useState } from "react";
++import { Megaphone } from "lucide-react";
++
++import FullscreenSwitch from "../components/FullscreenSwitch";
++import AutoFitText from "../components/AutoFitText";
++import { subscribeAnnouncements, subscribeCandidates } from "../lib/localBackend";
++import { isShownOnBoard } from "../lib/candidateVisibility";
++import { DEFAULT_LAYOUT, LAYOUT_EVENT, isVisible, loadBoardLayout } from "../lib/boardLayout";
++import { resolveTextStyle } from "../lib/textStyle";
++import { resolveShapeStyle } from "../lib/shapeStyle";
++import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from "../lib/boardGeometry";
++
++/* Announcements cycle on their own timer, independent of the candidate sets. */
++const ANNOUNCEMENT_DURATION = 7000;
++
++/* ---------------- ember field ---------------- */
++
++function mulberry32(seed) {
++  return () => {
++    seed |= 0;
++    seed = (seed + 0x6d2b79f5) | 0;
++
++    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
++
++    t =
++      (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^
++      t;
++
++    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
++  };
++}
++
++const SPARK_COLORS = [
++  "224,40,24",
++  "255,80,48",
++  "255,140,60",
++  "255,176,96",
++];
++
++function sparkField(
++  seed,
++  count,
++  maxR
++) {
++  const rand = mulberry32(seed);
++  const shadows = [];
++
++  for (let i = 0; i < count; i++) {
++    const x = Math.floor(rand() * 1600);
++    const y = Math.floor(rand() * 1000);
++
++    const r = +(
++      rand() * rand() * maxR
++    ).toFixed(1);
++
++    const blur = +(
++      (r + 0.5) *
++      (1.5 + rand() * 2)
++    ).toFixed(1);
++
++    const color =
++      SPARK_COLORS[
++        Math.floor(
++          rand() * SPARK_COLORS.length
++        )
++      ];
++
++    const alpha = +(
++      0.25 + rand() * 0.55
++    ).toFixed(2);
++
++    shadows.push(
++      `${x}px ${y}px ${blur}px ${r}px rgba(${color},${alpha})`
++    );
++
++    if (rand() < 0.35) {
++      shadows.push(
++        `${x}px ${y}px ${blur + 6}px ${
++          r + 1.5
++        }px rgba(${color},${+(
++          alpha * 0.35
++        ).toFixed(2)})`
++      );
++    }
++  }
++
++  return shadows.join(", ");
++}
++
++const SPARK_LAYERS = [
++  {
++    shadow: sparkField(11, 420, 1.2),
++    animation:
++      "animate-[drift_45s_linear_infinite] opacity-75",
++  },
++  {
++    shadow: sparkField(22, 230, 2.4),
++    animation:
++      "animate-[drift_28s_linear_infinite] opacity-90",
++  },
++  {
++    shadow: sparkField(33, 120, 4),
++    animation:
++      "animate-[drift_16s_linear_infinite]",
++  },
++  {
++    shadow: sparkField(44, 36, 8),
++    animation:
++      "animate-[drift_60s_linear_infinite] opacity-80",
++  },
++];
++
++/* ---------------- Visual Board ---------------- */
++
++export default function DisplayPage() {
++  const [candidates, setCandidates] =
++    useState([]);
++
++  const [loading, setLoading] =
++    useState(true);
++
++  const [lightMode, setLightMode] = useState(false);
++
++  /*
++   * The dashboard's small live preview (an <iframe src="/visual?preview=1">)
++   * always wants the board's normal dark branding, regardless of whatever
++   * light/dark preference the admin has set for their own panel — that
++   * preference lives in the same localStorage key this page reads below,
++   * so without this guard toggling the admin's panel theme would also
++   * flip the actual public board. The real standalone page (opened
++   * without ?preview=1) is unaffected and keeps following that setting.
++   */
++  const [isPreviewEmbed] = useState(
++    () =>
++      typeof window !== "undefined" &&
++      new URLSearchParams(window.location.search).get("preview") === "1"
++  );
++
++  /*
++   * =========================================================
++   * DISPLAY SETTINGS
++   * =========================================================
++   *
++   * The candidate carousel (right column) shows about 4 cards
++   * in its viewport at once, scrolling upward continuously
++   * rather than swapping discrete sets.
++   */
++
++  const CAROUSEL_VISIBLE_COUNT = 4;
++
++  /* =========================================================
++     LOAD CANDIDATES (live)
++
++     subscribeCandidates both delivers the current candidates
++     and keeps them in step afterwards, so this one
++     subscription covers the initial load and every later
++     change - including edits made in another tab.
++  ========================================================= */
++
++  useEffect(() => {
++    return subscribeCandidates((rows) => {
++      /*
++       * Candidates hidden from the board in the admin panel are
++       * dropped here, before the sets are worked out, so a hidden
++       * candidate never leaves an empty slot behind.
++       */
++
++      setCandidates(
++        rows
++          .filter((candidate) => isShownOnBoard(candidate))
++          .sort(
++            (a, b) =>
++              (Number(a.sort_order) || 0) -
++              (Number(b.sort_order) || 0)
++          )
++      );
++
++      setLoading(false);
++    });
++  }, []);
++
++  /* =========================================================
++     LOAD ANNOUNCEMENTS (live)
++  ========================================================= */
++
++  const [announcements, setAnnouncements] = useState([]);
++  const [currentAnnouncement, setCurrentAnnouncement] = useState(0);
++
++  useEffect(() => {
++    return subscribeAnnouncements((rows) => {
++      setAnnouncements(
++        rows
++          .filter((announcement) => announcement.active !== false)
++          .sort(
++            (a, b) => new Date(a.created_at) - new Date(b.created_at)
++          )
++      );
++    });
++  }, []);
++
++  useEffect(() => {
++    if (currentAnnouncement >= announcements.length) {
++      setCurrentAnnouncement(0);
++    }
++  }, [currentAnnouncement, announcements.length]);
++
++  useEffect(() => {
++    if (announcements.length <= 1) return;
++
++    const timer = window.setInterval(() => {
++      setCurrentAnnouncement(
++        (previous) => (previous + 1) % announcements.length
++      );
++    }, ANNOUNCEMENT_DURATION);
++
++    return () => window.clearInterval(timer);
++  }, [announcements.length]);
++
++  /* =========================================================
++     LOAD BOARD LAYOUT (live)
++
++     Where the logo, every text block, and any photos or shapes sit
++     - and whether each is shown at all - set from /admin/visual-board
++     and synced here the same way the theme is: a native 'storage'
++     event reaches this page in another tab or in the dashboard's
++     preview iframe, and LAYOUT_EVENT covers a listener in the very
++     same window.
++  ========================================================= */
++
++  const [layout, setLayout] = useState(DEFAULT_LAYOUT);
++
++  useEffect(() => {
++    const load = () => setLayout(loadBoardLayout());
++
++    load();
++    window.addEventListener("storage", load);
++    window.addEventListener(LAYOUT_EVENT, load);
++
++    return () => {
++      window.removeEventListener("storage", load);
++      window.removeEventListener(LAYOUT_EVENT, load);
++    };
++  }, []);
++
++  useEffect(() => {
++    if (isPreviewEmbed) return;
++
++    const loadTheme = () => {
++      const storedSettings = window.localStorage.getItem("interview-board-settings");
++
++      if (!storedSettings) {
++        setLightMode(false);
++        return;
++      }
++
++      try {
++        setLightMode(JSON.parse(storedSettings).lightMode === true);
++      } catch {
++        setLightMode(false);
++      }
++    };
++
++    loadTheme();
++    window.addEventListener("storage", loadTheme);
++    window.addEventListener("interview-board-settings-updated", loadTheme);
++
++    return () => {
++      window.removeEventListener("storage", loadTheme);
++      window.removeEventListener("interview-board-settings-updated", loadTheme);
++    };
++  }, [isPreviewEmbed]);
++
++  /*
++   * =========================================================
++   * CAROUSEL SCROLL SPEED
++   *
++   * A constant pace regardless of how many candidates there are -
++   * more candidates means a longer loop, not a faster one. The
++   * card list is rendered twice back to back and this animates it
++   * from 0 to -50%, i.e. exactly one copy's height, so it loops
++   * seamlessly no matter how tall a "copy" actually is.
++   * =========================================================
++   */
++
++  /* Set per board in the editor; the pace is per card, not per loop. */
++  const secondsPerCard = layout.candidates.secondsPerCard ?? 4;
++
++  const carouselDuration = Math.max(
++    /* a short list still needs long enough not to be a blur */
++    secondsPerCard * 4,
++    candidates.length * secondsPerCard
++  );
++
++  /*
++   * The board is one free-form surface: every entry in layerOrder paints in
++   * that order, the candidate board and the announcement strip included.
++   * Nothing is pinned to a column any more, so an element sits exactly
++   * where the editor put it.
++   */
++
++  /* The candidate board, as a positioned and sized box. */
++  function renderCandidatesLayer() {
++    const box = layout.candidates;
++    if (!isVisible(box)) return null;
++
++    return (
++      <div
++        key="candidates"
++        className="absolute [container-type:size]"
++        style={{
++          left: `${box.x}%`,
++          top: `${box.y}%`,
++          width: `${box.width}%`,
++          height: `${box.height}%`,
++          transform: "translate(-50%, -50%)",
++        }}
++      >
++        {renderCandidateCarousel()}
++      </div>
++    );
++  }
++
++  /* The announcement strip, as a positioned box that sizes to its text. */
++  function renderAnnouncementsLayer() {
++    const box = layout.announcements;
++    if (!isVisible(box) || announcements.length === 0) return null;
++
++    return (
++      <div
++        key="announcements"
++        className="absolute flex justify-center"
++        style={{
++          left: `${box.x}%`,
++          top: `${box.y}%`,
++          width: `${box.width}%`,
++          transform: "translate(-50%, -50%)",
++        }}
++      >
++        <div
++          key={announcements[currentAnnouncement]?.id}
++          className={`
++            flex
++            max-w-full
++            items-center
++            justify-center
++            gap-2
++            rounded-[2px]
++            border
++            border-[#c9a03c]
++            px-[clamp(12px,2.4vw,22px)]
++            py-[clamp(6px,1.2vw,12px)]
++            text-center
++            animate-[fadeIn_.7s_ease-in-out]
++            ${lightMode ? "bg-[#fdf6f3] text-[#7a5a12]" : "bg-[#2e0505] text-[#f0d689]"}
++          `}
++        >
++          <Megaphone size={18} className="shrink-0" aria-hidden="true" />
++
++          <p className="text-[clamp(13px,1.6vw,18px)] font-semibold leading-snug">
++            {announcements[currentAnnouncement]?.message}
++          </p>
++        </div>
++      </div>
++    );
++  }
++
++  /* A soft gold rule - fading at both ends rather than a flat border. */
++  function renderDividerLayer(id) {
++    const divider = layout.dividers.find((item) => item.id === id);
++    if (!divider || !isVisible(divider)) return null;
++
++    const vertical = divider.orientation !== "horizontal";
++
++    return (
++      <div
++        key={divider.id}
++        aria-hidden="true"
++        className="absolute"
++        style={{
++          left: `${divider.x}%`,
++          top: `${divider.y}%`,
++          width: vertical ? `${divider.thickness}px` : `${divider.length}%`,
++          height: vertical ? `${divider.length}%` : `${divider.thickness}px`,
++          transform: "translate(-50%, -50%)",
++          background: `linear-gradient(to ${
++            vertical ? "bottom" : "right"
++          }, transparent, rgba(201,160,60,0.55) 18%, rgba(201,160,60,0.75) 50%, rgba(201,160,60,0.55) 82%, transparent)`,
++          boxShadow: "0 0 10px rgba(201,160,60,0.28)",
++        }}
++      />
++    );
++  }
++
++  function renderLayer(entry) {
++    if (entry.kind === "divider") return renderDividerLayer(entry.id);
++    if (entry.kind === "candidates") return renderCandidatesLayer();
++    if (entry.kind === "announcements") return renderAnnouncementsLayer();
++
++    if (entry.kind === "shape") {
++      const shape = layout.shapes.find((item) => item.id === entry.id);
++      if (!shape || !isVisible(shape)) return null;
++      return <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)} />;
++    }
++
++    if (entry.kind === "logo") {
++      if (!isVisible(layout.logo)) return null;
++      return (
++        <img
++          key="logo"
++          src={layout.logo.url || "/visual/logo.png"}
++          alt="Hyacinth"
++          style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
++          className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.55)]"
++        />
++      );
++    }
++
++    if (entry.kind === "image") {
++      const image = layout.images.find((item) => item.id === entry.id);
++      if (!image || !isVisible(image)) return null;
++      return (
++        <img
++          key={image.id}
++          src={image.url}
++          alt=""
++          style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
++          className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
++        />
++      );
++    }
++
++    if (entry.kind === "text") {
++      const text = layout.texts.find((item) => item.id === entry.id);
++      if (!text || !isVisible(text)) return null;
++      return (
++        <p
++          key={text.id}
++          style={{ ...positionStyle(text), ...resolveTextStyle(text) }}
++          className="absolute"
++        >
++          {text.text}
++        </p>
++      );
++    }
++
++    return null;
++  }
++
++
++  /* Groups a flat list into rows of `size` - unlike a flat grid, a lone
++     last candidate is marked to span the full row instead of leaving an
++     empty cell next to it. */
++  function chunkIntoRows(list, size) {
++    const rows = [];
++    for (let i = 0; i < list.length; i += size) {
++      rows.push(list.slice(i, i + size));
++    }
++    return rows;
++  }
++
++  /* One candidate box for the carousel - photo on top, gold name bar below,
++     the board's original card look, just sized to sit two across.
++     `full` spans both grid columns, for a lone candidate closing out a row. */
++  function renderCandidateCard(candidate, key, full = false) {
++    return (
++      <div
++        key={key}
++        className={`flex flex-col overflow-hidden rounded-[3px] ${full ? "col-span-2" : ""} ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}`}
++      >
++        <div
++          className={`
++            relative
++            aspect-[11/10]
++            overflow-hidden
++            ${
++              lightMode
++                ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
++                : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
++            }
++          `}
++        >
++          {candidate.photo_url && (
++            <div
++              className="absolute inset-0 bg-cover bg-top bg-no-repeat"
++              style={{ backgroundImage: `url("${candidate.photo_url}")` }}
++            />
++          )}
++        </div>
++
++        <div
++          className={`
++            relative
++            flex
++            min-h-[clamp(48px,16cqh,84px)]
++            flex-col
++            items-center
++            justify-center
++            gap-0.5
++            px-2
++            py-1.5
++
++            bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
++          `}
++        >
++          <AutoFitText
++            minScale={0.55}
++            className="
++              font-magneton
++              text-center
++              leading-[1.1]
++              tracking-[0.01em]
++              text-[clamp(17px,4.6cqh,28px)]
++              text-[#560606]
++              [text-shadow:1px_1px_1px_rgba(63,39,10,.3)]
++            "
++          >
++            {candidate.name}
++          </AutoFitText>
++
++          {candidate.course && (
++            <span
++              className="
++                truncate
++                text-[clamp(8px,1.7cqh,13px)]
++                font-bold
++                uppercase
++                tracking-wider
++                text-[#2e1604]/80
++              "
++            >
++              {candidate.course}
++            </span>
++          )}
++        </div>
++      </div>
++    );
++  }
++
++  /* The right column's whole candidate board: a loading skeleton, an empty
++     message, or the looping carousel - two rows of two copies stacked so
++     translateY(-50%) always lands exactly on the seam between them. */
++  function renderCandidateCarousel() {
++    if (loading) {
++      return (
++        <div className="grid h-full w-full auto-rows-[minmax(0,1fr)] grid-cols-2 gap-[2cqw] overflow-hidden [container-type:size]">
++          {Array.from({ length: CAROUSEL_VISIBLE_COUNT }).map((_, index) => (
++            <div
++              key={`skeleton-${index}`}
++              style={{ animationDelay: `${index * 0.12}s` }}
++              className={`
++                flex
++                flex-col
++                overflow-hidden
++                animate-[skeleton-in_.5s_ease-out_both]
++                ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}
++              `}
++            >
++              <div
++                className={`
++                  relative
++                  aspect-[11/10]
++                  animate-[pulse-glow_1.8s_ease-in-out_infinite]
++                  ${
++                    lightMode
++                      ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
++                      : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
++                  }
++                `}
++                style={{ animationDelay: `${index * 0.3}s` }}
++              />
++              <div
++                className={`
++                  min-h-[clamp(48px,16cqh,84px)]
++                  bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
++                `}
++              />
++            </div>
++          ))}
++        </div>
++      );
++    }
++
++    if (candidates.length === 0) {
++      return (
++        <div
++          className={`
++            flex
++            h-full
++            w-full
++            items-center
++            justify-center
++            px-2
++            text-center
++            text-[clamp(11px,1.3vw,14px)]
++            ${lightMode ? "text-[#7a5a12]" : "text-[#f0d689]"}
++          `}
++        >
++          No final interview applicants currently listed.
++        </div>
++      );
++    }
++
++    const rows = chunkIntoRows(candidates, 2);
++
++    return (
++      <div className="relative h-full w-full overflow-hidden [container-type:size]">
++        <div
++          className="absolute inset-x-0 top-0 flex flex-col gap-[2cqh]"
++          style={{ animation: `carousel-scroll ${carouselDuration}s linear infinite` }}
++        >
++          {[0, 1].map((copy) => (
++            <div key={copy} className="flex flex-col gap-[2cqh]">
++              {rows.map((row, rowIndex) => (
++                <div
++                  key={rowIndex}
++                  className="grid shrink-0 grid-cols-2 gap-[2cqw]"
++                >
++                  {row.map((candidate, cellIndex) =>
++                    renderCandidateCard(
++                      candidate,
++                      `${copy}-${rowIndex}-${cellIndex}`,
++                      row.length === 1
++                    )
++                  )}
++                </div>
++              ))}
++            </div>
++          ))}
++        </div>
++      </div>
++    );
++  }
++
++  return (
++    <main
++      className={`
++        relative
++        grid
++        h-dvh
++        place-items-center
++        overflow-hidden
++        ${lightMode ? "bg-[#f4efed]" : "bg-[#0b0102]"}
++      `}
++    >
++
++      <video
++        className={`
++          pointer-events-none
++          absolute
++          inset-0
++          z-0
++          h-full
++          w-full
++          object-cover
++          ${lightMode ? "opacity-35" : "opacity-75"}
++        `}
++        src="/visual/bg.mp4"
++        autoPlay
++        loop
++        muted
++        playsInline
++        aria-hidden="true"
++      />
++
++      <div
++        aria-hidden
++        className={`
++          pointer-events-none
++          absolute
++          inset-0
++          z-[1]
++          ${lightMode ? "bg-[#fffaf7]/70" : "bg-black/25"}
++        `}
++      />
++
++      <FullscreenSwitch />
++
++      {/* Falling embers */}
++
++      {SPARK_LAYERS.map(
++        (layer, i) =>
++          [0, -1000].map((top) => (
++            <div
++              key={`sparks-${i}-${top}`}
++              aria-hidden
++              className={`
++                pointer-events-none
++                absolute
++                left-1/2
++                -ml-[800px]
++                h-px
++                w-px
++                rounded-full
++                motion-reduce:animate-none
++                ${layer.animation}
++              `}
++              style={{
++                top,
++                boxShadow:
++                  layer.shadow,
++              }}
++            />
++          ))
++      )}
++
++      {/*
++        The board itself: one full-bleed surface that every element is
++        positioned against. It marks itself as the container-query basis,
++        so an element's cqw/cqh sizing is relative to the whole board
++        rather than to a column of it.
++      */}
++
++      <div
++        style={{ containerType: "size" }}
++        className="absolute inset-0 z-[2]"
++      >
++        {layout.layerOrder.map(renderLayer)}
++      </div>
++    </main>
++  );
++}

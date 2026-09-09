@@ -42,10 +42,12 @@ export default function TablePagination({
   onPageSizeChange,
   itemLabel = 'candidates',
 }) {
+  if (totalItems === 0) return null;
+
   const pageCount = Math.max(1, Math.ceil(totalItems / pageSize));
   const safePage = Math.min(Math.max(1, page), pageCount);
 
-  const firstRow = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const firstRow = (safePage - 1) * pageSize + 1;
   const lastRow = Math.min(safePage * pageSize, totalItems);
 
   const goTo = (next) => {
@@ -58,14 +60,8 @@ export default function TablePagination({
 
       {/* left: what you are looking at */}
       <p className="pagination-range">
-        {totalItems === 0 ? (
-          <>No {itemLabel} to show</>
-        ) : (
-          <>
-            Showing <strong>{firstRow}</strong>&ndash;<strong>{lastRow}</strong> of{' '}
-            <strong>{totalItems}</strong> {itemLabel}
-          </>
-        )}
+        Showing <strong>{firstRow}</strong>&ndash;<strong>{lastRow}</strong> of{' '}
+        <strong>{totalItems}</strong> {itemLabel}
       </p>
 
       {/* middle: the controls */}

@@ -1,5 +1,16 @@
 {
   "projects": {
-    "default": "hyacinth-event-announcements"
-  }
+    "default": "hyacinth-event-announcements",
+    "events": "hyacinth-event-announcements"
+  },
+  "targets": {
+    "hyacinth-event-announcements": {
+      "hosting": {
+        "hyacinth-event-announcements": [
+          "hyacinth-event-announcements"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

@@ -1,0 +1,2450 @@
+diff --git a/src/lib/boardLayout.js b/src/lib/boardLayout.js
+index 01af48a..63927de 100644
+--- a/src/lib/boardLayout.js
++++ b/src/lib/boardLayout.js
+@@ -9,14 +9,25 @@
+  * start the board off, but they can be restyled, moved, or removed like any
+  * other text.
+  *
+- * Editing happens on a separate draft copy (its own localStorage key) so
+- * the public board never shows work in progress - /visual only ever reads
+- * the published copy, and stays completely unaware that a draft exists.
+- * Publishing copies the draft over it and notifies other tabs the same way
+- * interview-board-settings does: a 'storage' event reaches them on its own,
+- * and LAYOUT_EVENT covers a listener in the same window.
++ * Editing happens on a separate draft document in Firestore so the public
++ * board never shows work in progress - /visual only ever reads the
++ * published document, and stays completely unaware that a draft exists.
++ * Publishing copies the draft over it. Both documents update live: /visual
++ * subscribes to the published one, and the admin editor loads the draft
++ * once when it opens (there is normally only one admin editing at a time).
+  */
+ 
++import {
++  addDoc,
++  deleteDoc,
++  doc,
++  getDoc,
++  getDocs,
++  onSnapshot,
++  setDoc,
++} from 'firebase/firestore';
++import { boardTemplatesCollection, boardLayoutDoc, boardLayoutDraftDoc } from './firebase/collections';
++
+ import {
+   DEFAULT_CLOSING_STYLE,
+   DEFAULT_EXTRA_TEXT_STYLE,
+@@ -25,6 +36,7 @@ import {
+   normalizeTextStyle,
+ } from './textStyle';
+ import { normalizeShapes } from './shapeStyle';
++import { DEFAULT_ANIMATION, normalizeAnimation } from './animationStyle';
+ 
+ /*
+  * Bumped when stored geometry stops meaning what it used to. Positions were
+@@ -35,11 +47,6 @@ import { normalizeShapes } from './shapeStyle';
+  */
+ export const LAYOUT_VERSION = 3;
+ 
+-export const LAYOUT_KEY = 'interview-board-layout';
+-export const DRAFT_KEY = 'interview-board-layout:draft';
+-export const LAYOUT_EVENT = 'interview-board-layout-updated';
+-export const TEMPLATES_KEY = 'interview-board-templates';
+-
+ /*
+  * The candidate board and the announcement strip are boxes rather than
+  * points: they carry a width and height as percentages of the board, so
+@@ -54,6 +61,11 @@ export const DEFAULT_CANDIDATES = {
+   height: 74,
+   /* Seconds the carousel spends per card - lower is faster. */
+   secondsPerCard: 4,
++  /* How many candidate boxes sit across one row - the grid's column count.
++     Each card's height then follows from its width by its own aspect ratio,
++     so raising or lowering this auto-adjusts card size to fit that many
++     across, rather than changing how many candidates show per row. */
++  perRow: 2,
+ };
+ 
+ export const DEFAULT_ANNOUNCEMENTS = {
+@@ -62,6 +74,7 @@ export const DEFAULT_ANNOUNCEMENTS = {
+   x: 27,
+   y: 78,
+   width: 42,
++  height: 10,
+ };
+ 
+ /*
+@@ -80,14 +93,14 @@ export const DEFAULT_DIVIDER = {
+ 
+ export const DEFAULT_LAYOUT = {
+   version: LAYOUT_VERSION,
+-  logo: { visible: true, url: null, x: 24, y: 16, scale: 1 },
++  logo: { visible: true, url: null, x: 24, y: 16, scale: 1, animation: DEFAULT_ANIMATION },
+   candidates: DEFAULT_CANDIDATES,
+   announcements: DEFAULT_ANNOUNCEMENTS,
+   // { id, text, x, y, fontSize, visible, style, locked?, groupId? }
+   texts: [
+     {
+       id: 'heading',
+-      text: 'Final Interview Applicants',
++      text: 'Final Interview\nApplicants',
+       x: 27,
+       y: 36,
+       fontSize: DEFAULT_TEXT_SIZES.heading,
+@@ -105,6 +118,7 @@ export const DEFAULT_LAYOUT = {
+     },
+   ],
+   images: [], // { id, url, x, y, scale, visible, locked?, groupId? }
++  videos: [], // { id, url, x, y, scale, visible, locked?, groupId? }
+   // { id, x, y, length, thickness, orientation, visible, locked?, groupId? }
+   dividers: [{ ...DEFAULT_DIVIDER, id: 'divider-1' }],
+   shapes: [], // { id, kind, x, y, width, height, rotation, radius, layer, fill, stroke, visible, locked?, groupId? }
+@@ -139,9 +153,15 @@ function normalizeText(text, base = DEFAULT_EXTRA_TEXT_STYLE, baseSize = DEFAULT
+       ? clamp(text.fontSize, 0.3, 40)
+       : clamp(baseSize * (Number(text.scale) || 1), 0.3, 40),
+     visible: text.visible !== false,
++    locked: text.locked === true,
+     /* How wide the text may run before wrapping, as a share of the board. */
+     boxWidth: clamp(text.boxWidth ?? 92, 5, 100),
++    /* Each non-empty line becomes its own bulleted item instead of one
++       wrapped block of running text - for a list like "Our Brands". */
++    bulletList: text.bulletList === true,
+     style: normalizeTextStyle(text.style, base),
++    animation: normalizeAnimation(text.animation),
++    ...(text.groupId ? { groupId: text.groupId } : {}),
+   };
+ }
+ 
+@@ -164,6 +184,7 @@ function normalizeLayerOrder(saved, layout) {
+     ...layout.texts.map((item) => ({ kind: 'text', id: item.id })),
+     ...layout.dividers.map((item) => ({ kind: 'divider', id: item.id })),
+     ...layout.images.map((item) => ({ kind: 'image', id: item.id })),
++    ...layout.videos.map((item) => ({ kind: 'video', id: item.id })),
+     ...layout.shapes.map((item) => ({ kind: 'shape', id: item.id })),
+   ];
+   const realKeys = new Set(real.map(layerKey));
+@@ -235,9 +256,24 @@ function normalizeBox(box, defaults) {
+             30
+           ),
+         }),
++    ...(defaults.perRow === undefined
++      ? {}
++      : {
++          perRow: Math.round(clamp(source.perRow ?? defaults.perRow, 1, 6)),
++        }),
+   };
+ }
+ 
++/* A dropped-in photo. Positions and sizing are left as loosely-checked as
++   they always were here - only `animation` is validated, since it's new. */
++function normalizeImages(images) {
++  if (!Array.isArray(images)) return [];
++
++  return images
++    .filter((image) => image && typeof image === 'object' && image.id)
++    .map((image) => ({ ...image, animation: normalizeAnimation(image.animation) }));
++}
++
+ function normalizeLayout(parsed) {
+   const texts = [];
+ 
+@@ -276,12 +312,17 @@ function normalizeLayout(parsed) {
+   const hasTextData = Boolean(parsed.heading || parsed.closing || Array.isArray(parsed.texts));
+ 
+   const layout = {
+-    logo: { ...DEFAULT_LAYOUT.logo, ...(parsed.logo ?? {}) },
++    logo: {
++      ...DEFAULT_LAYOUT.logo,
++      ...(parsed.logo ?? {}),
++      animation: normalizeAnimation(parsed.logo?.animation),
++    },
+     candidates: normalizeBox(parsed.candidates, DEFAULT_CANDIDATES),
+     announcements: normalizeBox(parsed.announcements, DEFAULT_ANNOUNCEMENTS),
+     dividers: normalizeDividers(parsed),
+     texts: hasTextData ? texts : DEFAULT_LAYOUT.texts,
+-    images: Array.isArray(parsed.images) ? parsed.images : [],
++    images: normalizeImages(parsed.images),
++    videos: Array.isArray(parsed.videos) ? parsed.videos : [],
+     shapes: normalizeShapes(parsed.shapes),
+   };
+ 
+@@ -291,23 +332,11 @@ function normalizeLayout(parsed) {
+   return layout;
+ }
+ 
+-function readLayout(key) {
+-  try {
+-    const raw = window.localStorage.getItem(key);
+-    if (!raw) return null;
+-
+-    const parsed = JSON.parse(raw);
+-
+-    // geometry from before the free-form change cannot be carried over
+-    if (parsed?.version !== LAYOUT_VERSION) {
+-      window.localStorage.removeItem(key);
+-      return null;
+-    }
+-
+-    return normalizeLayout(parsed);
+-  } catch {
+-    return null;
+-  }
++/* A layout document from before the free-form change, or from a schema
++   bump since, cannot be carried over - treated the same as no document. */
++function normalizeStoredLayout(data) {
++  if (!data || data.version !== LAYOUT_VERSION) return null;
++  return normalizeLayout(data);
+ }
+ 
+ /** Whether an element (the logo, headline, closing line, a photo, or a text block) is shown. */
+@@ -315,48 +344,90 @@ export function isVisible(element) {
+   return element.visible !== false;
+ }
+ 
+-/** The published layout - what /visual actually shows. */
+-export function loadBoardLayout() {
+-  return readLayout(LAYOUT_KEY) ?? DEFAULT_LAYOUT;
++/** The published layout - what /visual actually shows, as of right now. */
++export async function loadBoardLayout() {
++  const snapshot = await getDoc(boardLayoutDoc);
++  return normalizeStoredLayout(snapshot.data()) ?? DEFAULT_LAYOUT;
+ }
+ 
+ /**
+- * The admin's working copy. Falls back to the published layout the first
+- * time the editor is opened, so editing always starts from what is
+- * currently live rather than the bare defaults.
++ * Calls `listener` with the published layout now and after each change -
++ * from any admin, tab, or device, since this rides Firestore's own realtime
++ * updates. Returns an unsubscribe function.
++ */
++export function subscribeBoardLayout(listener) {
++  return onSnapshot(boardLayoutDoc, (snapshot) => {
++    listener(normalizeStoredLayout(snapshot.data()) ?? DEFAULT_LAYOUT);
++  });
++}
++
++/**
++ * The admin's working copy, loaded once when the editor opens. Falls back
++ * to the published layout when there is no draft yet, so editing always
++ * starts from what is currently live rather than the bare defaults.
++ */
++export async function loadDraftLayout() {
++  const snapshot = await getDoc(boardLayoutDraftDoc);
++  return normalizeStoredLayout(snapshot.data()) ?? (await loadBoardLayout());
++}
++
++/*
++ * Firestore rejects any field whose value is `undefined` outright (a
++ * synchronous throw, not a rejected promise) - unlike the old
++ * localStorage.setItem(JSON.stringify(layout)), where JSON.stringify
++ * silently dropped those keys. The editor sets fields like a duplicated
++ * element's `groupId` to `undefined` to mean "not in a group", so a layout
++ * has to be put through the same JSON round trip before it can be written,
++ * to strip them the same way JSON.stringify always did.
+  */
+-export function loadDraftLayout() {
+-  return readLayout(DRAFT_KEY) ?? loadBoardLayout();
++function sanitizeForFirestore(value) {
++  return JSON.parse(JSON.stringify(value));
+ }
+ 
++/*
++ * Both saves below are fire-and-forget from the caller's point of view -
++ * the editor's own state already updated the moment the admin dragged or
++ * typed something, so nothing needs to wait on the network round trip
++ * before feeling responsive. A failure is logged, not thrown, matching how
++ * a failed localStorage write used to be handled - including a failure
++ * Firestore raises synchronously (invalid data), not just a rejected write.
++ */
++
+ /** Saves the draft only - /visual never sees this until it's published. */
+ export function saveDraftLayout(layout) {
+   try {
+-    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(layout));
+-    return true;
++    setDoc(boardLayoutDraftDoc, sanitizeForFirestore(layout)).catch((error) => {
++      console.warn('Could not save the draft board layout:', error);
++    });
+   } catch (error) {
+     console.warn('Could not save the draft board layout:', error);
+-    return false;
+   }
++  return true;
+ }
+ 
+-/** Makes `layout` the published layout /visual reads, and notifies this tab. */
++/** Makes `layout` the published layout /visual reads. */
+ export function saveBoardLayout(layout) {
+   try {
+-    window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
++    setDoc(boardLayoutDoc, sanitizeForFirestore(layout)).catch((error) => {
++      console.warn('Could not save the board layout:', error);
++    });
+   } catch (error) {
+     console.warn('Could not save the board layout:', error);
+-    return false;
+   }
+-
+-  window.dispatchEvent(new Event(LAYOUT_EVENT));
+   return true;
+ }
+ 
+-/** Publishes the current draft: it becomes the live layout /visual shows. */
+-export function publishBoardLayout(layout) {
+-  saveDraftLayout(layout);
+-  return saveBoardLayout(layout);
++/*
++ * Publishes the current draft: it becomes the live layout /visual shows.
++ * Unlike the two saves above, this one is a deliberate admin action, not a
++ * side effect of every drag or keystroke - so it awaits both writes and
++ * throws if either fails (e.g. the layout, photos included, no longer fits
++ * Firestore's 1 MiB document limit), instead of failing silently while the
++ * editor still reports success.
++ */
++export async function publishBoardLayout(layout) {
++  const data = sanitizeForFirestore(layout);
++  await Promise.all([setDoc(boardLayoutDraftDoc, data), setDoc(boardLayoutDoc, data)]);
+ }
+ 
+ /*
+@@ -365,50 +436,50 @@ export function publishBoardLayout(layout) {
+  * saving one doesn't touch either, and applying one only replaces the draft.
+  */
+ 
+-function readTemplates() {
+-  try {
+-    const raw = window.localStorage.getItem(TEMPLATES_KEY);
+-    const parsed = raw ? JSON.parse(raw) : [];
+-    return Array.isArray(parsed) ? parsed : [];
+-  } catch {
+-    return [];
+-  }
+-}
+-
+-function writeTemplates(templates) {
+-  try {
+-    window.localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
+-    return true;
+-  } catch (error) {
+-    console.warn('Could not save templates:', error);
+-    return false;
+-  }
++/**
++ * Calls `listener` with every saved template, newest first, now and after
++ * each change. Returns an unsubscribe function.
++ */
++export function subscribeTemplates(listener) {
++  return onSnapshot(boardTemplatesCollection, (snapshot) => {
++    const templates = snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
++    templates.sort((a, b) => (a.savedAt < b.savedAt ? 1 : -1));
++    listener(templates);
++  });
+ }
+ 
+-/** Every saved template, newest first. */
+-export function loadTemplates() {
+-  return readTemplates();
++/** Every saved template, newest first, fetched once. */
++export async function loadTemplates() {
++  const snapshot = await getDocs(boardTemplatesCollection);
++  const templates = snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
++  templates.sort((a, b) => (a.savedAt < b.savedAt ? 1 : -1));
++  return templates;
+ }
+ 
+-/** Saves `layout` as a new named template; returns it. */
+-export function saveTemplate(name, layout) {
++/** Saves `layout` as a new named template; returns it once Firestore confirms it. */
++export async function saveTemplate(name, layout) {
+   const template = {
+-    id: crypto.randomUUID(),
+     name: name.trim() || 'Untitled template',
+     savedAt: new Date().toISOString(),
+-    layout,
++    layout: sanitizeForFirestore(layout),
+   };
+ 
+-  writeTemplates([template, ...readTemplates()]);
+-  return template;
++  const docRef = await addDoc(boardTemplatesCollection, template);
++  return { id: docRef.id, ...template };
+ }
+ 
+-/** The normalized layout of a saved template, or null if it's gone. */
+-export function applyTemplate(id) {
+-  const template = readTemplates().find((item) => item.id === id);
++/**
++ * The normalized layout of one of the already-loaded `templates` (from
++ * `subscribeTemplates`/`loadTemplates`), or null if `id` isn't among them -
++ * a pure lookup, not a Firestore read, since the caller already has the list.
++ */
++export function applyTemplate(templates, id) {
++  const template = templates.find((item) => item.id === id);
+   return template ? normalizeLayout(template.layout) : null;
+ }
+ 
+ export function deleteTemplate(id) {
+-  writeTemplates(readTemplates().filter((template) => template.id !== id));
++  deleteDoc(doc(boardTemplatesCollection, id)).catch((error) => {
++    console.warn('Could not delete the template:', error);
++  });
+ }
+diff --git a/src/lib/shapeStyle.js b/src/lib/shapeStyle.js
+index 2697264..337b877 100644
+--- a/src/lib/shapeStyle.js
++++ b/src/lib/shapeStyle.js
+@@ -10,6 +10,7 @@
+  */
+ 
+ import { fillBoxCss, imageFill, normalizeFill, solidFill } from './fill';
++import { DEFAULT_ANIMATION, normalizeAnimation, resolveAnimationCss } from './animationStyle';
+ 
+ export const SHAPE_KINDS = [
+   { value: 'rectangle', label: 'Rectangle' },
+@@ -17,6 +18,7 @@ export const SHAPE_KINDS = [
+   { value: 'triangle', label: 'Triangle' },
+   { value: 'line', label: 'Line' },
+   { value: 'frame', label: 'Photo frame' },
++  { value: 'box', label: 'Box' },
+ ];
+ 
+ export const FIT_OPTIONS = [
+@@ -34,6 +36,7 @@ const BASE_SHAPE = {
+   radius: 6,
+   stroke: { color: '#c9a03c', width: 0 },
+   visible: true,
++  animation: DEFAULT_ANIMATION,
+ };
+ 
+ /* What each kind starts out as when it is dropped on the board. */
+@@ -42,13 +45,33 @@ const SHAPE_PRESETS = {
+   ellipse: { width: 16, height: 16, radius: 0, fill: solidFill('#d45d59', 0.85) },
+   triangle: { width: 16, height: 14, radius: 0, fill: solidFill('#f4ca5d', 0.9) },
+   line: { width: 30, height: 0.6, radius: 999, fill: solidFill('#c9a03c', 1) },
++  /*
++   * `photos` backs the carousel animation (see PhotoCarousel.jsx) - a frame
++   * with two or more of them and animation.type 'carousel' slides between
++   * them instead of showing `fill`'s single image. Empty otherwise, so an
++   * ordinary frame behaves exactly as it always has.
++   */
+   frame: {
+     width: 16,
+     height: 20,
+     radius: 4,
+     fill: imageFill(),
++    photos: [],
+     stroke: { color: '#c9a03c', width: 2 },
+   },
++  /*
++   * A panel meant to sit behind other elements (usually text) rather than
++   * stand on its own - a dark, mostly-transparent card with a soft gold
++   * edge, sized to comfortably frame a cluster of content. Send it to the
++   * back of the layer order after adding it (see the Layers panel).
++   */
++  box: {
++    width: 34,
++    height: 46,
++    radius: 10,
++    fill: solidFill('#1a0605', 0.55),
++    stroke: { color: '#c9a03c', width: 1 },
++  },
+ };
+ 
+ export function createShape(kind = 'rectangle') {
+@@ -71,6 +94,11 @@ export function isFrame(shape) {
+   return shape.kind === 'frame';
+ }
+ 
++/** Whether a frame should render as a sliding photo carousel rather than its static `fill`. */
++export function isCarousel(shape) {
++  return isFrame(shape) && shape.animation?.type === 'carousel' && (shape.photos?.length ?? 0) > 1;
++}
++
+ function clamp(value, min, max) {
+   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+ }
+@@ -101,6 +129,10 @@ export function normalizeShapes(shapes) {
+           width: clamp(shape.stroke?.width ?? 0, 0, 40),
+         },
+         fill: normalizeFill(shape.fill, SHAPE_PRESETS[kind]?.fill ?? BASE_SHAPE.fill),
++        photos: kind === 'frame' && Array.isArray(shape.photos)
++          ? shape.photos.filter((url) => typeof url === 'string' && url)
++          : [],
++        animation: normalizeAnimation(shape.animation),
+       };
+     });
+ }
+@@ -120,6 +152,8 @@ export function resolveShapeStyle(shape) {
+     ...(shape.kind === 'triangle'
+       ? { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }
+       : {}),
+-    ...fillBoxCss(shape.fill),
++    // a carousel frame paints its photos itself (see PhotoCarousel.jsx), not through `fill`
++    ...(isCarousel(shape) ? {} : fillBoxCss(shape.fill)),
++    ...resolveAnimationCss(shape.animation),
+   };
+ }
+diff --git a/src/lib/useBoardLayoutEditor.js b/src/lib/useBoardLayoutEditor.js
+index 08ceced..06e9a5e 100644
+--- a/src/lib/useBoardLayoutEditor.js
++++ b/src/lib/useBoardLayoutEditor.js
+@@ -1,16 +1,44 @@
+-import { useReducer, useRef, useState } from 'react';
++import { useEffect, useReducer, useRef, useState } from 'react';
++import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+ 
+ import { DEFAULT_LAYOUT, isVisible, saveDraftLayout } from './boardLayout';
+ import { DEFAULT_EXTRA_TEXT_STYLE, DEFAULT_TEXT_SIZES } from './textStyle';
+ import { createShape } from './shapeStyle';
+-import { imageFill } from './fill';
++import { imageFill, normalizeFill, videoFill } from './fill';
++import { storage } from './firebase/storage';
++import { DEFAULT_ANIMATION, normalizeAnimation } from './animationStyle';
+ 
+ /* Photos and the logo are capped on the long edge so several fit in the quota. */
+ const MAX_IMAGE_EDGE = 800;
+ 
++/*
++ * Video, unlike a photo, can't be shrunk into a data URL small enough for a
++ * Firestore document (1 MiB per document, total) - it goes to Firebase
++ * Storage instead, and only its download URL lives in the layout. Capped
++ * client-side so one oversized file can't tie up someone's connection or
++ * run up Storage costs for what is, after all, a looping background clip.
++ */
++const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
++const VIDEO_STORAGE_FOLDER = 'board-videos';
++
++/* Every photo the editor accepts (logo, board images, frame fills, carousel
++   photos) goes to this same Storage folder - only its download URL ever
++   lands in the layout document. */
++const IMAGE_STORAGE_FOLDER = 'board-images';
++
++/*
++ * Every upload gets its own random filename and is never overwritten, so it's
++ * safe to have every viewer's browser (the live board included) cache it
++ * forever instead of re-fetching or revalidating it on every load - without
++ * this, Storage's default caching leaves that unset, and a photo or video can
++ * feel slow to appear even after the layout document has already updated.
++ */
++const STORAGE_CACHE_METADATA = { cacheControl: 'public, max-age=31536000, immutable' };
++
+ /* Which list each addressable kind lives in; anything else is a singleton. */
+ const LIST_BY_KIND = {
+   image: 'images',
++  video: 'videos',
+   text: 'texts',
+   shape: 'shapes',
+   divider: 'dividers',
+@@ -41,6 +69,7 @@ function collectPositionedElements(layout) {
+     { kind: 'announcements', id: null, ...layout.announcements },
+     ...layout.texts.map((item) => ({ kind: 'text', ...item })),
+     ...layout.images.map((item) => ({ kind: 'image', ...item })),
++    ...layout.videos.map((item) => ({ kind: 'video', ...item })),
+     ...layout.shapes.map((item) => ({ kind: 'shape', ...item })),
+     ...layout.dividers.map((item) => ({ kind: 'divider', ...item })),
+   ];
+@@ -79,7 +108,8 @@ function snapAxis(value, targets, threshold) {
+   return closest;
+ }
+ 
+-function downscaleToDataUrl(file) {
++/* Downscales `file` to a JPEG Blob no wider/taller than MAX_IMAGE_EDGE. */
++function downscaleToBlob(file) {
+   return new Promise((resolve, reject) => {
+     const reader = new FileReader();
+ 
+@@ -96,7 +126,11 @@ function downscaleToDataUrl(file) {
+         canvas.height = Math.round(image.height * scale);
+ 
+         canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+-        resolve(canvas.toDataURL('image/png'));
++        canvas.toBlob(
++          (blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the image file.'))),
++          'image/jpeg',
++          0.82
++        );
+       };
+ 
+       image.src = reader.result;
+@@ -106,6 +140,78 @@ function downscaleToDataUrl(file) {
+   });
+ }
+ 
++/*
++ * Downscales `file` and uploads it to Firebase Storage, returning its
++ * download URL - the same path video already takes (see MAX_VIDEO_BYTES
++ * above), so the layout document only ever holds a URL, never the photo
++ * itself. That's what keeps a board with several photos well under
++ * Firestore's 1 MiB per-document limit, no matter how detailed the photos are.
++ */
++async function uploadImageToStorage(file) {
++  const blob = await downscaleToBlob(file);
++  const storageRef = ref(storage, `${IMAGE_STORAGE_FOLDER}/${crypto.randomUUID()}.jpg`);
++
++  await uploadBytes(storageRef, blob, STORAGE_CACHE_METADATA);
++  return getDownloadURL(storageRef);
++}
++
++function isDataUrl(value) {
++  return typeof value === 'string' && value.startsWith('data:');
++}
++
++/* Re-encodes an already-embedded base64 photo through the same pipeline a
++   fresh upload takes, so a legacy photo ends up exactly like a new one. */
++async function migrateDataUrl(url) {
++  const blob = await (await fetch(url)).blob();
++  return uploadImageToStorage(blob);
++}
++
++/*
++ * A board built before photos went to Firebase Storage still carries them
++ * as base64 data URLs baked directly into the layout document - each one
++ * some tens to hundreds of KB, all counted against Firestore's 1 MiB
++ * per-document limit and all sent over the wire on every single save. This
++ * finds every one still around (the logo, a standalone photo, a frame's
++ * fill, a frame's carousel photos) and re-uploads it to Storage, replacing
++ * it with the same small download URL a fresh upload would get - shrinking
++ * the document and speeding up every publish after it, with no visible
++ * change to the board itself. Returns null if there was nothing to migrate.
++ */
++async function migrateLegacyPhotos(layout) {
++  let changed = false;
++
++  async function migrate(url) {
++    if (!isDataUrl(url)) return url;
++    changed = true;
++    return migrateDataUrl(url);
++  }
++
++  const logoUrl = await migrate(layout.logo.url);
++
++  const images = await Promise.all(
++    layout.images.map(async (image) => ({ ...image, url: await migrate(image.url) }))
++  );
++
++  const shapes = await Promise.all(
++    layout.shapes.map(async (shape) => {
++      const fill =
++        shape.fill?.type === 'image'
++          ? { ...shape.fill, url: await migrate(shape.fill.url) }
++          : shape.fill;
++
++      const photos = shape.photos?.length
++        ? await Promise.all(shape.photos.map((url) => migrate(url)))
++        : shape.photos;
++
++      return { ...shape, fill, photos };
++    })
++  );
++
++  if (!changed) return null;
++
++  return { ...layout, logo: { ...layout.logo, url: logoUrl }, images, shapes };
++}
++
+ /** The element a (kind, id) pair names, or undefined. */
+ export function findElement(layout, kind, id) {
+   const list = LIST_BY_KIND[kind];
+@@ -137,7 +243,7 @@ export function useBoardLayoutEditor(
+   layout,
+   setLayout,
+   boundsRef,
+-  { onError, onSuccess, persist = saveDraftLayout, snapEnabled = false } = {}
++  { onError, onSuccess, onProgress, persist = saveDraftLayout, snapEnabled = false } = {}
+ ) {
+   const latestLayoutRef = useRef(layout);
+   const saveScheduledRef = useRef(false);
+@@ -145,6 +251,21 @@ export function useBoardLayoutEditor(
+   const historyBurstRef = useRef(null);
+   const [, bumpHistory] = useReducer((count) => count + 1, 0);
+ 
++  /*
++   * `useRef(layout)`'s argument only ever seeds the ref's very first value -
++   * on every later render, changing `layout` does nothing to it on its own.
++   * That's fine for edits made through this hook (commitFrom reassigns the
++   * ref itself), but the draft now loads from Firestore asynchronously: the
++   * caller mounts with a placeholder layout, then swaps in the real one
++   * once it arrives. Without this effect, the ref would stay pinned to that
++   * placeholder until the first edit - so the very first thing an admin
++   * does (say, duplicating an element they just selected) would look up
++   * that element in the placeholder, fail to find it, and silently no-op.
++   */
++  useEffect(() => {
++    latestLayoutRef.current = layout;
++  }, [layout]);
++
+   /* Which axis a drag currently reads as centered on - drives the canvas's
+      center guide lines. */
+   const [centerGuide, setCenterGuide] = useState({ x: false, y: false });
+@@ -158,6 +279,14 @@ export function useBoardLayoutEditor(
+     onSuccess?.(message);
+   }
+ 
++  /* Shows a message for the length of an upload (which can run tens of
++     seconds for a video) rather than leaving the admin looking at an
++     unchanged screen with no sign anything is happening. Returns a function
++     that clears it once the upload settles, success or failure alike. */
++  function reportProgress(message) {
++    return onProgress?.(message) ?? (() => {});
++  }
++
+   /*
+    * Records `latestLayoutRef` onto the undo stack, but only once per burst
+    * of rapid edits (a drag, a slider) - each call within HISTORY_BURST_MS of
+@@ -219,6 +348,13 @@ export function useBoardLayoutEditor(
+    * queues one write per animation frame - writing on every pointermove
+    * event would be a lot of redundant JSON.stringify calls once a photo is
+    * on the canvas.
++   *
++   * The persist call is deliberately outside the updater passed to
++   * setLayout, not inside it: React (in development, under StrictMode)
++   * invokes a functional state update twice to check that it's pure, and
++   * discards every result but one - a side effect like `persist` sitting
++   * inside it would fire twice per edit, saving the same layout to
++   * Firestore (or, before, localStorage) two times over.
+    */
+   function commitFrom(updater, { immediate = true } = {}) {
+     recordHistory();
+@@ -226,19 +362,18 @@ export function useBoardLayoutEditor(
+     setLayout((current) => {
+       const next = updater(current);
+       latestLayoutRef.current = next;
+-
+-      if (immediate) {
+-        persist(next);
+-      } else if (!saveScheduledRef.current) {
+-        saveScheduledRef.current = true;
+-        requestAnimationFrame(() => {
+-          saveScheduledRef.current = false;
+-          persist(latestLayoutRef.current);
+-        });
+-      }
+-
+       return next;
+     });
++
++    if (immediate) {
++      persist(latestLayoutRef.current);
++    } else if (!saveScheduledRef.current) {
++      saveScheduledRef.current = true;
++      requestAnimationFrame(() => {
++        saveScheduledRef.current = false;
++        persist(latestLayoutRef.current);
++      });
++    }
+   }
+ 
+   function updateElement(kind, id, patch) {
+@@ -290,17 +425,20 @@ export function useBoardLayoutEditor(
+       dragWith((moveEvent, rect) => {
+         const { x, y } = pointToPercent(moveEvent, rect);
+ 
+-        commitFrom((current) => {
+-          const target = current[kind];
+-          const size = (value) => Math.min(100, Math.max(8, value));
+-          const patch = { width: size(Math.abs(x - target.x) * 2) };
++        commitFrom(
++          (current) => {
++            const target = current[kind];
++            const size = (value) => Math.min(100, Math.max(8, value));
++            const patch = { width: size(Math.abs(x - target.x) * 2) };
+ 
+-          if (hasHeight) {
+-            patch.height = size(Math.abs(y - target.y) * 2);
+-          }
++            if (hasHeight) {
++              patch.height = size(Math.abs(y - target.y) * 2);
++            }
+ 
+-          return patchElement(current, kind, null, patch);
+-        });
++            return patchElement(current, kind, null, patch);
++          },
++          { immediate: false }
++        );
+       });
+     };
+   }
+@@ -601,8 +739,9 @@ export function useBoardLayoutEditor(
+   /*
+    * Copies an element and drops the copy slightly down and to the right of
+    * the original, on top of the paint order. Only the kinds that can exist
+-   * more than once are copyable - the logo, the candidate board, the
+-   * announcement strip and the divider are each one of a kind.
++   * more than once are copyable - the logo, the candidate board and the
++   * announcement strip are each one of a kind; dividers, text, images,
++   * videos, and shapes can all have any number of them.
+    */
+   function duplicateElement(kind, id) {
+     const list = LIST_BY_KIND[kind];
+@@ -678,6 +817,18 @@ export function useBoardLayoutEditor(
+     });
+   }
+ 
++  /* Merges `patch` into an element's motion setting (type, direction, speed) -
++     any addressable kind, since every one of them carries its own `animation`. */
++  function setAnimation(kind, id, patch) {
++    commitFrom((current) => {
++      const element = findElement(current, kind, id);
++      if (!element) return current;
++      return patchElement(current, kind, id, {
++        animation: normalizeAnimation({ ...element.animation, ...patch }),
++      });
++    });
++  }
++
+   /* Replaces the fill of a text element (through its style) or of a shape. */
+   function setFill(kind, id, fill) {
+     if (kind === 'shape') {
+@@ -688,15 +839,32 @@ export function useBoardLayoutEditor(
+     setTextStyle(kind, id, { fill });
+   }
+ 
++  /* Pans/zooms a shape's image or video fill (offsetX, offsetY, zoom)
++     without touching its url/fit/opacity - see PhotoAdjuster.jsx /
++     VideoAdjuster.jsx. */
++  function adjustImageFill(id, patch) {
++    commitFrom((current) => {
++      const shape = findElement(current, 'shape', id);
++      if (!shape || (shape.fill?.type !== 'image' && shape.fill?.type !== 'video')) return current;
++      return patchElement(current, 'shape', id, {
++        fill: normalizeFill({ ...shape.fill, ...patch }),
++      });
++    });
++  }
++
+   async function handleLogoUpload(file) {
+     if (!file) return;
+ 
++    const clearProgress = reportProgress('Uploading logo...');
++
+     try {
+-      const dataUrl = await downscaleToDataUrl(file);
+-      updateElement('logo', null, { url: dataUrl });
++      const url = await uploadImageToStorage(file);
++      updateElement('logo', null, { url });
+       reportSuccess('Logo updated.');
+     } catch (error) {
+       reportError(error);
++    } finally {
++      clearProgress();
+     }
+   }
+ 
+@@ -707,13 +875,21 @@ export function useBoardLayoutEditor(
+   async function handleAddPhoto(file) {
+     if (!file) return null;
+ 
++    const clearProgress = reportProgress('Uploading photo...');
++
+     try {
+-      const dataUrl = await downscaleToDataUrl(file);
++      const url = await uploadImageToStorage(file);
+       const id = crypto.randomUUID();
+ 
+       commitFrom((current) =>
+         appendLayer(
+-          { ...current, images: [...current.images, { id, url: dataUrl, x: 50, y: 50, scale: 1, visible: true }] },
++          {
++            ...current,
++            images: [
++              ...current.images,
++              { id, url, x: 50, y: 50, scale: 1, visible: true, animation: { ...DEFAULT_ANIMATION } },
++            ],
++          },
+           'image',
+           id
+         )
+@@ -724,6 +900,8 @@ export function useBoardLayoutEditor(
+     } catch (error) {
+       reportError(error);
+       return null;
++    } finally {
++      clearProgress();
+     }
+   }
+ 
+@@ -737,6 +915,66 @@ export function useBoardLayoutEditor(
+     );
+   }
+ 
++  /*
++   * Re-uploads any legacy base64 photo still embedded in the layout to
++   * Firebase Storage - see migrateLegacyPhotos above. Safe to call anytime;
++   * a board with nothing legacy left is a no-op that changes nothing and
++   * doesn't touch the undo history. Resolves to whether it actually found
++   * (and migrated) anything.
++   */
++  async function cleanUpLegacyPhotos() {
++    const migrated = await migrateLegacyPhotos(latestLayoutRef.current);
++    if (!migrated) return false;
++
++    commitFrom(() => migrated);
++    return true;
++  }
++
++  async function handleAddVideo(file) {
++    if (!file) return null;
++
++    if (file.size > MAX_VIDEO_BYTES) {
++      reportError(new Error('That video is too large - keep it under 50MB.'));
++      return null;
++    }
++
++    const clearProgress = reportProgress('Uploading video... this can take a while on a slow connection.');
++
++    try {
++      const id = crypto.randomUUID();
++      const storageRef = ref(storage, `${VIDEO_STORAGE_FOLDER}/${id}-${file.name}`);
++
++      await uploadBytes(storageRef, file, STORAGE_CACHE_METADATA);
++      const url = await getDownloadURL(storageRef);
++
++      commitFrom((current) =>
++        appendLayer(
++          { ...current, videos: [...current.videos, { id, url, x: 50, y: 50, scale: 1, visible: true }] },
++          'video',
++          id
++        )
++      );
++      reportSuccess('Video added to the board.');
++
++      return id;
++    } catch (error) {
++      reportError(error);
++      return null;
++    } finally {
++      clearProgress();
++    }
++  }
++
++  function removeVideo(id) {
++    commitFrom((current) =>
++      removeLayer(
++        { ...current, videos: current.videos.filter((video) => video.id !== id) },
++        'video',
++        id
++      )
++    );
++  }
++
+   function addText() {
+     const id = crypto.randomUUID();
+ 
+@@ -753,7 +991,9 @@ export function useBoardLayoutEditor(
+               y: 50,
+               fontSize: DEFAULT_TEXT_SIZES.extra,
+               visible: true,
++              bulletList: false,
+               style: { ...DEFAULT_EXTRA_TEXT_STYLE },
++              animation: { ...DEFAULT_ANIMATION },
+             },
+           ],
+         },
+@@ -803,27 +1043,106 @@ export function useBoardLayoutEditor(
+   async function handleFramePhoto(id, file) {
+     if (!file) return;
+ 
++    const clearProgress = reportProgress('Uploading photo...');
++
+     try {
+-      const dataUrl = await downscaleToDataUrl(file);
++      const url = await uploadImageToStorage(file);
+ 
+       commitFrom((current) => {
+         const shape = findElement(current, 'shape', id);
+         if (!shape) return current;
+ 
+         const fit = shape.fill?.type === 'image' ? shape.fill.fit : 'cover';
+-        return patchElement(current, 'shape', id, { fill: imageFill(dataUrl, fit) });
++        return patchElement(current, 'shape', id, { fill: imageFill(url, fit) });
+       });
+       reportSuccess('Photo added to the frame.');
+     } catch (error) {
+       reportError(error);
++    } finally {
++      clearProgress();
++    }
++  }
++
++  /* Drops a video into a frame - the frame's fill *is* the video, same as
++     handleFramePhoto but through the video upload path (see handleAddVideo
++     above) since a clip is too big to shrink into a data URL. */
++  async function handleFrameVideo(id, file) {
++    if (!file) return;
++
++    if (file.size > MAX_VIDEO_BYTES) {
++      reportError(new Error('That video is too large - keep it under 50MB.'));
++      return;
+     }
++
++    const clearProgress = reportProgress('Uploading video... this can take a while on a slow connection.');
++
++    try {
++      const storageRef = ref(storage, `${VIDEO_STORAGE_FOLDER}/${crypto.randomUUID()}-${file.name}`);
++      await uploadBytes(storageRef, file, STORAGE_CACHE_METADATA);
++      const url = await getDownloadURL(storageRef);
++
++      commitFrom((current) => {
++        const shape = findElement(current, 'shape', id);
++        if (!shape) return current;
++
++        const fit = shape.fill?.type === 'image' || shape.fill?.type === 'video' ? shape.fill.fit : 'cover';
++        return patchElement(current, 'shape', id, { fill: videoFill(url, fit) });
++      });
++      reportSuccess('Video added to the frame.');
++    } catch (error) {
++      reportError(error);
++    } finally {
++      clearProgress();
++    }
++  }
++
++  /*
++   * A frame's carousel photos - a separate list from its single `fill`
++   * image, since a carousel with animation.type 'carousel' cycles through
++   * these instead of showing one static photo. Adding a second photo is
++   * what makes the Carousel animation option appear at all (see isCarousel).
++   */
++  async function addFramePhoto(id, file) {
++    if (!file) return;
++
++    const clearProgress = reportProgress('Uploading photo...');
++
++    try {
++      const url = await uploadImageToStorage(file);
++
++      commitFrom((current) => {
++        const shape = findElement(current, 'shape', id);
++        if (!shape) return current;
++        return patchElement(current, 'shape', id, { photos: [...(shape.photos ?? []), url] });
++      });
++      reportSuccess('Photo added to the carousel.');
++    } catch (error) {
++      reportError(error);
++    } finally {
++      clearProgress();
++    }
++  }
++
++  function removeFramePhoto(id, index) {
++    commitFrom((current) => {
++      const shape = findElement(current, 'shape', id);
++      if (!shape) return current;
++      return patchElement(current, 'shape', id, {
++        photos: (shape.photos ?? []).filter((_, photoIndex) => photoIndex !== index),
++      });
++    });
+   }
+ 
+   function resetLayout() {
+     commitFrom(() => ({
++      version: DEFAULT_LAYOUT.version,
+       logo: { ...DEFAULT_LAYOUT.logo },
++      candidates: { ...DEFAULT_LAYOUT.candidates },
++      announcements: { ...DEFAULT_LAYOUT.announcements },
++      dividers: DEFAULT_LAYOUT.dividers.map((divider) => ({ ...divider })),
+       texts: DEFAULT_LAYOUT.texts.map((text) => ({ ...text, style: { ...text.style } })),
+       images: [],
++      videos: [],
+       shapes: [],
+       layerOrder: DEFAULT_LAYOUT.layerOrder.map((entry) => ({ ...entry })),
+     }));
+@@ -858,10 +1177,15 @@ export function useBoardLayoutEditor(
+     setTextContent,
+     setTextStyle,
+     setFill,
++    adjustImageFill,
++    setAnimation,
+     handleLogoUpload,
+     resetLogo,
+     handleAddPhoto,
+     removePhoto,
++    cleanUpLegacyPhotos,
++    handleAddVideo,
++    removeVideo,
+     addText,
+     removeText,
+     addShape,
+@@ -871,6 +1195,9 @@ export function useBoardLayoutEditor(
+     updateElement,
+     setShapeStroke,
+     handleFramePhoto,
++    handleFrameVideo,
++    addFramePhoto,
++    removeFramePhoto,
+     resetLayout,
+     replaceLayout,
+     moveLayer,
+diff --git a/src/pages/AdminVisualBoard.jsx b/src/pages/AdminVisualBoard.jsx
+index 0dcdbb2..552a7ba 100644
+--- a/src/pages/AdminVisualBoard.jsx
++++ b/src/pages/AdminVisualBoard.jsx
+@@ -3,6 +3,7 @@ import {
+   AlignCenter,
+   AlignLeft,
+   AlignRight,
++  Box as BoxIcon,
+   ChevronDown,
+   ChevronUp,
+   ChevronsDown,
+@@ -21,6 +22,7 @@ import {
+   ImagePlus,
+   Layers,
+   LayoutTemplate,
++  List,
+   Megaphone,
+   SeparatorHorizontal,
+   SeparatorVertical,
+@@ -43,18 +45,20 @@ import {
+   Ungroup,
+   UploadCloud,
+   UsersRound,
++  Video,
+   X,
+ } from 'lucide-react';
+ 
+ import {
++  DEFAULT_LAYOUT,
+   applyTemplate,
+   deleteTemplate,
+   isVisible,
+   loadBoardLayout,
+   loadDraftLayout,
+-  loadTemplates,
+   publishBoardLayout,
+   saveTemplate,
++  subscribeTemplates,
+ } from '../lib/boardLayout';
+ import { useBoardLayoutEditor, findElement } from '../lib/useBoardLayoutEditor';
+ import {
+@@ -65,10 +69,15 @@ import {
+   WEIGHT_OPTIONS,
+   resolveTextStyle,
+ } from '../lib/textStyle';
+-import { SHAPE_KINDS, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
++import { SHAPE_KINDS, isCarousel, isFrame, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
+ import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from '../lib/boardGeometry';
++import { ANIMATION_DIRECTIONS, ANIMATION_TYPES, CAROUSEL_ANIMATION, resolveAnimationCss } from '../lib/animationStyle';
+ import FillEditor from '../components/FillEditor';
+-import { subscribeCandidates } from '../lib/localBackend';
++import PhotoCarousel from '../components/PhotoCarousel';
++import PhotoAdjuster from '../components/PhotoAdjuster';
++import VideoAdjuster from '../components/VideoAdjuster';
++import TextContent from '../components/TextContent';
++import { subscribeCandidates } from '../lib/firebaseBackend';
+ import { isShownOnBoard } from '../lib/candidateVisibility';
+ import { useToast } from '../components/ToastProvider';
+ 
+@@ -80,6 +89,7 @@ const SHAPE_ICONS = {
+   triangle: Triangle,
+   line: Minus,
+   frame: Frame,
++  box: BoxIcon,
+ };
+ 
+ /* The left rail's tabs - each switches which panel sits beside it. */
+@@ -101,7 +111,7 @@ const BOX_KINDS = {
+   },
+   announcements: {
+     label: 'Announcements',
+-    hint: 'Drag it anywhere, or drag its corner to set its width. What it shows comes from Announcements.',
++    hint: 'Drag it anywhere, or drag its corner to resize. What it shows comes from Announcements.',
+   },
+ };
+ 
+@@ -110,6 +120,7 @@ const PANEL_BY_KIND = {
+   candidates: 'brand',
+   text: 'text',
+   image: 'uploads',
++  video: 'uploads',
+   shape: 'elements',
+ };
+ 
+@@ -127,6 +138,8 @@ function propertiesTitle(kind, shape) {
+       return 'Logo';
+     case 'image':
+       return 'Photo';
++    case 'video':
++      return 'Video';
+     case 'text':
+       return 'Text';
+     case 'shape':
+@@ -149,7 +162,7 @@ function labelShapes(shapes) {
+ }
+ 
+ export default function AdminVisualBoard() {
+-  const [layout, setLayout] = useState(() => loadDraftLayout());
++  const [layout, setLayout] = useState(DEFAULT_LAYOUT);
+   const [selected, setSelected] = useState(null); // { kind, id? } | null
+   const [multiSelected, setMultiSelected] = useState([]); // [{ kind, id }] - shift-click grouping
+   const [activePanel, setActivePanel] = useState('elements');
+@@ -161,6 +174,11 @@ export default function AdminVisualBoard() {
+   /* The element Ctrl+C remembered, for Ctrl+V to copy. */
+   const [clipboard, setClipboard] = useState(null);
+   const [isDirty, setIsDirty] = useState(false);
++  // Publishing writes the whole layout document (photos and all) to
++  // Firestore, which can take a good while for a board with a lot of
++  // content - without this, the button gives no sign it's doing anything
++  // and clicking it looks like it silently failed.
++  const [publishing, setPublishing] = useState(false);
+ 
+   // '0.5' | '0.75' | '1' | 'fit' - a share of the stage's height
+   const [zoom, setZoom] = useState('fit');
+@@ -171,13 +189,16 @@ export default function AdminVisualBoard() {
+ 
+   const [templateModal, setTemplateModal] = useState(null); // null | 'save' | 'apply'
+   const [templateName, setTemplateName] = useState('');
+-  const [templates, setTemplates] = useState(() => loadTemplates());
++  const [templates, setTemplates] = useState([]);
++
++  // null until the first Firestore read resolves, so the dirty check below
++  // never fires a false "unpublished changes" against an empty placeholder.
++  const [publishedSnapshot, setPublishedSnapshot] = useState(null);
+ 
+   const canvasRef = useRef(null);
+   const middleColumnRef = useRef(null);
+   const stageRef = useRef(null);
+   const layoutRef = useRef(null);
+-  const publishedSnapshotRef = useRef(JSON.stringify(loadBoardLayout()));
+   const showToast = useToast();
+ 
+   /*
+@@ -189,9 +210,59 @@ export default function AdminVisualBoard() {
+   const editor = useBoardLayoutEditor(layout, setLayout, middleColumnRef, {
+     onError: (error) => showToast.error(error.message),
+     onSuccess: (message) => showToast.success(message),
++    onProgress: (message) => {
++      const id = showToast.loading(message, { duration: Infinity });
++      return () => showToast.dismiss(id);
++    },
+     snapEnabled,
+   });
+ 
++  // The draft loads once, when the editor opens - there is normally only
++  // one admin editing at a time, so it doesn't need to be a live subscription.
++  useEffect(() => {
++    let cancelled = false;
++    loadDraftLayout().then((draft) => {
++      if (!cancelled) setLayout(draft);
++    });
++    return () => {
++      cancelled = true;
++    };
++  }, []);
++
++  // One-time cleanup: a board built before photos went to Firebase Storage
++  // may still carry some as base64 data URLs baked into the layout itself,
++  // bloating the document and slowing every publish down. Once the real
++  // draft has loaded (not the DEFAULT_LAYOUT placeholder), silently
++  // re-upload any of those to Storage - a no-op if there's nothing legacy
++  // left. Guarded by a ref rather than state so it only ever runs once,
++  // even though migrating triggers this same effect again with new layout.
++  const cleanedLegacyPhotosRef = useRef(false);
++
++  useEffect(() => {
++    if (cleanedLegacyPhotosRef.current || layout === DEFAULT_LAYOUT) return;
++    cleanedLegacyPhotosRef.current = true;
++
++    editor.cleanUpLegacyPhotos().then((didMigrate) => {
++      if (didMigrate) {
++        showToast.success('Cleaned up some old photos to speed up publishing.');
++      }
++    });
++  }, [layout]);
++
++  useEffect(() => {
++    let cancelled = false;
++    loadBoardLayout().then((published) => {
++      if (!cancelled) setPublishedSnapshot(JSON.stringify(published));
++    });
++    return () => {
++      cancelled = true;
++    };
++  }, []);
++
++  useEffect(() => {
++    return subscribeTemplates(setTemplates);
++  }, []);
++
+   useEffect(() => {
+     return subscribeCandidates((rows) => {
+       setCandidates(rows.filter((candidate) => isShownOnBoard(candidate)));
+@@ -199,8 +270,9 @@ export default function AdminVisualBoard() {
+   }, []);
+ 
+   useEffect(() => {
+-    setIsDirty(JSON.stringify(layout) !== publishedSnapshotRef.current);
+-  }, [layout]);
++    if (publishedSnapshot === null) return;
++    setIsDirty(JSON.stringify(layout) !== publishedSnapshot);
++  }, [layout, publishedSnapshot]);
+ 
+   /*
+    * "Fit to screen" only has real work to do in fullscreen, where the stage
+@@ -473,19 +545,18 @@ export default function AdminVisualBoard() {
+     setMultiSelected([]);
+   }
+ 
+-  function handleSaveTemplate(event) {
++  async function handleSaveTemplate(event) {
+     event.preventDefault();
+     if (!templateName.trim()) return;
+ 
+-    saveTemplate(templateName, layout);
+-    setTemplates(loadTemplates());
++    await saveTemplate(templateName, layout);
+     setTemplateName('');
+     setTemplateModal(null);
+     showToast.success('Template saved.');
+   }
+ 
+   function handleApplyTemplate(id) {
+-    const nextLayout = applyTemplate(id);
++    const nextLayout = applyTemplate(templates, id);
+     if (!nextLayout) {
+       showToast.error('That template is gone.');
+       return;
+@@ -500,7 +571,6 @@ export default function AdminVisualBoard() {
+ 
+   function handleDeleteTemplate(id) {
+     deleteTemplate(id);
+-    setTemplates(loadTemplates());
+   }
+ 
+   /* Deselects first if the removed element was the one being edited. */
+@@ -508,11 +578,20 @@ export default function AdminVisualBoard() {
+     setSelected((current) => (current?.kind === kind && current.id === id ? null : current));
+   }
+ 
+-  function publish() {
+-    publishBoardLayout(layout);
+-    publishedSnapshotRef.current = JSON.stringify(layout);
+-    setIsDirty(false);
+-    showToast.success('Published to the live board.');
++  async function publish() {
++    setPublishing(true);
++
++    try {
++      await publishBoardLayout(layout);
++      setPublishedSnapshot(JSON.stringify(layout));
++      setIsDirty(false);
++      showToast.success('Published to the live board.');
++    } catch (error) {
++      console.warn('Could not publish the board layout:', error);
++      showToast.error('Could not publish - the board may be too large (try a smaller photo).');
++    } finally {
++      setPublishing(false);
++    }
+   }
+ 
+   async function addPhotoAndSelect(file) {
+@@ -520,6 +599,11 @@ export default function AdminVisualBoard() {
+     if (id) select('image', id);
+   }
+ 
++  async function addVideoAndSelect(file) {
++    const id = await editor.handleAddVideo(file);
++    if (id) select('video', id);
++  }
++
+   function addTextAndSelect() {
+     select('text', editor.addText());
+   }
+@@ -537,6 +621,11 @@ export default function AdminVisualBoard() {
+     deselectIfSelected('image', id);
+   }
+ 
++  function removeVideo(id) {
++    editor.removeVideo(id);
++    deselectIfSelected('video', id);
++  }
++
+   function removeText(id) {
+     editor.removeText(id);
+     deselectIfSelected('text', id);
+@@ -661,6 +750,12 @@ export default function AdminVisualBoard() {
+       return { label: `Photo ${index + 1}`, Icon: ImagePlus, element: layout.images[index] };
+     }
+ 
++    if (entry.kind === 'video') {
++      const index = layout.videos.findIndex((item) => item.id === entry.id);
++      if (index < 0) return null;
++      return { label: `Video ${index + 1}`, Icon: Video, element: layout.videos[index] };
++    }
++
+     if (entry.kind === 'shape') {
+       const index = layout.shapes.findIndex((item) => item.id === entry.id);
+       if (index < 0) return null;
+@@ -726,8 +821,11 @@ export default function AdminVisualBoard() {
+           {candidates.length === 0 ? (
+             <span className="vb-candidates-empty">No candidates currently shown</span>
+           ) : (
+-            <div className="vb-candidate-preview-grid">
+-              {candidates.slice(0, 4).map((candidate) => (
++            <div
++              className="vb-candidate-preview-grid"
++              style={{ gridTemplateColumns: `repeat(${box.perRow}, 1fr)` }}
++            >
++              {candidates.slice(0, box.perRow * 2).map((candidate) => (
+                 <div key={candidate.id} className="vb-candidate-preview-card">
+                   <div className="vb-candidate-preview-photo">
+                     {candidate.photo_url ? (
+@@ -793,7 +891,10 @@ export default function AdminVisualBoard() {
+           className={`vb-element ${isSelected('logo') ? 'selected' : ''} ${
+             isMultiSelected('logo') ? 'multi-selected' : ''
+           }`}
+-          style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
++          style={{
++            ...scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH),
++            ...resolveAnimationCss(layout.logo.animation),
++          }}
+           onPointerDown={handlePointerDown('logo')}
+           onContextMenu={handleContextMenu('logo', null)}
+         >
+@@ -821,11 +922,13 @@ export default function AdminVisualBoard() {
+           className={`vb-element ${isSelected('text', text.id) ? 'selected' : ''} ${
+             isMultiSelected('text', text.id) ? 'multi-selected' : ''
+           }`}
+-          style={positionStyle(text)}
++          style={{ ...positionStyle(text), ...resolveAnimationCss(text.animation) }}
+           onPointerDown={handlePointerDown('text', text.id)}
+           onContextMenu={handleContextMenu('text', text.id)}
+         >
+-          <span style={resolveTextStyle(text)}>{text.text}</span>
++          <span style={resolveTextStyle(text)}>
++            <TextContent text={text} />
++          </span>
+ 
+           {isSelected('text', text.id) && (
+             <span
+@@ -849,7 +952,10 @@ export default function AdminVisualBoard() {
+           className={`vb-element ${isSelected('image', image.id) ? 'selected' : ''} ${
+             isMultiSelected('image', image.id) ? 'multi-selected' : ''
+           }`}
+-          style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
++          style={{
++            ...scaledPositionStyle(image, PHOTO_BASE_WIDTH),
++            ...resolveAnimationCss(image.animation),
++          }}
+           onPointerDown={handlePointerDown('image', image.id)}
+           onContextMenu={handleContextMenu('image', image.id)}
+         >
+@@ -866,11 +972,42 @@ export default function AdminVisualBoard() {
+       );
+     }
+ 
++    if (entry.kind === 'video') {
++      const video = layout.videos.find((item) => item.id === entry.id);
++      if (!video || !isVisible(video)) return null;
++
++      return (
++        <button
++          key={video.id}
++          type="button"
++          className={`vb-element ${isSelected('video', video.id) ? 'selected' : ''} ${
++            isMultiSelected('video', video.id) ? 'multi-selected' : ''
++          }`}
++          style={scaledPositionStyle(video, PHOTO_BASE_WIDTH)}
++          onPointerDown={handlePointerDown('video', video.id)}
++          onContextMenu={handleContextMenu('video', video.id)}
++        >
++          <video src={video.url} className="vb-photo-img" muted loop autoPlay playsInline />
++
++          {isSelected('video', video.id) && (
++            <span
++              className="vb-shape-resize"
++              title="Drag to resize"
++              onPointerDown={editor.beginScaleResize('video', video.id, PHOTO_BASE_WIDTH)}
++            />
++          )}
++        </button>
++      );
++    }
++
+     if (entry.kind === 'shape') {
+       const shape = layout.shapes.find((item) => item.id === entry.id);
+       if (!shape || !isVisible(shape)) return null;
+ 
+-      const isEmptyFrame = shape.fill.type === 'image' && !shape.fill.url;
++      const isEmptyFrame =
++        (shape.fill.type === 'image' || shape.fill.type === 'video') &&
++        !shape.fill.url &&
++        !isCarousel(shape);
+       const selectedOnCanvas = isSelected('shape', shape.id);
+ 
+       return (
+@@ -885,6 +1022,20 @@ export default function AdminVisualBoard() {
+         >
+           {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
+ 
++          {isCarousel(shape) ? (
++            <PhotoCarousel
++              photos={shape.photos}
++              direction={shape.animation.direction}
++              speed={shape.animation.speed}
++              fit={shape.fill.fit}
++            />
++          ) : (
++            <>
++              {shape.fill.type === 'image' && <PhotoAdjuster fill={shape.fill} />}
++              {shape.fill.type === 'video' && <VideoAdjuster fill={shape.fill} />}
++            </>
++          )}
++
+           {selectedOnCanvas && (
+             <span
+               className="vb-shape-resize"
+@@ -901,6 +1052,8 @@ export default function AdminVisualBoard() {
+ 
+   const selectedImage =
+     selected?.kind === 'image' ? layout.images.find((image) => image.id === selected.id) : null;
++  const selectedVideo =
++    selected?.kind === 'video' ? layout.videos.find((video) => video.id === selected.id) : null;
+   const selectedText =
+     selected?.kind === 'text' ? layout.texts.find((text) => text.id === selected.id) : null;
+   const selectedShape =
+@@ -916,11 +1069,13 @@ export default function AdminVisualBoard() {
+       ? layout.logo
+       : selected?.kind === 'image'
+         ? selectedImage
+-        : selected?.kind === 'text'
+-          ? selectedText
+-          : selected?.kind === 'divider'
+-            ? selectedDivider
+-            : selectedShape;
++        : selected?.kind === 'video'
++          ? selectedVideo
++          : selected?.kind === 'text'
++            ? selectedText
++            : selected?.kind === 'divider'
++              ? selectedDivider
++              : selectedShape;
+ 
+   const isTextSelected = selected?.kind === 'text';
+   const shapeLabels = labelShapes(layout.shapes);
+@@ -956,8 +1111,13 @@ export default function AdminVisualBoard() {
+               Preview
+               <ExternalLink size={11} />
+             </a>
+-            <button type="button" className="primary-button" onClick={publish} disabled={!isDirty}>
+-              Publish
++            <button
++              type="button"
++              className="primary-button"
++              onClick={publish}
++              disabled={!isDirty || publishing}
++            >
++              {publishing ? 'Publishing…' : 'Publish'}
+             </button>
+           </div>
+         </div>
+@@ -1143,6 +1303,14 @@ export default function AdminVisualBoard() {
+                               <Icon size={14} />
+                               {shapeLabels[index]}
+                             </button>
++                            <button
++                              type="button"
++                              className="vb-layer-icon-button"
++                              onClick={() => editor.setLocked('shape', shape.id, !shape.locked)}
++                              aria-label={`${shape.locked ? 'Unlock' : 'Lock'} ${shapeLabels[index]}`}
++                            >
++                              {shape.locked ? <Lock size={13} /> : <LockOpen size={13} />}
++                            </button>
+                             <button
+                               type="button"
+                               className="vb-element-remove"
+@@ -1182,6 +1350,14 @@ export default function AdminVisualBoard() {
+                             <Type size={14} />
+                             Text {index + 1}
+                           </button>
++                          <button
++                            type="button"
++                            className="vb-layer-icon-button"
++                            onClick={() => editor.setLocked('text', text.id, !text.locked)}
++                            aria-label={`${text.locked ? 'Unlock' : 'Lock'} Text ${index + 1}`}
++                          >
++                            {text.locked ? <Lock size={13} /> : <LockOpen size={13} />}
++                          </button>
+                           <button
+                             type="button"
+                             className="vb-element-remove"
+@@ -1201,25 +1377,43 @@ export default function AdminVisualBoard() {
+                 <>
+                   <p className="vb-panel-label">Board identity</p>
+ 
+-                  <button
+-                    type="button"
+-                    className={`vb-element-row ${isSelected('logo') ? 'active' : ''} ${
+-                      isVisible(layout.logo) ? '' : 'is-hidden'
+-                    }`}
+-                    onClick={() => select('logo')}
+-                  >
+-                    <ImageIcon size={14} />
+-                    Logo
+-                  </button>
++                  <div className={`vb-element-row-wrap ${isSelected('logo') ? 'active' : ''}`}>
++                    <button
++                      type="button"
++                      className={`vb-element-row ${isVisible(layout.logo) ? '' : 'is-hidden'}`}
++                      onClick={() => select('logo')}
++                    >
++                      <ImageIcon size={14} />
++                      Logo
++                    </button>
++                    <button
++                      type="button"
++                      className="vb-layer-icon-button"
++                      onClick={() => editor.setLocked('logo', null, !layout.logo.locked)}
++                      aria-label={`${layout.logo.locked ? 'Unlock' : 'Lock'} Logo`}
++                    >
++                      {layout.logo.locked ? <Lock size={13} /> : <LockOpen size={13} />}
++                    </button>
++                  </div>
+ 
+-                  <button
+-                    type="button"
+-                    className={`vb-element-row ${isSelected('candidates') ? 'active' : ''}`}
+-                    onClick={() => select('candidates')}
+-                  >
+-                    <UsersRound size={14} />
+-                    Candidate Board
+-                  </button>
++                  <div className={`vb-element-row-wrap ${isSelected('candidates') ? 'active' : ''}`}>
++                    <button
++                      type="button"
++                      className="vb-element-row"
++                      onClick={() => select('candidates')}
++                    >
++                      <UsersRound size={14} />
++                      Candidate Board
++                    </button>
++                    <button
++                      type="button"
++                      className="vb-layer-icon-button"
++                      onClick={() => editor.setLocked('candidates', null, !layout.candidates.locked)}
++                      aria-label={`${layout.candidates.locked ? 'Unlock' : 'Lock'} Candidate Board`}
++                    >
++                      {layout.candidates.locked ? <Lock size={13} /> : <LockOpen size={13} />}
++                    </button>
++                  </div>
+                 </>
+               )}
+ 
+@@ -1242,7 +1436,7 @@ export default function AdminVisualBoard() {
+ 
+                   {layout.images.length > 0 && (
+                     <>
+-                      <p className="vb-panel-label">Uploaded</p>
++                      <p className="vb-panel-label">Uploaded photos</p>
+                       {layout.images.map((image, index) => (
+                         <div
+                           key={image.id}
+@@ -1256,6 +1450,14 @@ export default function AdminVisualBoard() {
+                             <ImagePlus size={14} />
+                             Photo {index + 1}
+                           </button>
++                          <button
++                            type="button"
++                            className="vb-layer-icon-button"
++                            onClick={() => editor.setLocked('image', image.id, !image.locked)}
++                            aria-label={`${image.locked ? 'Unlock' : 'Lock'} Photo ${index + 1}`}
++                          >
++                            {image.locked ? <Lock size={13} /> : <LockOpen size={13} />}
++                          </button>
+                           <button
+                             type="button"
+                             className="vb-element-remove"
+@@ -1268,6 +1470,58 @@ export default function AdminVisualBoard() {
+                       ))}
+                     </>
+                   )}
++
++                  <label htmlFor="vb-add-video" className="vb-panel-add">
++                    <Plus size={14} />
++                    Add Video
++                  </label>
++                  <input
++                    id="vb-add-video"
++                    type="file"
++                    accept="video/mp4,video/webm,video/ogg"
++                    style={{ display: 'none' }}
++                    onChange={(event) => {
++                      void addVideoAndSelect(event.target.files?.[0] ?? null);
++                      event.target.value = '';
++                    }}
++                  />
++
++                  {layout.videos.length > 0 && (
++                    <>
++                      <p className="vb-panel-label">Uploaded videos</p>
++                      {layout.videos.map((video, index) => (
++                        <div
++                          key={video.id}
++                          className={`vb-element-row-wrap ${isSelected('video', video.id) ? 'active' : ''}`}
++                        >
++                          <button
++                            type="button"
++                            className={`vb-element-row ${isVisible(video) ? '' : 'is-hidden'}`}
++                            onClick={() => select('video', video.id)}
++                          >
++                            <Video size={14} />
++                            Video {index + 1}
++                          </button>
++                          <button
++                            type="button"
++                            className="vb-layer-icon-button"
++                            onClick={() => editor.setLocked('video', video.id, !video.locked)}
++                            aria-label={`${video.locked ? 'Unlock' : 'Lock'} Video ${index + 1}`}
++                          >
++                            {video.locked ? <Lock size={13} /> : <LockOpen size={13} />}
++                          </button>
++                          <button
++                            type="button"
++                            className="vb-element-remove"
++                            onClick={() => removeVideo(video.id)}
++                            aria-label={`Remove Video ${index + 1}`}
++                          >
++                            <X size={12} />
++                          </button>
++                        </div>
++                      ))}
++                    </>
++                  )}
+                 </>
+               )}
+ 
+@@ -1570,6 +1824,45 @@ export default function AdminVisualBoard() {
+                       />
+                     )}
+ 
++                    {box.perRow !== undefined && (
++                      <div className="vb-field-row">
++                        <label htmlFor="vb-per-row">
++                          Candidates per row
++                          <input
++                            id="vb-per-row"
++                            className="form-input"
++                            type="number"
++                            min="1"
++                            max="6"
++                            step="1"
++                            value={box.perRow}
++                            onChange={(event) =>
++                              editor.updateElement(selected.kind, null, {
++                                perRow: Number(event.target.value),
++                              })
++                            }
++                          />
++                        </label>
++                      </div>
++                    )}
++
++                    {box.perRow !== undefined && (
++                      <input
++                        className="vb-range"
++                        type="range"
++                        min="1"
++                        max="6"
++                        step="1"
++                        value={box.perRow}
++                        aria-label="Candidates per row"
++                        onChange={(event) =>
++                          editor.updateElement(selected.kind, null, {
++                            perRow: Number(event.target.value),
++                          })
++                        }
++                      />
++                    )}
++
+                     <div className="vb-element-actions">
+                       <button
+                         type="button"
+@@ -1632,6 +1925,31 @@ export default function AdminVisualBoard() {
+                       value={selectedText.text}
+                       onChange={(event) => editor.setTextContent(selected.id, event.target.value)}
+                     />
++                    <p className="vb-properties-hint">
++                      Press Enter to start a new line on the board.
++                    </p>
++
++                    <label className="settings-option">
++                      <span className="settings-option-label">
++                        <List size={13} />
++                        Bulleted list
++                      </span>
++                      <input
++                        type="checkbox"
++                        checked={selectedText.bulletList === true}
++                        onChange={(event) =>
++                          editor.updateElement('text', selected.id, {
++                            bulletList: event.target.checked,
++                          })
++                        }
++                      />
++                    </label>
++
++                    {selectedText.bulletList && (
++                      <p className="vb-properties-hint">
++                        Each line on its own becomes a bullet - put one item per line above.
++                      </p>
++                    )}
+                   </div>
+                 )}
+ 
+@@ -1672,6 +1990,17 @@ export default function AdminVisualBoard() {
+                   <img src={selectedImage.url} alt="" className="vb-properties-thumb" />
+                 )}
+ 
++                {selected.kind === 'video' && (
++                  <video
++                    src={selectedVideo.url}
++                    className="vb-properties-thumb"
++                    muted
++                    loop
++                    autoPlay
++                    playsInline
++                  />
++                )}
++
+                 {selected.kind === 'shape' && (
+                   <>
+                     <div className="form-group">
+@@ -1845,11 +2174,207 @@ export default function AdminVisualBoard() {
+                       allowImage={selected.kind === 'shape'}
+                       uploadId="vb-fill-photo"
+                       onUploadImage={(file) => editor.handleFramePhoto(selected.id, file)}
++                      allowVideo={selected.kind === 'shape'}
++                      videoUploadId="vb-fill-video"
++                      onUploadVideo={(file) => editor.handleFrameVideo(selected.id, file)}
+                       onChange={(fill) => editor.setFill(selected.kind, selected.id, fill)}
+                     />
+                   </div>
+                 )}
+ 
++                {selected.kind === 'shape' &&
++                  (selectedShape.fill.type === 'image' || selectedShape.fill.type === 'video') &&
++                  selectedShape.fill.url && (
++                  <div className="form-group">
++                    <div className="vb-photo-position-header">
++                      <label className="form-label">
++                        {selectedShape.fill.type === 'video' ? 'Video position' : 'Photo position'}
++                      </label>
++                      <button
++                        type="button"
++                        className="vb-photo-position-reset"
++                        onClick={() =>
++                          editor.adjustImageFill(selected.id, { offsetX: 0, offsetY: 0, zoom: 1 })
++                        }
++                      >
++                        <RotateCcw size={11} />
++                        Reset
++                      </button>
++                    </div>
++
++                    <label className="form-label" htmlFor="vb-photo-zoom">
++                      Zoom
++                    </label>
++                    <div className="scale-field">
++                      <input
++                        id="vb-photo-zoom"
++                        type="range"
++                        min="1"
++                        max="4"
++                        step="0.05"
++                        value={selectedShape.fill.zoom}
++                        onChange={(event) =>
++                          editor.adjustImageFill(selected.id, { zoom: Number(event.target.value) })
++                        }
++                      />
++                      <span className="scale-field-value">
++                        {selectedShape.fill.zoom.toFixed(2)}x
++                      </span>
++                    </div>
++
++                    <div className="vb-field-row">
++                      <label htmlFor="vb-photo-x">
++                        Move X
++                        <input
++                          id="vb-photo-x"
++                          className="form-input"
++                          type="range"
++                          min="-50"
++                          max="50"
++                          step="1"
++                          value={selectedShape.fill.offsetX}
++                          onChange={(event) =>
++                            editor.adjustImageFill(selected.id, {
++                              offsetX: Number(event.target.value),
++                            })
++                          }
++                        />
++                      </label>
++                      <label htmlFor="vb-photo-y">
++                        Move Y
++                        <input
++                          id="vb-photo-y"
++                          className="form-input"
++                          type="range"
++                          min="-50"
++                          max="50"
++                          step="1"
++                          value={selectedShape.fill.offsetY}
++                          onChange={(event) =>
++                            editor.adjustImageFill(selected.id, {
++                              offsetY: Number(event.target.value),
++                            })
++                          }
++                        />
++                      </label>
++                    </div>
++                  </div>
++                )}
++
++                {selected.kind === 'shape' && isFrame(selectedShape) && (
++                  <div className="form-group">
++                    <label className="form-label">Carousel photos</label>
++                    <p className="vb-properties-hint">
++                      Add two or more to unlock the Carousel animation below - it slides between
++                      them instead of showing the single photo above.
++                    </p>
++
++                    <div className="vb-carousel-photos">
++                      {selectedShape.photos.map((url, index) => (
++                        <div key={index} className="vb-carousel-photo">
++                          <img src={url} alt="" />
++                          <button
++                            type="button"
++                            className="vb-carousel-photo-remove"
++                            aria-label={`Remove photo ${index + 1}`}
++                            onClick={() => editor.removeFramePhoto(selected.id, index)}
++                          >
++                            <X size={11} />
++                          </button>
++                        </div>
++                      ))}
++
++                      <label htmlFor="vb-carousel-photo-add" className="vb-carousel-photo-add">
++                        <input
++                          id="vb-carousel-photo-add"
++                          type="file"
++                          accept="image/png,image/jpeg,image/webp"
++                          onChange={(event) => {
++                            void editor.addFramePhoto(selected.id, event.target.files?.[0] ?? null);
++                            event.target.value = '';
++                          }}
++                        />
++                        <Plus size={16} />
++                      </label>
++                    </div>
++                  </div>
++                )}
++
++                {(selected.kind === 'text' ||
++                  selected.kind === 'logo' ||
++                  selected.kind === 'image' ||
++                  selected.kind === 'shape') && (
++                  <div className="form-group">
++                    <label className="form-label" htmlFor="vb-animation-type">
++                      Animation
++                    </label>
++                    <div className="vb-field-row">
++                      <select
++                        id="vb-animation-type"
++                        className="form-select"
++                        value={selectedElement.animation.type}
++                        onChange={(event) =>
++                          editor.setAnimation(selected.kind, selected.id, { type: event.target.value })
++                        }
++                      >
++                        {ANIMATION_TYPES.map((option) => (
++                          <option key={option.value} value={option.value}>
++                            {option.label}
++                          </option>
++                        ))}
++                        {selected.kind === 'shape' &&
++                          isFrame(selectedShape) &&
++                          selectedShape.photos.length > 1 && (
++                            <option value={CAROUSEL_ANIMATION.value}>{CAROUSEL_ANIMATION.label}</option>
++                          )}
++                      </select>
++
++                      {(selectedElement.animation.type === 'slide' ||
++                        selectedElement.animation.type === 'carousel') && (
++                        <select
++                          className="form-select"
++                          aria-label="Animation direction"
++                          value={selectedElement.animation.direction}
++                          onChange={(event) =>
++                            editor.setAnimation(selected.kind, selected.id, {
++                              direction: event.target.value,
++                            })
++                          }
++                        >
++                          {ANIMATION_DIRECTIONS.map((option) => (
++                            <option key={option.value} value={option.value}>
++                              {option.label}
++                            </option>
++                          ))}
++                        </select>
++                      )}
++                    </div>
++
++                    {selectedElement.animation.type !== 'none' && (
++                      <div className="scale-field">
++                        <input
++                          type="range"
++                          min="1"
++                          max="30"
++                          step="1"
++                          value={selectedElement.animation.speed}
++                          aria-label={
++                            selectedElement.animation.type === 'carousel'
++                              ? 'Seconds per photo'
++                              : 'Animation speed'
++                          }
++                          onChange={(event) =>
++                            editor.setAnimation(selected.kind, selected.id, {
++                              speed: Number(event.target.value),
++                            })
++                          }
++                        />
++                        <span className="scale-field-value">{selectedElement.animation.speed}s</span>
++                      </div>
++                    )}
++                  </div>
++                )}
++
+                 {isTextSelected && (
+                   <div className="form-group">
+                     <label className="form-label" htmlFor="vb-shadow">
+@@ -2074,7 +2599,7 @@ export default function AdminVisualBoard() {
+                   </div>
+                 )}
+ 
+-                {(selected.kind === 'logo' || selected.kind === 'image') && (
++                {(selected.kind === 'logo' || selected.kind === 'image' || selected.kind === 'video') && (
+                   <div className="form-group">
+                     <label className="form-label">Size</label>
+                     <div className="scale-field">
+@@ -2148,6 +2673,7 @@ export default function AdminVisualBoard() {
+ 
+                 <div className="vb-element-actions">
+                   {(selected.kind === 'image' ||
++                    selected.kind === 'video' ||
+                     selected.kind === 'text' ||
+                     selected.kind === 'shape' ||
+                     selected.kind === 'divider') && (
+diff --git a/src/pages/VisualBoard.jsx b/src/pages/VisualBoard.jsx
+index 584da44..770af3e 100644
+--- a/src/pages/VisualBoard.jsx
++++ b/src/pages/VisualBoard.jsx
+@@ -3,12 +3,22 @@ import { Megaphone } from "lucide-react";
+ 
+ import FullscreenSwitch from "../components/FullscreenSwitch";
+ import AutoFitText from "../components/AutoFitText";
+-import { subscribeAnnouncements, subscribeCandidates } from "../lib/localBackend";
++import { subscribeAnnouncements, subscribeCandidates } from "../lib/firebaseBackend";
+ import { isShownOnBoard } from "../lib/candidateVisibility";
+-import { DEFAULT_LAYOUT, LAYOUT_EVENT, isVisible, loadBoardLayout } from "../lib/boardLayout";
++import { DEFAULT_LAYOUT, isVisible, subscribeBoardLayout } from "../lib/boardLayout";
++import {
++  DEFAULT_ANNOUNCEMENT_STYLE,
++  resolveAnnouncementStyle,
++  subscribeAnnouncementStyle,
++} from "../lib/announcementStyle";
+ import { resolveTextStyle } from "../lib/textStyle";
+-import { resolveShapeStyle } from "../lib/shapeStyle";
++import { isCarousel, resolveShapeStyle } from "../lib/shapeStyle";
++import { resolveAnimationCss } from "../lib/animationStyle";
+ import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from "../lib/boardGeometry";
++import PhotoCarousel from "../components/PhotoCarousel";
++import PhotoAdjuster from "../components/PhotoAdjuster";
++import VideoAdjuster from "../components/VideoAdjuster";
++import TextContent from "../components/TextContent";
+ 
+ /* Announcements cycle on their own timer, independent of the candidate sets. */
+ const ANNOUNCEMENT_DURATION = 7000;
+@@ -141,13 +151,11 @@ export default function DisplayPage() {
+    * DISPLAY SETTINGS
+    * =========================================================
+    *
+-   * The candidate carousel (right column) shows about 4 cards
+-   * in its viewport at once, scrolling upward continuously
+-   * rather than swapping discrete sets.
++   * The candidate carousel (right column) shows a configurable number of
++   * candidates across each row - see `perRow` on layout.candidates -
++   * scrolling upward continuously rather than swapping discrete sets.
+    */
+ 
+-  const CAROUSEL_VISIBLE_COUNT = 4;
+-
+   /* =========================================================
+      LOAD CANDIDATES (live)
+ 
+@@ -185,6 +193,7 @@ export default function DisplayPage() {
+ 
+   const [announcements, setAnnouncements] = useState([]);
+   const [currentAnnouncement, setCurrentAnnouncement] = useState(0);
++  const [announcementStyle, setAnnouncementStyle] = useState(DEFAULT_ANNOUNCEMENT_STYLE);
+ 
+   useEffect(() => {
+     return subscribeAnnouncements((rows) => {
+@@ -198,6 +207,10 @@ export default function DisplayPage() {
+     });
+   }, []);
+ 
++  useEffect(() => {
++    return subscribeAnnouncementStyle(setAnnouncementStyle);
++  }, []);
++
+   useEffect(() => {
+     if (currentAnnouncement >= announcements.length) {
+       setCurrentAnnouncement(0);
+@@ -221,25 +234,14 @@ export default function DisplayPage() {
+ 
+      Where the logo, every text block, and any photos or shapes sit
+      - and whether each is shown at all - set from /admin/visual-board
+-     and synced here the same way the theme is: a native 'storage'
+-     event reaches this page in another tab or in the dashboard's
+-     preview iframe, and LAYOUT_EVENT covers a listener in the very
+-     same window.
++     and synced here through Firestore's own realtime updates, the
++     same way subscribeCandidates/subscribeAnnouncements work above.
+   ========================================================= */
+ 
+   const [layout, setLayout] = useState(DEFAULT_LAYOUT);
+ 
+   useEffect(() => {
+-    const load = () => setLayout(loadBoardLayout());
+-
+-    load();
+-    window.addEventListener("storage", load);
+-    window.addEventListener(LAYOUT_EVENT, load);
+-
+-    return () => {
+-      window.removeEventListener("storage", load);
+-      window.removeEventListener(LAYOUT_EVENT, load);
+-    };
++    return subscribeBoardLayout(setLayout);
+   }, []);
+ 
+   useEffect(() => {
+@@ -270,6 +272,26 @@ export default function DisplayPage() {
+     };
+   }, [isPreviewEmbed]);
+ 
++  /* Nothing else on the board means anything until the first candidate
++     snapshot lands, so the loading state is its own screen - just the
++     mark, spinning - rather than a skeleton of a board that isn't
++     there yet. */
++  if (loading) {
++    return (
++      <main
++        className={`grid h-dvh place-items-center ${
++          lightMode ? "bg-[#f4efed]" : "bg-[#0b0102]"
++        }`}
++      >
++        <img
++          src="/visual/HILLC-Petals.png"
++          alt=""
++          className="w-[12vw] max-w-[140px] min-w-[56px] animate-[board-loading-spin_1.6s_linear_infinite] drop-shadow-[0_0_18px_rgba(162,29,27,0.6)] motion-reduce:[animation-duration:2.4s]"
++        />
++      </main>
++    );
++  }
++
+   /*
+    * =========================================================
+    * CAROUSEL SCROLL SPEED
+@@ -320,7 +342,9 @@ export default function DisplayPage() {
+     );
+   }
+ 
+-  /* The announcement strip, as a positioned box that sizes to its text. */
++  /* The announcement strip, as a positioned, resizable box - the bordered
++     banner fills it (width and height alike), rather than just hugging its
++     own text, so dragging its corner in the editor has a visible effect. */
+   function renderAnnouncementsLayer() {
+     const box = layout.announcements;
+     if (!isVisible(box) || announcements.length === 0) return null;
+@@ -328,11 +352,12 @@ export default function DisplayPage() {
+     return (
+       <div
+         key="announcements"
+-        className="absolute flex justify-center"
++        className="absolute flex items-center justify-center"
+         style={{
+           left: `${box.x}%`,
+           top: `${box.y}%`,
+           width: `${box.width}%`,
++          height: `${box.height}%`,
+           transform: "translate(-50%, -50%)",
+         }}
+       >
+@@ -340,7 +365,8 @@ export default function DisplayPage() {
+           key={announcements[currentAnnouncement]?.id}
+           className={`
+             flex
+-            max-w-full
++            h-full
++            w-full
+             items-center
+             justify-center
+             gap-2
+@@ -356,7 +382,7 @@ export default function DisplayPage() {
+         >
+           <Megaphone size={18} className="shrink-0" aria-hidden="true" />
+ 
+-          <p className="text-[clamp(13px,1.6vw,18px)] font-semibold leading-snug">
++          <p className="leading-snug" style={resolveAnnouncementStyle(announcementStyle)}>
+             {announcements[currentAnnouncement]?.message}
+           </p>
+         </div>
+@@ -399,7 +425,23 @@ export default function DisplayPage() {
+     if (entry.kind === "shape") {
+       const shape = layout.shapes.find((item) => item.id === entry.id);
+       if (!shape || !isVisible(shape)) return null;
+-      return <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)} />;
++      return (
++        <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)}>
++          {isCarousel(shape) ? (
++            <PhotoCarousel
++              photos={shape.photos}
++              direction={shape.animation.direction}
++              speed={shape.animation.speed}
++              fit={shape.fill.fit}
++            />
++          ) : (
++            <>
++              {shape.fill.type === "image" && <PhotoAdjuster fill={shape.fill} />}
++              {shape.fill.type === "video" && <VideoAdjuster fill={shape.fill} />}
++            </>
++          )}
++        </div>
++      );
+     }
+ 
+     if (entry.kind === "logo") {
+@@ -409,7 +451,10 @@ export default function DisplayPage() {
+           key="logo"
+           src={layout.logo.url || "/visual/logo.png"}
+           alt="Hyacinth"
+-          style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
++          style={{
++            ...scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH),
++            ...resolveAnimationCss(layout.logo.animation),
++          }}
+           className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.55)]"
+         />
+       );
+@@ -423,22 +468,49 @@ export default function DisplayPage() {
+           key={image.id}
+           src={image.url}
+           alt=""
+-          style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
++          style={{
++            ...scaledPositionStyle(image, PHOTO_BASE_WIDTH),
++            ...resolveAnimationCss(image.animation),
++          }}
+           className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
+         />
+       );
+     }
+ 
++    if (entry.kind === "video") {
++      const video = layout.videos.find((item) => item.id === entry.id);
++      if (!video || !isVisible(video)) return null;
++      return (
++        <video
++          key={video.id}
++          src={video.url}
++          style={{
++            ...scaledPositionStyle(video, PHOTO_BASE_WIDTH),
++            ...resolveAnimationCss(video.animation),
++          }}
++          className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
++          autoPlay
++          loop
++          muted
++          playsInline
++        />
++      );
++    }
++
+     if (entry.kind === "text") {
+       const text = layout.texts.find((item) => item.id === entry.id);
+       if (!text || !isVisible(text)) return null;
+       return (
+         <p
+           key={text.id}
+-          style={{ ...positionStyle(text), ...resolveTextStyle(text) }}
++          style={{
++            ...positionStyle(text),
++            ...resolveTextStyle(text),
++            ...resolveAnimationCss(text.animation),
++          }}
+           className="absolute"
+         >
+-          {text.text}
++          <TextContent text={text} />
+         </p>
+       );
+     }
+@@ -458,14 +530,17 @@ export default function DisplayPage() {
+     return rows;
+   }
+ 
+-  /* One candidate box for the carousel - photo on top, gold name bar below,
+-     the board's original card look, just sized to sit two across.
+-     `full` spans both grid columns, for a lone candidate closing out a row. */
+-  function renderCandidateCard(candidate, key, full = false) {
++  /* One candidate box for the carousel - photo on top, gold name bar below.
++     The photo keeps a fixed aspect ratio rather than filling whatever
++     height its row is given, so a card's height simply follows from its
++     width - which is what makes `perRow` (below) "auto adjust" card size
++     just by changing how many sit across a row, with no separate height
++     setting to keep in sync. */
++  function renderCandidateCard(candidate, key) {
+     return (
+       <div
+         key={key}
+-        className={`flex flex-col overflow-hidden rounded-[3px] ${full ? "col-span-2" : ""} ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}`}
++        className={`flex flex-col overflow-hidden rounded-[3px] border ${lightMode ? "border-[#d8ab9c] bg-[#fdf6f3]" : "border-[#c9a03c] bg-[#2e0505]"}`}
+       >
+         <div
+           className={`
+@@ -491,13 +566,13 @@ export default function DisplayPage() {
+           className={`
+             relative
+             flex
+-            min-h-[clamp(48px,16cqh,84px)]
++            min-h-[clamp(30px,9cqh,55px)]
+             flex-col
+             items-center
+             justify-center
+             gap-0.5
+             px-2
+-            py-1.5
++            py-1
+ 
+             bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
+           `}
+@@ -537,48 +612,19 @@ export default function DisplayPage() {
+   }
+ 
+   /* The right column's whole candidate board: a loading skeleton, an empty
+-     message, or the looping carousel - two rows of two copies stacked so
+-     translateY(-50%) always lands exactly on the seam between them. */
++     message, or the looping carousel - two copies of the candidate list
++     stacked so translateY(-50%) always lands exactly on the seam between
++     them, regardless of how tall each copy actually is.
++     `perRow` (set from the editor's Candidate Board panel, 2 by default)
++     is how many candidates sit across one row; a row's height then simply
++     follows its cards' own aspect ratio, so raising or lowering `perRow`
++     auto-adjusts card size to fit that many across instead of requiring a
++     separate height setting to keep in sync. A row shorter than `perRow`
++     (the last one, when the count doesn't divide evenly) gets its own
++     column count so its cards stretch to fill the row rather than leaving
++     empty cells. */
+   function renderCandidateCarousel() {
+-    if (loading) {
+-      return (
+-        <div className="grid h-full w-full auto-rows-[minmax(0,1fr)] grid-cols-2 gap-[2cqw] overflow-hidden [container-type:size]">
+-          {Array.from({ length: CAROUSEL_VISIBLE_COUNT }).map((_, index) => (
+-            <div
+-              key={`skeleton-${index}`}
+-              style={{ animationDelay: `${index * 0.12}s` }}
+-              className={`
+-                flex
+-                flex-col
+-                overflow-hidden
+-                animate-[skeleton-in_.5s_ease-out_both]
+-                ${lightMode ? "bg-[#fdf6f3]" : "bg-[#2e0505]"}
+-              `}
+-            >
+-              <div
+-                className={`
+-                  relative
+-                  aspect-[11/10]
+-                  animate-[pulse-glow_1.8s_ease-in-out_infinite]
+-                  ${
+-                    lightMode
+-                      ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
+-                      : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
+-                  }
+-                `}
+-                style={{ animationDelay: `${index * 0.3}s` }}
+-              />
+-              <div
+-                className={`
+-                  min-h-[clamp(48px,16cqh,84px)]
+-                  bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
+-                `}
+-              />
+-            </div>
+-          ))}
+-        </div>
+-      );
+-    }
++    const perRow = layout.candidates.perRow ?? 2;
+ 
+     if (candidates.length === 0) {
+       return (
+@@ -600,7 +646,7 @@ export default function DisplayPage() {
+       );
+     }
+ 
+-    const rows = chunkIntoRows(candidates, 2);
++    const rows = chunkIntoRows(candidates, perRow);
+ 
+     return (
+       <div className="relative h-full w-full overflow-hidden [container-type:size]">
+@@ -613,14 +659,11 @@ export default function DisplayPage() {
+               {rows.map((row, rowIndex) => (
+                 <div
+                   key={rowIndex}
+-                  className="grid shrink-0 grid-cols-2 gap-[2cqw]"
++                  className="grid shrink-0 gap-[2cqw]"
++                  style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}
+                 >
+                   {row.map((candidate, cellIndex) =>
+-                    renderCandidateCard(
+-                      candidate,
+-                      `${copy}-${rowIndex}-${cellIndex}`,
+-                      row.length === 1
+-                    )
++                    renderCandidateCard(candidate, `${copy}-${rowIndex}-${cellIndex}`)
+                   )}
+                 </div>
+               ))}
+@@ -704,15 +747,22 @@ export default function DisplayPage() {
+       )}
+ 
+       {/*
+-        The board itself: one full-bleed surface that every element is
+-        positioned against. It marks itself as the container-query basis,
+-        so an element's cqw/cqh sizing is relative to the whole board
+-        rather than to a column of it.
++        The board itself: a centered 16:9 frame, letterboxed against
++        whatever the screen's actual ratio is, with the video showing
++        through the bars. It marks itself as the container-query basis, so
++        an element's cqw/cqh sizing is relative to the whole board rather
++        than to a column of it - and, being locked to the same 16:9 ratio
++        as the editor's canvas, an element sits at the same spot here as it
++        does in the preview, regardless of the display's own aspect ratio.
+       */}
+ 
+       <div
+-        style={{ containerType: "size" }}
+-        className="absolute inset-0 z-[2]"
++        style={{
++          containerType: "size",
++          width: "min(100dvw, 100dvh * 16 / 9)",
++          height: "min(100dvh, 100dvw * 9 / 16)",
++        }}
++        className="absolute inset-0 z-[2] m-auto overflow-hidden"
+       >
+         {layout.layerOrder.map(renderLayer)}
+       </div>

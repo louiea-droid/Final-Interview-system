@@ -1,16 +1,44 @@
-import { useReducer, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 
 import { DEFAULT_LAYOUT, isVisible, saveDraftLayout } from './boardLayout';
 import { DEFAULT_EXTRA_TEXT_STYLE, DEFAULT_TEXT_SIZES } from './textStyle';
 import { createShape } from './shapeStyle';
-import { imageFill } from './fill';
+import { imageFill, normalizeFill, videoFill } from './fill';
+import { storage } from './firebase/storage';
+import { DEFAULT_ANIMATION, normalizeAnimation } from './animationStyle';
 
 /* Photos and the logo are capped on the long edge so several fit in the quota. */
 const MAX_IMAGE_EDGE = 800;
 
+/*
+ * Video, unlike a photo, can't be shrunk into a data URL small enough for a
+ * Firestore document (1 MiB per document, total) - it goes to Firebase
+ * Storage instead, and only its download URL lives in the layout. Capped
+ * client-side so one oversized file can't tie up someone's connection or
+ * run up Storage costs for what is, after all, a looping background clip.
+ */
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const VIDEO_STORAGE_FOLDER = 'board-videos';
+
+/* Every photo the editor accepts (logo, board images, frame fills, carousel
+   photos) goes to this same Storage folder - only its download URL ever
+   lands in the layout document. */
+const IMAGE_STORAGE_FOLDER = 'board-images';
+
+/*
+ * Every upload gets its own random filename and is never overwritten, so it's
+ * safe to have every viewer's browser (the live board included) cache it
+ * forever instead of re-fetching or revalidating it on every load - without
+ * this, Storage's default caching leaves that unset, and a photo or video can
+ * feel slow to appear even after the layout document has already updated.
+ */
+const STORAGE_CACHE_METADATA = { cacheControl: 'public, max-age=31536000, immutable' };
+
 /* Which list each addressable kind lives in; anything else is a singleton. */
 const LIST_BY_KIND = {
   image: 'images',
+  video: 'videos',
   text: 'texts',
   shape: 'shapes',
   divider: 'dividers',
@@ -41,6 +69,7 @@ function collectPositionedElements(layout) {
     { kind: 'announcements', id: null, ...layout.announcements },
     ...layout.texts.map((item) => ({ kind: 'text', ...item })),
     ...layout.images.map((item) => ({ kind: 'image', ...item })),
+    ...layout.videos.map((item) => ({ kind: 'video', ...item })),
     ...layout.shapes.map((item) => ({ kind: 'shape', ...item })),
     ...layout.dividers.map((item) => ({ kind: 'divider', ...item })),
   ];
@@ -79,7 +108,8 @@ function snapAxis(value, targets, threshold) {
   return closest;
 }
 
-function downscaleToDataUrl(file) {
+/* Downscales `file` to a JPEG Blob no wider/taller than MAX_IMAGE_EDGE. */
+function downscaleToBlob(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -96,7 +126,11 @@ function downscaleToDataUrl(file) {
         canvas.height = Math.round(image.height * scale);
 
         canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/png'));
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the image file.'))),
+          'image/jpeg',
+          0.82
+        );
       };
 
       image.src = reader.result;
@@ -104,6 +138,78 @@ function downscaleToDataUrl(file) {
 
     reader.readAsDataURL(file);
   });
+}
+
+/*
+ * Downscales `file` and uploads it to Firebase Storage, returning its
+ * download URL - the same path video already takes (see MAX_VIDEO_BYTES
+ * above), so the layout document only ever holds a URL, never the photo
+ * itself. That's what keeps a board with several photos well under
+ * Firestore's 1 MiB per-document limit, no matter how detailed the photos are.
+ */
+async function uploadImageToStorage(file) {
+  const blob = await downscaleToBlob(file);
+  const storageRef = ref(storage, `${IMAGE_STORAGE_FOLDER}/${crypto.randomUUID()}.jpg`);
+
+  await uploadBytes(storageRef, blob, STORAGE_CACHE_METADATA);
+  return getDownloadURL(storageRef);
+}
+
+function isDataUrl(value) {
+  return typeof value === 'string' && value.startsWith('data:');
+}
+
+/* Re-encodes an already-embedded base64 photo through the same pipeline a
+   fresh upload takes, so a legacy photo ends up exactly like a new one. */
+async function migrateDataUrl(url) {
+  const blob = await (await fetch(url)).blob();
+  return uploadImageToStorage(blob);
+}
+
+/*
+ * A board built before photos went to Firebase Storage still carries them
+ * as base64 data URLs baked directly into the layout document - each one
+ * some tens to hundreds of KB, all counted against Firestore's 1 MiB
+ * per-document limit and all sent over the wire on every single save. This
+ * finds every one still around (the logo, a standalone photo, a frame's
+ * fill, a frame's carousel photos) and re-uploads it to Storage, replacing
+ * it with the same small download URL a fresh upload would get - shrinking
+ * the document and speeding up every publish after it, with no visible
+ * change to the board itself. Returns null if there was nothing to migrate.
+ */
+async function migrateLegacyPhotos(layout) {
+  let changed = false;
+
+  async function migrate(url) {
+    if (!isDataUrl(url)) return url;
+    changed = true;
+    return migrateDataUrl(url);
+  }
+
+  const logoUrl = await migrate(layout.logo.url);
+
+  const images = await Promise.all(
+    layout.images.map(async (image) => ({ ...image, url: await migrate(image.url) }))
+  );
+
+  const shapes = await Promise.all(
+    layout.shapes.map(async (shape) => {
+      const fill =
+        shape.fill?.type === 'image'
+          ? { ...shape.fill, url: await migrate(shape.fill.url) }
+          : shape.fill;
+
+      const photos = shape.photos?.length
+        ? await Promise.all(shape.photos.map((url) => migrate(url)))
+        : shape.photos;
+
+      return { ...shape, fill, photos };
+    })
+  );
+
+  if (!changed) return null;
+
+  return { ...layout, logo: { ...layout.logo, url: logoUrl }, images, shapes };
 }
 
 /** The element a (kind, id) pair names, or undefined. */
@@ -137,13 +243,28 @@ export function useBoardLayoutEditor(
   layout,
   setLayout,
   boundsRef,
-  { onError, onSuccess, persist = saveDraftLayout, snapEnabled = false } = {}
+  { onError, onSuccess, onProgress, persist = saveDraftLayout, snapEnabled = false } = {}
 ) {
   const latestLayoutRef = useRef(layout);
   const saveScheduledRef = useRef(false);
   const historyRef = useRef({ undo: [], redo: [] });
   const historyBurstRef = useRef(null);
   const [, bumpHistory] = useReducer((count) => count + 1, 0);
+
+  /*
+   * `useRef(layout)`'s argument only ever seeds the ref's very first value -
+   * on every later render, changing `layout` does nothing to it on its own.
+   * That's fine for edits made through this hook (commitFrom reassigns the
+   * ref itself), but the draft now loads from Firestore asynchronously: the
+   * caller mounts with a placeholder layout, then swaps in the real one
+   * once it arrives. Without this effect, the ref would stay pinned to that
+   * placeholder until the first edit - so the very first thing an admin
+   * does (say, duplicating an element they just selected) would look up
+   * that element in the placeholder, fail to find it, and silently no-op.
+   */
+  useEffect(() => {
+    latestLayoutRef.current = layout;
+  }, [layout]);
 
   /* Which axis a drag currently reads as centered on - drives the canvas's
      center guide lines. */
@@ -156,6 +277,14 @@ export function useBoardLayoutEditor(
 
   function reportSuccess(message) {
     onSuccess?.(message);
+  }
+
+  /* Shows a message for the length of an upload (which can run tens of
+     seconds for a video) rather than leaving the admin looking at an
+     unchanged screen with no sign anything is happening. Returns a function
+     that clears it once the upload settles, success or failure alike. */
+  function reportProgress(message) {
+    return onProgress?.(message) ?? (() => {});
   }
 
   /*
@@ -219,6 +348,13 @@ export function useBoardLayoutEditor(
    * queues one write per animation frame - writing on every pointermove
    * event would be a lot of redundant JSON.stringify calls once a photo is
    * on the canvas.
+   *
+   * The persist call is deliberately outside the updater passed to
+   * setLayout, not inside it: React (in development, under StrictMode)
+   * invokes a functional state update twice to check that it's pure, and
+   * discards every result but one - a side effect like `persist` sitting
+   * inside it would fire twice per edit, saving the same layout to
+   * Firestore (or, before, localStorage) two times over.
    */
   function commitFrom(updater, { immediate = true } = {}) {
     recordHistory();
@@ -226,19 +362,18 @@ export function useBoardLayoutEditor(
     setLayout((current) => {
       const next = updater(current);
       latestLayoutRef.current = next;
-
-      if (immediate) {
-        persist(next);
-      } else if (!saveScheduledRef.current) {
-        saveScheduledRef.current = true;
-        requestAnimationFrame(() => {
-          saveScheduledRef.current = false;
-          persist(latestLayoutRef.current);
-        });
-      }
-
       return next;
     });
+
+    if (immediate) {
+      persist(latestLayoutRef.current);
+    } else if (!saveScheduledRef.current) {
+      saveScheduledRef.current = true;
+      requestAnimationFrame(() => {
+        saveScheduledRef.current = false;
+        persist(latestLayoutRef.current);
+      });
+    }
   }
 
   function updateElement(kind, id, patch) {
@@ -290,17 +425,20 @@ export function useBoardLayoutEditor(
       dragWith((moveEvent, rect) => {
         const { x, y } = pointToPercent(moveEvent, rect);
 
-        commitFrom((current) => {
-          const target = current[kind];
-          const size = (value) => Math.min(100, Math.max(8, value));
-          const patch = { width: size(Math.abs(x - target.x) * 2) };
+        commitFrom(
+          (current) => {
+            const target = current[kind];
+            const size = (value) => Math.min(100, Math.max(8, value));
+            const patch = { width: size(Math.abs(x - target.x) * 2) };
 
-          if (hasHeight) {
-            patch.height = size(Math.abs(y - target.y) * 2);
-          }
+            if (hasHeight) {
+              patch.height = size(Math.abs(y - target.y) * 2);
+            }
 
-          return patchElement(current, kind, null, patch);
-        });
+            return patchElement(current, kind, null, patch);
+          },
+          { immediate: false }
+        );
       });
     };
   }
@@ -601,8 +739,9 @@ export function useBoardLayoutEditor(
   /*
    * Copies an element and drops the copy slightly down and to the right of
    * the original, on top of the paint order. Only the kinds that can exist
-   * more than once are copyable - the logo, the candidate board, the
-   * announcement strip and the divider are each one of a kind.
+   * more than once are copyable - the logo, the candidate board and the
+   * announcement strip are each one of a kind; dividers, text, images,
+   * videos, and shapes can all have any number of them.
    */
   function duplicateElement(kind, id) {
     const list = LIST_BY_KIND[kind];
@@ -678,6 +817,18 @@ export function useBoardLayoutEditor(
     });
   }
 
+  /* Merges `patch` into an element's motion setting (type, direction, speed) -
+     any addressable kind, since every one of them carries its own `animation`. */
+  function setAnimation(kind, id, patch) {
+    commitFrom((current) => {
+      const element = findElement(current, kind, id);
+      if (!element) return current;
+      return patchElement(current, kind, id, {
+        animation: normalizeAnimation({ ...element.animation, ...patch }),
+      });
+    });
+  }
+
   /* Replaces the fill of a text element (through its style) or of a shape. */
   function setFill(kind, id, fill) {
     if (kind === 'shape') {
@@ -688,15 +839,32 @@ export function useBoardLayoutEditor(
     setTextStyle(kind, id, { fill });
   }
 
+  /* Pans/zooms a shape's image or video fill (offsetX, offsetY, zoom)
+     without touching its url/fit/opacity - see PhotoAdjuster.jsx /
+     VideoAdjuster.jsx. */
+  function adjustImageFill(id, patch) {
+    commitFrom((current) => {
+      const shape = findElement(current, 'shape', id);
+      if (!shape || (shape.fill?.type !== 'image' && shape.fill?.type !== 'video')) return current;
+      return patchElement(current, 'shape', id, {
+        fill: normalizeFill({ ...shape.fill, ...patch }),
+      });
+    });
+  }
+
   async function handleLogoUpload(file) {
     if (!file) return;
 
+    const clearProgress = reportProgress('Uploading logo...');
+
     try {
-      const dataUrl = await downscaleToDataUrl(file);
-      updateElement('logo', null, { url: dataUrl });
+      const url = await uploadImageToStorage(file);
+      updateElement('logo', null, { url });
       reportSuccess('Logo updated.');
     } catch (error) {
       reportError(error);
+    } finally {
+      clearProgress();
     }
   }
 
@@ -707,13 +875,21 @@ export function useBoardLayoutEditor(
   async function handleAddPhoto(file) {
     if (!file) return null;
 
+    const clearProgress = reportProgress('Uploading photo...');
+
     try {
-      const dataUrl = await downscaleToDataUrl(file);
+      const url = await uploadImageToStorage(file);
       const id = crypto.randomUUID();
 
       commitFrom((current) =>
         appendLayer(
-          { ...current, images: [...current.images, { id, url: dataUrl, x: 50, y: 50, scale: 1, visible: true }] },
+          {
+            ...current,
+            images: [
+              ...current.images,
+              { id, url, x: 50, y: 50, scale: 1, visible: true, animation: { ...DEFAULT_ANIMATION } },
+            ],
+          },
           'image',
           id
         )
@@ -724,6 +900,8 @@ export function useBoardLayoutEditor(
     } catch (error) {
       reportError(error);
       return null;
+    } finally {
+      clearProgress();
     }
   }
 
@@ -732,6 +910,66 @@ export function useBoardLayoutEditor(
       removeLayer(
         { ...current, images: current.images.filter((image) => image.id !== id) },
         'image',
+        id
+      )
+    );
+  }
+
+  /*
+   * Re-uploads any legacy base64 photo still embedded in the layout to
+   * Firebase Storage - see migrateLegacyPhotos above. Safe to call anytime;
+   * a board with nothing legacy left is a no-op that changes nothing and
+   * doesn't touch the undo history. Resolves to whether it actually found
+   * (and migrated) anything.
+   */
+  async function cleanUpLegacyPhotos() {
+    const migrated = await migrateLegacyPhotos(latestLayoutRef.current);
+    if (!migrated) return false;
+
+    commitFrom(() => migrated);
+    return true;
+  }
+
+  async function handleAddVideo(file) {
+    if (!file) return null;
+
+    if (file.size > MAX_VIDEO_BYTES) {
+      reportError(new Error('That video is too large - keep it under 50MB.'));
+      return null;
+    }
+
+    const clearProgress = reportProgress('Uploading video... this can take a while on a slow connection.');
+
+    try {
+      const id = crypto.randomUUID();
+      const storageRef = ref(storage, `${VIDEO_STORAGE_FOLDER}/${id}-${file.name}`);
+
+      await uploadBytes(storageRef, file, STORAGE_CACHE_METADATA);
+      const url = await getDownloadURL(storageRef);
+
+      commitFrom((current) =>
+        appendLayer(
+          { ...current, videos: [...current.videos, { id, url, x: 50, y: 50, scale: 1, visible: true }] },
+          'video',
+          id
+        )
+      );
+      reportSuccess('Video added to the board.');
+
+      return id;
+    } catch (error) {
+      reportError(error);
+      return null;
+    } finally {
+      clearProgress();
+    }
+  }
+
+  function removeVideo(id) {
+    commitFrom((current) =>
+      removeLayer(
+        { ...current, videos: current.videos.filter((video) => video.id !== id) },
+        'video',
         id
       )
     );
@@ -753,7 +991,9 @@ export function useBoardLayoutEditor(
               y: 50,
               fontSize: DEFAULT_TEXT_SIZES.extra,
               visible: true,
+              bulletList: false,
               style: { ...DEFAULT_EXTRA_TEXT_STYLE },
+              animation: { ...DEFAULT_ANIMATION },
             },
           ],
         },
@@ -803,27 +1043,106 @@ export function useBoardLayoutEditor(
   async function handleFramePhoto(id, file) {
     if (!file) return;
 
+    const clearProgress = reportProgress('Uploading photo...');
+
     try {
-      const dataUrl = await downscaleToDataUrl(file);
+      const url = await uploadImageToStorage(file);
 
       commitFrom((current) => {
         const shape = findElement(current, 'shape', id);
         if (!shape) return current;
 
         const fit = shape.fill?.type === 'image' ? shape.fill.fit : 'cover';
-        return patchElement(current, 'shape', id, { fill: imageFill(dataUrl, fit) });
+        return patchElement(current, 'shape', id, { fill: imageFill(url, fit) });
       });
       reportSuccess('Photo added to the frame.');
     } catch (error) {
       reportError(error);
+    } finally {
+      clearProgress();
     }
+  }
+
+  /* Drops a video into a frame - the frame's fill *is* the video, same as
+     handleFramePhoto but through the video upload path (see handleAddVideo
+     above) since a clip is too big to shrink into a data URL. */
+  async function handleFrameVideo(id, file) {
+    if (!file) return;
+
+    if (file.size > MAX_VIDEO_BYTES) {
+      reportError(new Error('That video is too large - keep it under 50MB.'));
+      return;
+    }
+
+    const clearProgress = reportProgress('Uploading video... this can take a while on a slow connection.');
+
+    try {
+      const storageRef = ref(storage, `${VIDEO_STORAGE_FOLDER}/${crypto.randomUUID()}-${file.name}`);
+      await uploadBytes(storageRef, file, STORAGE_CACHE_METADATA);
+      const url = await getDownloadURL(storageRef);
+
+      commitFrom((current) => {
+        const shape = findElement(current, 'shape', id);
+        if (!shape) return current;
+
+        const fit = shape.fill?.type === 'image' || shape.fill?.type === 'video' ? shape.fill.fit : 'cover';
+        return patchElement(current, 'shape', id, { fill: videoFill(url, fit) });
+      });
+      reportSuccess('Video added to the frame.');
+    } catch (error) {
+      reportError(error);
+    } finally {
+      clearProgress();
+    }
+  }
+
+  /*
+   * A frame's carousel photos - a separate list from its single `fill`
+   * image, since a carousel with animation.type 'carousel' cycles through
+   * these instead of showing one static photo. Adding a second photo is
+   * what makes the Carousel animation option appear at all (see isCarousel).
+   */
+  async function addFramePhoto(id, file) {
+    if (!file) return;
+
+    const clearProgress = reportProgress('Uploading photo...');
+
+    try {
+      const url = await uploadImageToStorage(file);
+
+      commitFrom((current) => {
+        const shape = findElement(current, 'shape', id);
+        if (!shape) return current;
+        return patchElement(current, 'shape', id, { photos: [...(shape.photos ?? []), url] });
+      });
+      reportSuccess('Photo added to the carousel.');
+    } catch (error) {
+      reportError(error);
+    } finally {
+      clearProgress();
+    }
+  }
+
+  function removeFramePhoto(id, index) {
+    commitFrom((current) => {
+      const shape = findElement(current, 'shape', id);
+      if (!shape) return current;
+      return patchElement(current, 'shape', id, {
+        photos: (shape.photos ?? []).filter((_, photoIndex) => photoIndex !== index),
+      });
+    });
   }
 
   function resetLayout() {
     commitFrom(() => ({
+      version: DEFAULT_LAYOUT.version,
       logo: { ...DEFAULT_LAYOUT.logo },
+      candidates: { ...DEFAULT_LAYOUT.candidates },
+      announcements: { ...DEFAULT_LAYOUT.announcements },
+      dividers: DEFAULT_LAYOUT.dividers.map((divider) => ({ ...divider })),
       texts: DEFAULT_LAYOUT.texts.map((text) => ({ ...text, style: { ...text.style } })),
       images: [],
+      videos: [],
       shapes: [],
       layerOrder: DEFAULT_LAYOUT.layerOrder.map((entry) => ({ ...entry })),
     }));
@@ -858,10 +1177,15 @@ export function useBoardLayoutEditor(
     setTextContent,
     setTextStyle,
     setFill,
+    adjustImageFill,
+    setAnimation,
     handleLogoUpload,
     resetLogo,
     handleAddPhoto,
     removePhoto,
+    cleanUpLegacyPhotos,
+    handleAddVideo,
+    removeVideo,
     addText,
     removeText,
     addShape,
@@ -871,6 +1195,9 @@ export function useBoardLayoutEditor(
     updateElement,
     setShapeStroke,
     handleFramePhoto,
+    handleFrameVideo,
+    addFramePhoto,
+    removeFramePhoto,
     resetLayout,
     replaceLayout,
     moveLayer,

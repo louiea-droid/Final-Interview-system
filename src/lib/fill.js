@@ -5,6 +5,7 @@
  *   { type: 'solid',    color, opacity }
  *   { type: 'gradient', gradient: 'linear'|'radial', angle, stops[], opacity }
  *   { type: 'image',    url, fit: 'cover'|'contain', opacity }
+ *   { type: 'video',    url, fit: 'cover'|'contain', opacity }
  *
  * Colors are stored as hex and converted on the way in and out, so the
  * editor can offer HEX / RGB / HSL entry over the same value.
@@ -167,8 +168,22 @@ export function solidFill(color, opacity = 1) {
   return { type: 'solid', color, opacity };
 }
 
-export function imageFill(url = null, fit = 'cover', opacity = 1) {
-  return { type: 'image', url, fit, opacity };
+/*
+ * `offsetX`/`offsetY` (percent, -50 to 50) and `zoom` (1 to 4) let a photo be
+ * panned and zoomed within its box after it's inserted - see PhotoAdjuster.
+ * They're rendered as a `translate()/scale()` on the <img> itself rather
+ * than through background-position/-size, which can't represent zoom
+ * precisely once the box and the photo have different aspect ratios.
+ */
+export function imageFill(url = null, fit = 'cover', opacity = 1, offsetX = 0, offsetY = 0, zoom = 1) {
+  return { type: 'image', url, fit, opacity, offsetX, offsetY, zoom };
+}
+
+/* A video fill behaves exactly like an image fill - same pan/zoom fields,
+   same fit/opacity - just rendered through a <video> instead (see
+   VideoAdjuster.jsx). */
+export function videoFill(url = null, fit = 'cover', opacity = 1, offsetX = 0, offsetY = 0, zoom = 1) {
+  return { type: 'video', url, fit, opacity, offsetX, offsetY, zoom };
 }
 
 export function gradientFill(gradient, angle, stops, opacity = 1) {
@@ -268,12 +283,15 @@ export function normalizeFill(fill, fallback = BOARD_GOLD_FILL) {
     };
   }
 
-  if (fill.type === 'image') {
+  if (fill.type === 'image' || fill.type === 'video') {
     return {
-      type: 'image',
+      type: fill.type,
       url: typeof fill.url === 'string' ? fill.url : null,
       fit: fill.fit === 'contain' ? 'contain' : 'cover',
       opacity,
+      offsetX: clamp(Number.isFinite(Number(fill.offsetX)) ? Number(fill.offsetX) : 0, -50, 50),
+      offsetY: clamp(Number.isFinite(Number(fill.offsetY)) ? Number(fill.offsetY) : 0, -50, 50),
+      zoom: clamp(Number.isFinite(Number(fill.zoom)) ? Number(fill.zoom) : 1, 1, 4),
     };
   }
 
@@ -322,16 +340,14 @@ export function fillBoxCss(fill) {
     return { backgroundImage: gradientCss(resolved), opacity: resolved.opacity };
   }
 
-  if (resolved.type === 'image') {
-    if (!resolved.url) return { opacity: resolved.opacity };
-
-    return {
-      backgroundImage: `url("${resolved.url}")`,
-      backgroundSize: resolved.fit,
-      backgroundPosition: 'center',
-      backgroundRepeat: 'no-repeat',
-      opacity: resolved.opacity,
-    };
+  /*
+   * An image or video fill paints through an actual <img>/<video> child
+   * instead (see PhotoAdjuster.jsx / VideoAdjuster.jsx) so its pan/zoom can
+   * be precise regardless of how the box's aspect ratio compares to the
+   * media's - only its opacity belongs on the box itself.
+   */
+  if (resolved.type === 'image' || resolved.type === 'video') {
+    return { opacity: resolved.opacity };
   }
 
   return { backgroundColor: withAlpha(resolved.color, resolved.opacity) };
@@ -347,6 +363,8 @@ export function fillPreviewCss(fill) {
       ? { backgroundImage: `url("${resolved.url}")`, backgroundSize: 'cover' }
       : {};
   }
+  // a video has no still frame to show, so its swatch stays blank either way
+  if (resolved.type === 'video') return {};
 
   return { backgroundColor: resolved.color };
 }

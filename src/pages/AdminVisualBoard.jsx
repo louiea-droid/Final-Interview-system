@@ -3,6 +3,7 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  Box as BoxIcon,
   ChevronDown,
   ChevronUp,
   ChevronsDown,
@@ -13,6 +14,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  Focus,
   FolderOpen,
   Frame,
   Grid3x3,
@@ -21,6 +23,7 @@ import {
   ImagePlus,
   Layers,
   LayoutTemplate,
+  List,
   Megaphone,
   SeparatorHorizontal,
   SeparatorVertical,
@@ -34,6 +37,7 @@ import {
   Redo2,
   RotateCcw,
   Save,
+  Scan,
   Shapes,
   Square,
   Trash2,
@@ -43,18 +47,21 @@ import {
   Ungroup,
   UploadCloud,
   UsersRound,
+  Video,
   X,
+  ZoomIn,
 } from 'lucide-react';
 
 import {
+  DEFAULT_LAYOUT,
   applyTemplate,
   deleteTemplate,
   isVisible,
   loadBoardLayout,
   loadDraftLayout,
-  loadTemplates,
   publishBoardLayout,
   saveTemplate,
+  subscribeTemplates,
 } from '../lib/boardLayout';
 import { useBoardLayoutEditor, findElement } from '../lib/useBoardLayoutEditor';
 import {
@@ -65,10 +72,15 @@ import {
   WEIGHT_OPTIONS,
   resolveTextStyle,
 } from '../lib/textStyle';
-import { SHAPE_KINDS, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
+import { SHAPE_KINDS, isCarousel, isFrame, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
 import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from '../lib/boardGeometry';
+import { ANIMATION_DIRECTIONS, ANIMATION_TYPES, CAROUSEL_ANIMATION, resolveAnimationCss } from '../lib/animationStyle';
 import FillEditor from '../components/FillEditor';
-import { subscribeCandidates } from '../lib/localBackend';
+import PhotoCarousel from '../components/PhotoCarousel';
+import PhotoAdjuster from '../components/PhotoAdjuster';
+import VideoAdjuster from '../components/VideoAdjuster';
+import TextContent from '../components/TextContent';
+import { subscribeCandidates } from '../lib/firebaseBackend';
 import { isShownOnBoard } from '../lib/candidateVisibility';
 import { useToast } from '../components/ToastProvider';
 
@@ -80,6 +92,7 @@ const SHAPE_ICONS = {
   triangle: Triangle,
   line: Minus,
   frame: Frame,
+  box: BoxIcon,
 };
 
 /* The left rail's tabs - each switches which panel sits beside it. */
@@ -101,7 +114,7 @@ const BOX_KINDS = {
   },
   announcements: {
     label: 'Announcements',
-    hint: 'Drag it anywhere, or drag its corner to set its width. What it shows comes from Announcements.',
+    hint: 'Drag it anywhere, or drag its corner to resize. What it shows comes from Announcements.',
   },
 };
 
@@ -110,16 +123,15 @@ const PANEL_BY_KIND = {
   candidates: 'brand',
   text: 'text',
   image: 'uploads',
+  video: 'uploads',
   shape: 'elements',
 };
 
-/* The zoom toolbar's fixed presets; 'fit' is computed instead of literal. */
-const ZOOM_OPTIONS = [
-  { value: '0.5', label: '50%' },
-  { value: '0.75', label: '75%' },
-  { value: '1', label: '100%' },
-  { value: 'fit', label: 'Fit to screen' },
-];
+/* The canvas zoom slider's range, as a percentage of "fit" - 100% already
+   fills the stage exactly (see .vb-canvas in globals.css), so anything
+   above that needs the stage's own scrollbar to see the rest of it. */
+const MIN_ZOOM = 25;
+const MAX_ZOOM = 150;
 
 function propertiesTitle(kind, shape) {
   switch (kind) {
@@ -127,6 +139,8 @@ function propertiesTitle(kind, shape) {
       return 'Logo';
     case 'image':
       return 'Photo';
+    case 'video':
+      return 'Video';
     case 'text':
       return 'Text';
     case 'shape':
@@ -149,7 +163,7 @@ function labelShapes(shapes) {
 }
 
 export default function AdminVisualBoard() {
-  const [layout, setLayout] = useState(() => loadDraftLayout());
+  const [layout, setLayout] = useState(DEFAULT_LAYOUT);
   const [selected, setSelected] = useState(null); // { kind, id? } | null
   const [multiSelected, setMultiSelected] = useState([]); // [{ kind, id }] - shift-click grouping
   const [activePanel, setActivePanel] = useState('elements');
@@ -161,23 +175,31 @@ export default function AdminVisualBoard() {
   /* The element Ctrl+C remembered, for Ctrl+V to copy. */
   const [clipboard, setClipboard] = useState(null);
   const [isDirty, setIsDirty] = useState(false);
+  // Publishing writes the whole layout document (photos and all) to
+  // Firestore, which can take a good while for a board with a lot of
+  // content - without this, the button gives no sign it's doing anything
+  // and clicking it looks like it silently failed.
+  const [publishing, setPublishing] = useState(false);
 
-  // '0.5' | '0.75' | '1' | 'fit' - a share of the stage's height
-  const [zoom, setZoom] = useState('fit');
+  // A percentage of "fit" (see MIN_ZOOM/MAX_ZOOM) - 100 exactly fills the stage.
+  const [zoom, setZoom] = useState(100);
   const [showGrid, setShowGrid] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [fitPercent, setFitPercent] = useState(100);
+  const [focusMode, setFocusMode] = useState(false);
 
   const [templateModal, setTemplateModal] = useState(null); // null | 'save' | 'apply'
   const [templateName, setTemplateName] = useState('');
-  const [templates, setTemplates] = useState(() => loadTemplates());
+  const [templates, setTemplates] = useState([]);
+
+  // null until the first Firestore read resolves, so the dirty check below
+  // never fires a false "unpublished changes" against an empty placeholder.
+  const [publishedSnapshot, setPublishedSnapshot] = useState(null);
 
   const canvasRef = useRef(null);
   const middleColumnRef = useRef(null);
   const stageRef = useRef(null);
   const layoutRef = useRef(null);
-  const publishedSnapshotRef = useRef(JSON.stringify(loadBoardLayout()));
   const showToast = useToast();
 
   /*
@@ -189,8 +211,58 @@ export default function AdminVisualBoard() {
   const editor = useBoardLayoutEditor(layout, setLayout, middleColumnRef, {
     onError: (error) => showToast.error(error.message),
     onSuccess: (message) => showToast.success(message),
+    onProgress: (message) => {
+      const id = showToast.loading(message, { duration: Infinity });
+      return () => showToast.dismiss(id);
+    },
     snapEnabled,
   });
+
+  // The draft loads once, when the editor opens - there is normally only
+  // one admin editing at a time, so it doesn't need to be a live subscription.
+  useEffect(() => {
+    let cancelled = false;
+    loadDraftLayout().then((draft) => {
+      if (!cancelled) setLayout(draft);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // One-time cleanup: a board built before photos went to Firebase Storage
+  // may still carry some as base64 data URLs baked into the layout itself,
+  // bloating the document and slowing every publish down. Once the real
+  // draft has loaded (not the DEFAULT_LAYOUT placeholder), silently
+  // re-upload any of those to Storage - a no-op if there's nothing legacy
+  // left. Guarded by a ref rather than state so it only ever runs once,
+  // even though migrating triggers this same effect again with new layout.
+  const cleanedLegacyPhotosRef = useRef(false);
+
+  useEffect(() => {
+    if (cleanedLegacyPhotosRef.current || layout === DEFAULT_LAYOUT) return;
+    cleanedLegacyPhotosRef.current = true;
+
+    editor.cleanUpLegacyPhotos().then((didMigrate) => {
+      if (didMigrate) {
+        showToast.success('Cleaned up some old photos to speed up publishing.');
+      }
+    });
+  }, [layout]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadBoardLayout().then((published) => {
+      if (!cancelled) setPublishedSnapshot(JSON.stringify(published));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return subscribeTemplates(setTemplates);
+  }, []);
 
   useEffect(() => {
     return subscribeCandidates((rows) => {
@@ -199,37 +271,48 @@ export default function AdminVisualBoard() {
   }, []);
 
   useEffect(() => {
-    setIsDirty(JSON.stringify(layout) !== publishedSnapshotRef.current);
-  }, [layout]);
+    if (publishedSnapshot === null) return;
+    setIsDirty(JSON.stringify(layout) !== publishedSnapshot);
+  }, [layout, publishedSnapshot]);
 
-  /*
-   * "Fit to screen" only has real work to do in fullscreen, where the stage
-   * is a fixed, known-size viewport - outside it the stage's height simply
-   * follows the canvas, so there is nothing independent to fit against and
-   * 100% width is already the fit.
-   */
   useEffect(() => {
-    function recomputeFit() {
-      setIsFullscreen(Boolean(document.fullscreenElement));
-
-      if (!document.fullscreenElement) {
-        setFitPercent(100);
-        return;
-      }
-
-      const ratio = (window.innerHeight * 16) / (9 * window.innerWidth);
-      setFitPercent(Math.min(100, ratio * 100));
+    function updateFullscreenState() {
+      const stillFullscreen = Boolean(document.fullscreenElement);
+      setIsFullscreen(stillFullscreen);
+      // Focus mode always rides fullscreen - exiting it any way (Escape,
+      // the browser's own exit-fullscreen UI, alt-tabbing away) should
+      // bring the panels back rather than leaving the canvas stranded at
+      // full width in a normal window.
+      if (!stillFullscreen) setFocusMode(false);
     }
 
-    recomputeFit();
-    window.addEventListener('resize', recomputeFit);
-    document.addEventListener('fullscreenchange', recomputeFit);
-
-    return () => {
-      window.removeEventListener('resize', recomputeFit);
-      document.removeEventListener('fullscreenchange', recomputeFit);
-    };
+    updateFullscreenState();
+    document.addEventListener('fullscreenchange', updateFullscreenState);
+    return () => document.removeEventListener('fullscreenchange', updateFullscreenState);
   }, []);
+
+  /*
+   * A distraction-free view of just the board - fullscreen with the
+   * toolbar, element rail, and properties panel all hidden, for presenting
+   * or reviewing the board without the editing chrome. Toggling it off
+   * exits fullscreen too, since focus mode has no meaning outside it.
+   */
+  function toggleFocusMode() {
+    if (focusMode) {
+      setFocusMode(false);
+      if (document.fullscreenElement) document.exitFullscreen();
+      return;
+    }
+
+    setFocusMode(true);
+    // A selection outline and resize handle are editing chrome too - focus
+    // mode hides the panels that would let you act on a selection, but
+    // without this the selected element's own outline stayed drawn right
+    // on the board underneath them.
+    setSelected(null);
+    setMultiSelected([]);
+    if (!document.fullscreenElement) layoutRef.current?.requestFullscreen();
+  }
 
   /* Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y to redo - but not
      while the user is typing in a field. */
@@ -473,19 +556,18 @@ export default function AdminVisualBoard() {
     setMultiSelected([]);
   }
 
-  function handleSaveTemplate(event) {
+  async function handleSaveTemplate(event) {
     event.preventDefault();
     if (!templateName.trim()) return;
 
-    saveTemplate(templateName, layout);
-    setTemplates(loadTemplates());
+    await saveTemplate(templateName, layout);
     setTemplateName('');
     setTemplateModal(null);
     showToast.success('Template saved.');
   }
 
   function handleApplyTemplate(id) {
-    const nextLayout = applyTemplate(id);
+    const nextLayout = applyTemplate(templates, id);
     if (!nextLayout) {
       showToast.error('That template is gone.');
       return;
@@ -500,7 +582,6 @@ export default function AdminVisualBoard() {
 
   function handleDeleteTemplate(id) {
     deleteTemplate(id);
-    setTemplates(loadTemplates());
   }
 
   /* Deselects first if the removed element was the one being edited. */
@@ -508,16 +589,30 @@ export default function AdminVisualBoard() {
     setSelected((current) => (current?.kind === kind && current.id === id ? null : current));
   }
 
-  function publish() {
-    publishBoardLayout(layout);
-    publishedSnapshotRef.current = JSON.stringify(layout);
-    setIsDirty(false);
-    showToast.success('Published to the live board.');
+  async function publish() {
+    setPublishing(true);
+
+    try {
+      await publishBoardLayout(layout);
+      setPublishedSnapshot(JSON.stringify(layout));
+      setIsDirty(false);
+      showToast.success('Published to the live board.');
+    } catch (error) {
+      console.warn('Could not publish the board layout:', error);
+      showToast.error('Could not publish - the board may be too large (try a smaller photo).');
+    } finally {
+      setPublishing(false);
+    }
   }
 
   async function addPhotoAndSelect(file) {
     const id = await editor.handleAddPhoto(file);
     if (id) select('image', id);
+  }
+
+  async function addVideoAndSelect(file) {
+    const id = await editor.handleAddVideo(file);
+    if (id) select('video', id);
   }
 
   function addTextAndSelect() {
@@ -535,6 +630,11 @@ export default function AdminVisualBoard() {
   function removePhoto(id) {
     editor.removePhoto(id);
     deselectIfSelected('image', id);
+  }
+
+  function removeVideo(id) {
+    editor.removeVideo(id);
+    deselectIfSelected('video', id);
   }
 
   function removeText(id) {
@@ -661,6 +761,12 @@ export default function AdminVisualBoard() {
       return { label: `Photo ${index + 1}`, Icon: ImagePlus, element: layout.images[index] };
     }
 
+    if (entry.kind === 'video') {
+      const index = layout.videos.findIndex((item) => item.id === entry.id);
+      if (index < 0) return null;
+      return { label: `Video ${index + 1}`, Icon: Video, element: layout.videos[index] };
+    }
+
     if (entry.kind === 'shape') {
       const index = layout.shapes.findIndex((item) => item.id === entry.id);
       if (index < 0) return null;
@@ -726,8 +832,11 @@ export default function AdminVisualBoard() {
           {candidates.length === 0 ? (
             <span className="vb-candidates-empty">No candidates currently shown</span>
           ) : (
-            <div className="vb-candidate-preview-grid">
-              {candidates.slice(0, 4).map((candidate) => (
+            <div
+              className="vb-candidate-preview-grid"
+              style={{ gridTemplateColumns: `repeat(${box.perRow}, 1fr)` }}
+            >
+              {candidates.slice(0, box.perRow * 2).map((candidate) => (
                 <div key={candidate.id} className="vb-candidate-preview-card">
                   <div className="vb-candidate-preview-photo">
                     {candidate.photo_url ? (
@@ -793,7 +902,10 @@ export default function AdminVisualBoard() {
           className={`vb-element ${isSelected('logo') ? 'selected' : ''} ${
             isMultiSelected('logo') ? 'multi-selected' : ''
           }`}
-          style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
+          style={{
+            ...scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH),
+            ...resolveAnimationCss(layout.logo.animation),
+          }}
           onPointerDown={handlePointerDown('logo')}
           onContextMenu={handleContextMenu('logo', null)}
         >
@@ -821,11 +933,13 @@ export default function AdminVisualBoard() {
           className={`vb-element ${isSelected('text', text.id) ? 'selected' : ''} ${
             isMultiSelected('text', text.id) ? 'multi-selected' : ''
           }`}
-          style={positionStyle(text)}
+          style={{ ...positionStyle(text), ...resolveAnimationCss(text.animation) }}
           onPointerDown={handlePointerDown('text', text.id)}
           onContextMenu={handleContextMenu('text', text.id)}
         >
-          <span style={resolveTextStyle(text)}>{text.text}</span>
+          <span style={resolveTextStyle(text)}>
+            <TextContent text={text} />
+          </span>
 
           {isSelected('text', text.id) && (
             <span
@@ -849,7 +963,10 @@ export default function AdminVisualBoard() {
           className={`vb-element ${isSelected('image', image.id) ? 'selected' : ''} ${
             isMultiSelected('image', image.id) ? 'multi-selected' : ''
           }`}
-          style={scaledPositionStyle(image, PHOTO_BASE_WIDTH)}
+          style={{
+            ...scaledPositionStyle(image, PHOTO_BASE_WIDTH),
+            ...resolveAnimationCss(image.animation),
+          }}
           onPointerDown={handlePointerDown('image', image.id)}
           onContextMenu={handleContextMenu('image', image.id)}
         >
@@ -866,11 +983,42 @@ export default function AdminVisualBoard() {
       );
     }
 
+    if (entry.kind === 'video') {
+      const video = layout.videos.find((item) => item.id === entry.id);
+      if (!video || !isVisible(video)) return null;
+
+      return (
+        <button
+          key={video.id}
+          type="button"
+          className={`vb-element ${isSelected('video', video.id) ? 'selected' : ''} ${
+            isMultiSelected('video', video.id) ? 'multi-selected' : ''
+          }`}
+          style={scaledPositionStyle(video, PHOTO_BASE_WIDTH)}
+          onPointerDown={handlePointerDown('video', video.id)}
+          onContextMenu={handleContextMenu('video', video.id)}
+        >
+          <video src={video.url} className="vb-photo-img" muted loop autoPlay playsInline />
+
+          {isSelected('video', video.id) && (
+            <span
+              className="vb-shape-resize"
+              title="Drag to resize"
+              onPointerDown={editor.beginScaleResize('video', video.id, PHOTO_BASE_WIDTH)}
+            />
+          )}
+        </button>
+      );
+    }
+
     if (entry.kind === 'shape') {
       const shape = layout.shapes.find((item) => item.id === entry.id);
       if (!shape || !isVisible(shape)) return null;
 
-      const isEmptyFrame = shape.fill.type === 'image' && !shape.fill.url;
+      const isEmptyFrame =
+        (shape.fill.type === 'image' || shape.fill.type === 'video') &&
+        !shape.fill.url &&
+        !isCarousel(shape);
       const selectedOnCanvas = isSelected('shape', shape.id);
 
       return (
@@ -884,6 +1032,20 @@ export default function AdminVisualBoard() {
           onContextMenu={handleContextMenu('shape', shape.id)}
         >
           {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
+
+          {isCarousel(shape) ? (
+            <PhotoCarousel
+              photos={shape.photos}
+              direction={shape.animation.direction}
+              speed={shape.animation.speed}
+              fit={shape.fill.fit}
+            />
+          ) : (
+            <>
+              {shape.fill.type === 'image' && <PhotoAdjuster fill={shape.fill} />}
+              {shape.fill.type === 'video' && <VideoAdjuster fill={shape.fill} />}
+            </>
+          )}
 
           {selectedOnCanvas && (
             <span
@@ -901,6 +1063,8 @@ export default function AdminVisualBoard() {
 
   const selectedImage =
     selected?.kind === 'image' ? layout.images.find((image) => image.id === selected.id) : null;
+  const selectedVideo =
+    selected?.kind === 'video' ? layout.videos.find((video) => video.id === selected.id) : null;
   const selectedText =
     selected?.kind === 'text' ? layout.texts.find((text) => text.id === selected.id) : null;
   const selectedShape =
@@ -916,11 +1080,13 @@ export default function AdminVisualBoard() {
       ? layout.logo
       : selected?.kind === 'image'
         ? selectedImage
-        : selected?.kind === 'text'
-          ? selectedText
-          : selected?.kind === 'divider'
-            ? selectedDivider
-            : selectedShape;
+        : selected?.kind === 'video'
+          ? selectedVideo
+          : selected?.kind === 'text'
+            ? selectedText
+            : selected?.kind === 'divider'
+              ? selectedDivider
+              : selectedShape;
 
   const isTextSelected = selected?.kind === 'text';
   const shapeLabels = labelShapes(layout.shapes);
@@ -952,12 +1118,23 @@ export default function AdminVisualBoard() {
               <RotateCcw size={12} />
               Reset
             </button>
-            <a href="/visual" target="_blank" rel="noopener noreferrer" className="secondary-button">
+            <a
+              href="/admin/visual-board/preview"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="secondary-button"
+              title="See your unpublished changes as they'll look once Published"
+            >
               Preview
               <ExternalLink size={11} />
             </a>
-            <button type="button" className="primary-button" onClick={publish} disabled={!isDirty}>
-              Publish
+            <button
+              type="button"
+              className="primary-button"
+              onClick={publish}
+              disabled={!isDirty || publishing}
+            >
+              {publishing ? 'Publishing…' : 'Publish'}
             </button>
           </div>
         </div>
@@ -990,18 +1167,29 @@ export default function AdminVisualBoard() {
 
           <span className="vb-toolbar-divider" aria-hidden="true" />
 
-          <select
-            className="form-select vb-toolbar-zoom"
-            value={zoom}
-            onChange={(event) => setZoom(event.target.value)}
-            aria-label="Zoom"
+          <button
+            type="button"
+            className={`vb-toolbar-button ${zoom === 100 ? 'active' : ''}`}
+            onClick={() => setZoom(100)}
+            title="Reset zoom to fit the stage"
           >
-            {ZOOM_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            <Scan size={15} />
+            <span>Fit</span>
+          </button>
+
+          <label className="vb-toolbar-zoom" title="Canvas size">
+            <ZoomIn size={14} />
+            <input
+              type="range"
+              min={MIN_ZOOM}
+              max={MAX_ZOOM}
+              step="5"
+              value={zoom}
+              onChange={(event) => setZoom(Number(event.target.value))}
+              aria-label="Canvas size"
+            />
+            <span className="vb-toolbar-zoom-value">{zoom}%</span>
+          </label>
 
           <span className="vb-toolbar-divider" aria-hidden="true" />
 
@@ -1060,9 +1248,30 @@ export default function AdminVisualBoard() {
             {isFullscreen ? <Minimize size={15} /> : <Maximize size={15} />}
             <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
           </button>
+          <button
+            type="button"
+            className={`vb-toolbar-button ${focusMode ? 'active' : ''}`}
+            onClick={toggleFocusMode}
+            title="Fullscreen with every editing control hidden - just the board"
+          >
+            <Focus size={15} />
+            <span>Focus</span>
+          </button>
         </div>
 
-        <div className="vb-layout" ref={layoutRef}>
+        <div className={`vb-layout ${focusMode ? 'vb-focus-mode' : ''}`} ref={layoutRef}>
+          {focusMode && (
+            <button
+              type="button"
+              className="vb-focus-exit"
+              onClick={toggleFocusMode}
+              title="Exit focus mode (Esc)"
+            >
+              <Minimize size={14} />
+              Exit Focus
+            </button>
+          )}
+
           {/* ================= ELEMENTS ================= */}
 
           <div className="vb-elements-col">
@@ -1145,6 +1354,14 @@ export default function AdminVisualBoard() {
                             </button>
                             <button
                               type="button"
+                              className="vb-layer-icon-button"
+                              onClick={() => editor.setLocked('shape', shape.id, !shape.locked)}
+                              aria-label={`${shape.locked ? 'Unlock' : 'Lock'} ${shapeLabels[index]}`}
+                            >
+                              {shape.locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                            </button>
+                            <button
+                              type="button"
                               className="vb-element-remove"
                               onClick={() => removeShape(shape.id)}
                               aria-label={`Remove ${shapeLabels[index]}`}
@@ -1184,6 +1401,14 @@ export default function AdminVisualBoard() {
                           </button>
                           <button
                             type="button"
+                            className="vb-layer-icon-button"
+                            onClick={() => editor.setLocked('text', text.id, !text.locked)}
+                            aria-label={`${text.locked ? 'Unlock' : 'Lock'} Text ${index + 1}`}
+                          >
+                            {text.locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                          </button>
+                          <button
+                            type="button"
                             className="vb-element-remove"
                             onClick={() => removeText(text.id)}
                             aria-label={`Remove Text ${index + 1}`}
@@ -1201,25 +1426,43 @@ export default function AdminVisualBoard() {
                 <>
                   <p className="vb-panel-label">Board identity</p>
 
-                  <button
-                    type="button"
-                    className={`vb-element-row ${isSelected('logo') ? 'active' : ''} ${
-                      isVisible(layout.logo) ? '' : 'is-hidden'
-                    }`}
-                    onClick={() => select('logo')}
-                  >
-                    <ImageIcon size={14} />
-                    Logo
-                  </button>
+                  <div className={`vb-element-row-wrap ${isSelected('logo') ? 'active' : ''}`}>
+                    <button
+                      type="button"
+                      className={`vb-element-row ${isVisible(layout.logo) ? '' : 'is-hidden'}`}
+                      onClick={() => select('logo')}
+                    >
+                      <ImageIcon size={14} />
+                      Logo
+                    </button>
+                    <button
+                      type="button"
+                      className="vb-layer-icon-button"
+                      onClick={() => editor.setLocked('logo', null, !layout.logo.locked)}
+                      aria-label={`${layout.logo.locked ? 'Unlock' : 'Lock'} Logo`}
+                    >
+                      {layout.logo.locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                    </button>
+                  </div>
 
-                  <button
-                    type="button"
-                    className={`vb-element-row ${isSelected('candidates') ? 'active' : ''}`}
-                    onClick={() => select('candidates')}
-                  >
-                    <UsersRound size={14} />
-                    Candidate Board
-                  </button>
+                  <div className={`vb-element-row-wrap ${isSelected('candidates') ? 'active' : ''}`}>
+                    <button
+                      type="button"
+                      className="vb-element-row"
+                      onClick={() => select('candidates')}
+                    >
+                      <UsersRound size={14} />
+                      Candidate Board
+                    </button>
+                    <button
+                      type="button"
+                      className="vb-layer-icon-button"
+                      onClick={() => editor.setLocked('candidates', null, !layout.candidates.locked)}
+                      aria-label={`${layout.candidates.locked ? 'Unlock' : 'Lock'} Candidate Board`}
+                    >
+                      {layout.candidates.locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                    </button>
+                  </div>
                 </>
               )}
 
@@ -1242,7 +1485,7 @@ export default function AdminVisualBoard() {
 
                   {layout.images.length > 0 && (
                     <>
-                      <p className="vb-panel-label">Uploaded</p>
+                      <p className="vb-panel-label">Uploaded photos</p>
                       {layout.images.map((image, index) => (
                         <div
                           key={image.id}
@@ -1258,9 +1501,69 @@ export default function AdminVisualBoard() {
                           </button>
                           <button
                             type="button"
+                            className="vb-layer-icon-button"
+                            onClick={() => editor.setLocked('image', image.id, !image.locked)}
+                            aria-label={`${image.locked ? 'Unlock' : 'Lock'} Photo ${index + 1}`}
+                          >
+                            {image.locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                          </button>
+                          <button
+                            type="button"
                             className="vb-element-remove"
                             onClick={() => removePhoto(image.id)}
                             aria-label={`Remove Photo ${index + 1}`}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  <label htmlFor="vb-add-video" className="vb-panel-add">
+                    <Plus size={14} />
+                    Add Video
+                  </label>
+                  <input
+                    id="vb-add-video"
+                    type="file"
+                    accept="video/mp4,video/webm,video/ogg"
+                    style={{ display: 'none' }}
+                    onChange={(event) => {
+                      void addVideoAndSelect(event.target.files?.[0] ?? null);
+                      event.target.value = '';
+                    }}
+                  />
+
+                  {layout.videos.length > 0 && (
+                    <>
+                      <p className="vb-panel-label">Uploaded videos</p>
+                      {layout.videos.map((video, index) => (
+                        <div
+                          key={video.id}
+                          className={`vb-element-row-wrap ${isSelected('video', video.id) ? 'active' : ''}`}
+                        >
+                          <button
+                            type="button"
+                            className={`vb-element-row ${isVisible(video) ? '' : 'is-hidden'}`}
+                            onClick={() => select('video', video.id)}
+                          >
+                            <Video size={14} />
+                            Video {index + 1}
+                          </button>
+                          <button
+                            type="button"
+                            className="vb-layer-icon-button"
+                            onClick={() => editor.setLocked('video', video.id, !video.locked)}
+                            aria-label={`${video.locked ? 'Unlock' : 'Lock'} Video ${index + 1}`}
+                          >
+                            {video.locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                          </button>
+                          <button
+                            type="button"
+                            className="vb-element-remove"
+                            onClick={() => removeVideo(video.id)}
+                            aria-label={`Remove Video ${index + 1}`}
                           >
                             <X size={12} />
                           </button>
@@ -1375,12 +1678,8 @@ export default function AdminVisualBoard() {
               <div
                 className={`vb-canvas ${showGrid ? 'show-grid' : ''}`}
                 ref={canvasRef}
-                /*
-                 * Height-driven, so the board fills the stage down to the
-                 * bottom and its 16:9 ratio gives the width. Zoom scales
-                 * that height; "fit" is simply all of it.
-                 */
-                style={{ height: `${zoom === 'fit' ? 100 : Number(zoom) * 100}%` }}
+                // Read by .vb-canvas in globals.css - see the comment there.
+                style={{ '--vb-zoom': zoom / 100 }}
               >
                 {/*
                   One free-form surface, matching the live board: every
@@ -1570,6 +1869,45 @@ export default function AdminVisualBoard() {
                       />
                     )}
 
+                    {box.perRow !== undefined && (
+                      <div className="vb-field-row">
+                        <label htmlFor="vb-per-row">
+                          Candidates per row
+                          <input
+                            id="vb-per-row"
+                            className="form-input"
+                            type="number"
+                            min="1"
+                            max="6"
+                            step="1"
+                            value={box.perRow}
+                            onChange={(event) =>
+                              editor.updateElement(selected.kind, null, {
+                                perRow: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+                    )}
+
+                    {box.perRow !== undefined && (
+                      <input
+                        className="vb-range"
+                        type="range"
+                        min="1"
+                        max="6"
+                        step="1"
+                        value={box.perRow}
+                        aria-label="Candidates per row"
+                        onChange={(event) =>
+                          editor.updateElement(selected.kind, null, {
+                            perRow: Number(event.target.value),
+                          })
+                        }
+                      />
+                    )}
+
                     <div className="vb-element-actions">
                       <button
                         type="button"
@@ -1632,6 +1970,31 @@ export default function AdminVisualBoard() {
                       value={selectedText.text}
                       onChange={(event) => editor.setTextContent(selected.id, event.target.value)}
                     />
+                    <p className="vb-properties-hint">
+                      Press Enter to start a new line on the board.
+                    </p>
+
+                    <label className="settings-option">
+                      <span className="settings-option-label">
+                        <List size={13} />
+                        Bulleted list
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={selectedText.bulletList === true}
+                        onChange={(event) =>
+                          editor.updateElement('text', selected.id, {
+                            bulletList: event.target.checked,
+                          })
+                        }
+                      />
+                    </label>
+
+                    {selectedText.bulletList && (
+                      <p className="vb-properties-hint">
+                        Each line on its own becomes a bullet - put one item per line above.
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -1670,6 +2033,17 @@ export default function AdminVisualBoard() {
 
                 {selected.kind === 'image' && (
                   <img src={selectedImage.url} alt="" className="vb-properties-thumb" />
+                )}
+
+                {selected.kind === 'video' && (
+                  <video
+                    src={selectedVideo.url}
+                    className="vb-properties-thumb"
+                    muted
+                    loop
+                    autoPlay
+                    playsInline
+                  />
                 )}
 
                 {selected.kind === 'shape' && (
@@ -1845,8 +2219,204 @@ export default function AdminVisualBoard() {
                       allowImage={selected.kind === 'shape'}
                       uploadId="vb-fill-photo"
                       onUploadImage={(file) => editor.handleFramePhoto(selected.id, file)}
+                      allowVideo={selected.kind === 'shape'}
+                      videoUploadId="vb-fill-video"
+                      onUploadVideo={(file) => editor.handleFrameVideo(selected.id, file)}
                       onChange={(fill) => editor.setFill(selected.kind, selected.id, fill)}
                     />
+                  </div>
+                )}
+
+                {selected.kind === 'shape' &&
+                  (selectedShape.fill.type === 'image' || selectedShape.fill.type === 'video') &&
+                  selectedShape.fill.url && (
+                  <div className="form-group">
+                    <div className="vb-photo-position-header">
+                      <label className="form-label">
+                        {selectedShape.fill.type === 'video' ? 'Video position' : 'Photo position'}
+                      </label>
+                      <button
+                        type="button"
+                        className="vb-photo-position-reset"
+                        onClick={() =>
+                          editor.adjustImageFill(selected.id, { offsetX: 0, offsetY: 0, zoom: 1 })
+                        }
+                      >
+                        <RotateCcw size={11} />
+                        Reset
+                      </button>
+                    </div>
+
+                    <label className="form-label" htmlFor="vb-photo-zoom">
+                      Zoom
+                    </label>
+                    <div className="scale-field">
+                      <input
+                        id="vb-photo-zoom"
+                        type="range"
+                        min="1"
+                        max="4"
+                        step="0.05"
+                        value={selectedShape.fill.zoom}
+                        onChange={(event) =>
+                          editor.adjustImageFill(selected.id, { zoom: Number(event.target.value) })
+                        }
+                      />
+                      <span className="scale-field-value">
+                        {selectedShape.fill.zoom.toFixed(2)}x
+                      </span>
+                    </div>
+
+                    <div className="vb-field-row">
+                      <label htmlFor="vb-photo-x">
+                        Move X
+                        <input
+                          id="vb-photo-x"
+                          className="form-input"
+                          type="range"
+                          min="-50"
+                          max="50"
+                          step="1"
+                          value={selectedShape.fill.offsetX}
+                          onChange={(event) =>
+                            editor.adjustImageFill(selected.id, {
+                              offsetX: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                      <label htmlFor="vb-photo-y">
+                        Move Y
+                        <input
+                          id="vb-photo-y"
+                          className="form-input"
+                          type="range"
+                          min="-50"
+                          max="50"
+                          step="1"
+                          value={selectedShape.fill.offsetY}
+                          onChange={(event) =>
+                            editor.adjustImageFill(selected.id, {
+                              offsetY: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {selected.kind === 'shape' && isFrame(selectedShape) && (
+                  <div className="form-group">
+                    <label className="form-label">Carousel photos</label>
+                    <p className="vb-properties-hint">
+                      Add two or more to unlock the Carousel animation below - it slides between
+                      them instead of showing the single photo above.
+                    </p>
+
+                    <div className="vb-carousel-photos">
+                      {selectedShape.photos.map((url, index) => (
+                        <div key={index} className="vb-carousel-photo">
+                          <img src={url} alt="" />
+                          <button
+                            type="button"
+                            className="vb-carousel-photo-remove"
+                            aria-label={`Remove photo ${index + 1}`}
+                            onClick={() => editor.removeFramePhoto(selected.id, index)}
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      ))}
+
+                      <label htmlFor="vb-carousel-photo-add" className="vb-carousel-photo-add">
+                        <input
+                          id="vb-carousel-photo-add"
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={(event) => {
+                            void editor.addFramePhoto(selected.id, event.target.files?.[0] ?? null);
+                            event.target.value = '';
+                          }}
+                        />
+                        <Plus size={16} />
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {(selected.kind === 'text' ||
+                  selected.kind === 'logo' ||
+                  selected.kind === 'image' ||
+                  selected.kind === 'shape') && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="vb-animation-type">
+                      Animation
+                    </label>
+                    <div className="vb-field-row">
+                      <select
+                        id="vb-animation-type"
+                        className="form-select"
+                        value={selectedElement.animation.type}
+                        onChange={(event) =>
+                          editor.setAnimation(selected.kind, selected.id, { type: event.target.value })
+                        }
+                      >
+                        {ANIMATION_TYPES.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                        {selected.kind === 'shape' &&
+                          isFrame(selectedShape) &&
+                          selectedShape.photos.length > 1 && (
+                            <option value={CAROUSEL_ANIMATION.value}>{CAROUSEL_ANIMATION.label}</option>
+                          )}
+                      </select>
+
+                      {(selectedElement.animation.type === 'slide' ||
+                        selectedElement.animation.type === 'carousel') && (
+                        <select
+                          className="form-select"
+                          aria-label="Animation direction"
+                          value={selectedElement.animation.direction}
+                          onChange={(event) =>
+                            editor.setAnimation(selected.kind, selected.id, {
+                              direction: event.target.value,
+                            })
+                          }
+                        >
+                          {ANIMATION_DIRECTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    {selectedElement.animation.type !== 'none' && (
+                      <div className="scale-field">
+                        <input
+                          type="range"
+                          min="1"
+                          max="30"
+                          step="1"
+                          value={selectedElement.animation.speed}
+                          aria-label={
+                            selectedElement.animation.type === 'carousel'
+                              ? 'Seconds per photo'
+                              : 'Animation speed'
+                          }
+                          onChange={(event) =>
+                            editor.setAnimation(selected.kind, selected.id, {
+                              speed: Number(event.target.value),
+                            })
+                          }
+                        />
+                        <span className="scale-field-value">{selectedElement.animation.speed}s</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2074,7 +2644,7 @@ export default function AdminVisualBoard() {
                   </div>
                 )}
 
-                {(selected.kind === 'logo' || selected.kind === 'image') && (
+                {(selected.kind === 'logo' || selected.kind === 'image' || selected.kind === 'video') && (
                   <div className="form-group">
                     <label className="form-label">Size</label>
                     <div className="scale-field">
@@ -2148,6 +2718,7 @@ export default function AdminVisualBoard() {
 
                 <div className="vb-element-actions">
                   {(selected.kind === 'image' ||
+                    selected.kind === 'video' ||
                     selected.kind === 'text' ||
                     selected.kind === 'shape' ||
                     selected.kind === 'divider') && (

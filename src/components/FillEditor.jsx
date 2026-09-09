@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Image as ImageIcon, Palette, Plus, Trash2, Waves } from 'lucide-react';
+import { Image as ImageIcon, Palette, Plus, Trash2, Video as VideoIcon, Waves } from 'lucide-react';
 
 import {
   COLOR_FORMATS,
@@ -12,6 +12,7 @@ import {
   normalizeFill,
   parseColor,
   solidFill,
+  videoFill,
 } from '../lib/fill';
 import { FIT_OPTIONS } from '../lib/shapeStyle';
 
@@ -19,6 +20,7 @@ const TABS = [
   { value: 'solid', label: 'Solid', icon: Palette },
   { value: 'gradient', label: 'Gradient', icon: Waves },
   { value: 'image', label: 'Image', icon: ImageIcon },
+  { value: 'video', label: 'Video', icon: VideoIcon },
 ];
 
 /* Keeps a gradient's colours when switching to solid, and the other way round. */
@@ -48,7 +50,16 @@ function toGradient(fill) {
  * plus a stop editor, and - for shapes and photo frames - an image fill.
  * Shared by every element the board can paint.
  */
-export default function FillEditor({ fill, onChange, allowImage = false, onUploadImage, uploadId }) {
+export default function FillEditor({
+  fill,
+  onChange,
+  allowImage = false,
+  onUploadImage,
+  uploadId,
+  allowVideo = false,
+  onUploadVideo,
+  videoUploadId,
+}) {
   const resolved = normalizeFill(fill);
 
   const [format, setFormat] = useState('hex');
@@ -65,13 +76,18 @@ export default function FillEditor({ fill, onChange, allowImage = false, onUploa
     if (!editingColor && solidColor) setColorDraft(formatColor(solidColor, format));
   }, [editingColor, solidColor, format]);
 
-  const tabs = allowImage ? TABS : TABS.filter((tab) => tab.value !== 'image');
+  const tabs = TABS.filter((tab) => {
+    if (tab.value === 'image') return allowImage;
+    if (tab.value === 'video') return allowVideo;
+    return true;
+  });
 
   function switchType(type) {
     if (type === resolved.type) return;
     if (type === 'solid') onChange(toSolid(resolved));
     if (type === 'gradient') onChange(toGradient(resolved));
     if (type === 'image') onChange(imageFill(null, 'cover', resolved.opacity));
+    if (type === 'video') onChange(videoFill(null, 'cover', resolved.opacity));
   }
 
   function setOpacity(opacity) {
@@ -320,6 +336,57 @@ export default function FillEditor({ fill, onChange, allowImage = false, onUploa
                 type="button"
                 className="secondary-button"
                 onClick={() => onChange(imageFill(null, resolved.fit, resolved.opacity))}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {resolved.type === 'video' && (
+        <>
+          <div className="photo-upload">
+            <label htmlFor={videoUploadId} className="photo-upload-box">
+              <input
+                id={videoUploadId}
+                type="file"
+                accept="video/mp4,video/webm,video/ogg,video/quicktime"
+                onChange={(event) => {
+                  void onUploadVideo?.(event.target.files?.[0] ?? null);
+                  event.target.value = '';
+                }}
+              />
+              <div className="photo-upload-content">
+                <span className="photo-upload-title">
+                  {resolved.url ? 'Replace video' : 'Insert a video'}
+                </span>
+                <span className="photo-upload-subtitle">MP4, WEBM or MOV, up to 50MB</span>
+              </div>
+            </label>
+          </div>
+
+          <div className="vb-fill-row">
+            <div className="vb-segment">
+              {FIT_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`vb-segment-button is-wide ${
+                    resolved.fit === option.value ? 'active' : ''
+                  }`}
+                  onClick={() => onChange({ ...resolved, fit: option.value })}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {resolved.url && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => onChange(videoFill(null, resolved.fit, resolved.opacity))}
               >
                 Clear
               </button>

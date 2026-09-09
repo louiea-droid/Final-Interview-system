@@ -3,7 +3,7 @@ function loadImage(url) {
     const image = new Image();
     image.addEventListener('load', () => resolve(image));
     image.addEventListener('error', reject);
-    // Lets canvas read pixels from a cross-origin (e.g. Supabase storage)
+    // Lets canvas read pixels from a cross-origin (e.g. Firebase Storage)
     // URL as long as that host allows CORS; harmless for local blob: URLs.
     image.crossOrigin = 'anonymous';
     image.src = url;

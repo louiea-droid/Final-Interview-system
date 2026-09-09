@@ -1,16 +1,16 @@
 /*
- * Typography for the announcement banner on /visual - set from the
- * Announcements admin page and read by the live board, the same way the
- * light/dark theme preference works: saved to localStorage immediately (no
- * draft/publish step) and broadcast on save so an open board picks it up
- * without a reload.
+ * Typography for the announcement banner - set from the Announcements admin
+ * page and stored in Firestore, the same document for every admin/tab/device.
+ * `subscribeAnnouncementStyle` rides Firestore's own realtime updates, so an
+ * open admin page (or, once /visual reads it, the live board) picks up a
+ * change immediately, the same way the light/dark theme preference works.
  */
+
+import { getDoc, onSnapshot, setDoc } from 'firebase/firestore';
+import { announcementStyleDoc } from './firebase/collections';
 
 import { BOARD_GOLD_FILL, fillTextCss, normalizeFill, solidFill } from './fill';
 import { FONT_STACKS, SHADOW_FILTERS } from './textStyle';
-
-export const ANNOUNCEMENT_STYLE_KEY = 'interview-board-announcement-style';
-export const ANNOUNCEMENT_STYLE_EVENT = 'interview-board-announcement-style-updated';
 
 export const DEFAULT_ANNOUNCEMENT_STYLE = {
   fontFamily: 'inter',
@@ -48,25 +48,37 @@ export function normalizeAnnouncementStyle(saved) {
   return merged;
 }
 
-export function loadAnnouncementStyle() {
-  try {
-    const raw = window.localStorage.getItem(ANNOUNCEMENT_STYLE_KEY);
-    if (!raw) return DEFAULT_ANNOUNCEMENT_STYLE;
-    return normalizeAnnouncementStyle(JSON.parse(raw));
-  } catch {
-    return DEFAULT_ANNOUNCEMENT_STYLE;
-  }
+/** The announcement style, as of right now. */
+export async function loadAnnouncementStyle() {
+  const snapshot = await getDoc(announcementStyleDoc);
+  return normalizeAnnouncementStyle(snapshot.data());
 }
 
+/**
+ * Calls `listener` with the announcement style now and after each change -
+ * from any admin, tab, or device. Returns an unsubscribe function.
+ */
+export function subscribeAnnouncementStyle(listener) {
+  return onSnapshot(announcementStyleDoc, (snapshot) => {
+    listener(normalizeAnnouncementStyle(snapshot.data()));
+  });
+}
+
+/*
+ * Fire-and-forget, like the board layout's saves - the caller's own state
+ * already reflects the change the moment a control moves, so nothing needs
+ * to wait on the network round trip. A failure is logged, not thrown -
+ * including one Firestore raises synchronously, for an `undefined` field
+ * (invalid there, unlike in a value bound for JSON.stringify).
+ */
 export function saveAnnouncementStyle(style) {
   try {
-    window.localStorage.setItem(ANNOUNCEMENT_STYLE_KEY, JSON.stringify(style));
+    setDoc(announcementStyleDoc, JSON.parse(JSON.stringify(style))).catch((error) => {
+      console.warn('Could not save the announcement style:', error);
+    });
   } catch (error) {
     console.warn('Could not save the announcement style:', error);
-    return false;
   }
-
-  window.dispatchEvent(new Event(ANNOUNCEMENT_STYLE_EVENT));
   return true;
 }
 
