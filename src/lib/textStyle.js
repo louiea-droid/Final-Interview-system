@@ -71,6 +71,23 @@ export const SHADOW_FILTERS = {
  */
 export const DEFAULT_TEXT_SIZES = { heading: 6.8, closing: 4.4, extra: 2.4 };
 
+/*
+ * The one range a text's size may take, shared by everything that can set
+ * it - the Size slider, the corner-drag handle, and the check applied to a
+ * stored layout. They each used to carry their own bounds, so the slider
+ * bottomed out at 0.6 and topped out at 14 while a drag could set anything
+ * from 0.3 to 40: a text outside the slider's range left its thumb pinned
+ * at one end, where nudging it jumped the size instead of moving it.
+ */
+export const MIN_TEXT_SIZE = 0.3;
+export const MAX_TEXT_SIZE = 40;
+
+/** Holds a text's size inside the range above. */
+export function clampTextSize(size) {
+  if (!Number.isFinite(size)) return DEFAULT_TEXT_SIZES.extra;
+  return Math.min(MAX_TEXT_SIZE, Math.max(MIN_TEXT_SIZE, size));
+}
+
 export const DEFAULT_HEADING_STYLE = {
   fontFamily: 'poppins',
   weight: 800,
@@ -147,8 +164,31 @@ export function resolveTextStyle(text) {
      * ran straight off its box.
      */
     display: 'inline-block',
+    /*
+     * Every text is absolutely positioned on its centre, and an absolutely
+     * positioned element with an automatic width shrinks to fit the space
+     * between its `left` and its containing block's right edge - NOT to its
+     * own `boxWidth`. So a text placed to the right of the board was capped
+     * at whatever was left of the board's width: the headline at left 85.25%
+     * could never exceed 14.75% no matter what boxWidth or font size it was
+     * given, and grew extra lines instead of getting wider.
+     *
+     * `max-content` takes the automatic width out of it: the element sizes to
+     * its own content and `boxWidth` below is what actually bounds it, which
+     * is what the editor's Box width field has always claimed to do.
+     */
+    width: 'max-content',
     maxWidth: `${text.boxWidth ?? 92}cqw`,
+    /*
+     * The live board renders text in a <p>, and there is no CSS reset in
+     * this app (Tailwind loads without preflight) - so without this, the
+     * browser's default 1em top margin pushed every text one font size
+     * below its stored position on /visual, while the editor's <span>
+     * showed it where it was stored. Same element, same box, both places.
+     */
+    margin: 0,
     filter: SHADOW_FILTERS[style.shadow] ?? 'none',
     ...fillTextCss(style.fill),
   };
 }
+

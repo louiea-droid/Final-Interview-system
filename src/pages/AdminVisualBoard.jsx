@@ -47,6 +47,7 @@ import {
   Ungroup,
   UploadCloud,
   UsersRound,
+  Zap,
   Video,
   X,
   ZoomIn,
@@ -68,11 +69,13 @@ import {
   ALIGN_OPTIONS,
   CASE_OPTIONS,
   FONT_OPTIONS,
+  MAX_TEXT_SIZE,
+  MIN_TEXT_SIZE,
   SHADOW_OPTIONS,
   WEIGHT_OPTIONS,
   resolveTextStyle,
 } from '../lib/textStyle';
-import { SHAPE_KINDS, isCarousel, isFrame, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
+import { SHAPE_KINDS, isCarousel, isFrame, isZigzag, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
 import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from '../lib/boardGeometry';
 import { ANIMATION_DIRECTIONS, ANIMATION_TYPES, CAROUSEL_ANIMATION, resolveAnimationCss } from '../lib/animationStyle';
 import FillEditor from '../components/FillEditor';
@@ -80,8 +83,18 @@ import PhotoCarousel from '../components/PhotoCarousel';
 import PhotoAdjuster from '../components/PhotoAdjuster';
 import VideoAdjuster from '../components/VideoAdjuster';
 import TextContent from '../components/TextContent';
-import { subscribeCandidates } from '../lib/firebaseBackend';
+import NumberField from '../components/NumberField';
+import CandidateBoard from '../components/CandidateBoard';
+import AnnouncementBanner from '../components/AnnouncementBanner';
+import ZigzagRule from '../components/ZigzagRule';
+import { subscribeAnnouncements, subscribeCandidates } from '../lib/firebaseBackend';
 import { isShownOnBoard } from '../lib/candidateVisibility';
+import { isShownOnBoard as isAnnouncementShownOnBoard } from '../lib/announcementVisibility';
+import {
+  DEFAULT_ANNOUNCEMENT_STYLE,
+  resolveAnnouncementStyle,
+  subscribeAnnouncementStyle,
+} from '../lib/announcementStyle';
 import { useToast } from '../components/ToastProvider';
 
 const ALIGN_ICONS = { left: AlignLeft, center: AlignCenter, right: AlignRight };
@@ -91,6 +104,7 @@ const SHAPE_ICONS = {
   ellipse: Circle,
   triangle: Triangle,
   line: Minus,
+  zigzag: Zap,
   frame: Frame,
   box: BoxIcon,
 };
@@ -168,6 +182,10 @@ export default function AdminVisualBoard() {
   const [multiSelected, setMultiSelected] = useState([]); // [{ kind, id }] - shift-click grouping
   const [activePanel, setActivePanel] = useState('elements');
   const [candidates, setCandidates] = useState([]);
+  /* What the live announcement strip is currently showing, so the canvas
+     can show the same - and can tell when the live board would hide it. */
+  const [announcements, setAnnouncements] = useState([]);
+  const [announcementStyle, setAnnouncementStyle] = useState(DEFAULT_ANNOUNCEMENT_STYLE);
 
   /* { kind, id, x, y } while the right-click order menu is open */
   const [orderMenu, setOrderMenu] = useState(null);
@@ -264,11 +282,29 @@ export default function AdminVisualBoard() {
     return subscribeTemplates(setTemplates);
   }, []);
 
+  /* The same filter and order the live board applies, so the canvas
+     shows the same cards in the same places. */
   useEffect(() => {
     return subscribeCandidates((rows) => {
-      setCandidates(rows.filter((candidate) => isShownOnBoard(candidate)));
+      setCandidates(
+        rows
+          .filter((candidate) => isShownOnBoard(candidate))
+          .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0))
+      );
     });
   }, []);
+
+  useEffect(() => {
+    return subscribeAnnouncements((rows) => {
+      setAnnouncements(
+        rows
+          .filter(isAnnouncementShownOnBoard)
+          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      );
+    });
+  }, []);
+
+  useEffect(() => subscribeAnnouncementStyle(setAnnouncementStyle), []);
 
   useEffect(() => {
     if (publishedSnapshot === null) return;
@@ -702,6 +738,8 @@ export default function AdminVisualBoard() {
       width: vertical ? `${grab}px` : `${divider.length}%`,
       height: vertical ? `${divider.length}%` : `${grab}px`,
       transform: 'translate(-50%, -50%)',
+      /* the rule inside is drawn at the divider's real thickness */
+      '--vb-divider-thickness': `${divider.thickness}px`,
     };
   }
 
@@ -829,27 +867,12 @@ export default function AdminVisualBoard() {
           onPointerDown={handlePointerDown('candidates', null)}
           onContextMenu={handleContextMenu('candidates', null)}
         >
-          {candidates.length === 0 ? (
-            <span className="vb-candidates-empty">No candidates currently shown</span>
-          ) : (
-            <div
-              className="vb-candidate-preview-grid"
-              style={{ gridTemplateColumns: `repeat(${box.perRow}, 1fr)` }}
-            >
-              {candidates.slice(0, box.perRow * 2).map((candidate) => (
-                <div key={candidate.id} className="vb-candidate-preview-card">
-                  <div className="vb-candidate-preview-photo">
-                    {candidate.photo_url ? (
-                      <img src={candidate.photo_url} alt="" />
-                    ) : (
-                      <UsersRound size={14} />
-                    )}
-                  </div>
-                  <div className="vb-candidate-preview-name">{candidate.name}</div>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* the live board's own candidate cards, so the box shows what it will hold */}
+          <CandidateBoard
+            candidates={candidates}
+            perRow={box.perRow ?? 2}
+            secondsPerCard={box.secondsPerCard ?? 4}
+          />
 
           {selectedOnCanvas && (
             <span
@@ -867,19 +890,31 @@ export default function AdminVisualBoard() {
       if (!isVisible(box)) return null;
 
       const selectedOnCanvas = isSelected('announcements');
+      /* the live board shows the oldest active announcement first, and
+         hides the strip altogether while there are none */
+      const liveAnnouncement = announcements[0] ?? null;
 
       return (
         <div
           key="announcements"
-          className={`vb-box vb-announcements ${selectedOnCanvas ? 'selected' : ''} ${
+          className={`vb-box vb-announcements ${liveAnnouncement ? '' : 'is-placeholder'} ${
+            selectedOnCanvas ? 'selected' : ''
+          } ${
             isMultiSelected('announcements') ? 'multi-selected' : ''
           }`}
           style={boxStyle(box)}
           onPointerDown={handlePointerDown('announcements', null)}
           onContextMenu={handleContextMenu('announcements', null)}
+          title={
+            liveAnnouncement
+              ? undefined
+              : 'Hidden on the live board until an announcement is posted'
+          }
         >
-          <Megaphone size={14} aria-hidden="true" />
-          <span>Announcements</span>
+          <AnnouncementBanner
+            message={liveAnnouncement ? liveAnnouncement.message : 'Announcements'}
+            style={resolveAnnouncementStyle(announcementStyle)}
+          />
 
           {selectedOnCanvas && (
             <span
@@ -899,7 +934,7 @@ export default function AdminVisualBoard() {
         <button
           key="logo"
           type="button"
-          className={`vb-element ${isSelected('logo') ? 'selected' : ''} ${
+          className={`vb-element vb-element-media ${isSelected('logo') ? 'selected' : ''} ${
             isMultiSelected('logo') ? 'multi-selected' : ''
           }`}
           style={{
@@ -960,7 +995,7 @@ export default function AdminVisualBoard() {
         <button
           key={image.id}
           type="button"
-          className={`vb-element ${isSelected('image', image.id) ? 'selected' : ''} ${
+          className={`vb-element vb-element-media ${isSelected('image', image.id) ? 'selected' : ''} ${
             isMultiSelected('image', image.id) ? 'multi-selected' : ''
           }`}
           style={{
@@ -991,7 +1026,7 @@ export default function AdminVisualBoard() {
         <button
           key={video.id}
           type="button"
-          className={`vb-element ${isSelected('video', video.id) ? 'selected' : ''} ${
+          className={`vb-element vb-element-media ${isSelected('video', video.id) ? 'selected' : ''} ${
             isMultiSelected('video', video.id) ? 'multi-selected' : ''
           }`}
           style={scaledPositionStyle(video, PHOTO_BASE_WIDTH)}
@@ -1033,7 +1068,13 @@ export default function AdminVisualBoard() {
         >
           {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
 
-          {isCarousel(shape) ? (
+          {isZigzag(shape) ? (
+            <ZigzagRule
+              color={shape.stroke.color}
+              width={shape.stroke.width}
+              peaks={shape.peaks}
+            />
+          ) : isCarousel(shape) ? (
             <PhotoCarousel
               photos={shape.photos}
               direction={shape.animation.direction}
@@ -1681,6 +1722,18 @@ export default function AdminVisualBoard() {
                 // Read by .vb-canvas in globals.css - see the comment there.
                 style={{ '--vb-zoom': zoom / 100 }}
               >
+                {/* The live board's backdrop - see .vb-canvas-bg in globals.css. */}
+                <video
+                  className="vb-canvas-bg"
+                  src="/visual/bg.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  aria-hidden="true"
+                />
+                <div className="vb-canvas-bg-shade" aria-hidden="true" />
+
                 {/*
                   One free-form surface, matching the live board: every
                   element is positioned against it, and pressing the empty
@@ -2627,19 +2680,37 @@ export default function AdminVisualBoard() {
 
                 {selected.kind === 'text' && (
                   <div className="form-group">
-                    <label className="form-label">Size</label>
+                    <label className="form-label" htmlFor="vb-text-size">
+                      Size
+                    </label>
+                    {/*
+                      The slider spans the whole range a text's size may
+                      take, so every size a corner-drag can reach can also
+                      be nudged here. The box beside it types an exact
+                      value, since one slider covering that whole range
+                      moves in fairly coarse steps.
+                    */}
                     <div className="scale-field">
                       <input
                         type="range"
-                        min="0.6"
-                        max="14"
+                        min={MIN_TEXT_SIZE}
+                        max={MAX_TEXT_SIZE}
                         step="0.1"
                         value={selectedElement.fontSize}
+                        aria-label="Size"
                         onChange={(event) =>
                           editor.setFontSize(selected.id, Number(event.target.value))
                         }
                       />
-                      <span className="scale-field-value">{selectedElement.fontSize.toFixed(1)}</span>
+                      <NumberField
+                        id="vb-text-size"
+                        className="scale-field-input"
+                        min={MIN_TEXT_SIZE}
+                        max={MAX_TEXT_SIZE}
+                        step="0.1"
+                        value={selectedElement.fontSize}
+                        onCommit={(next) => editor.setFontSize(selected.id, next)}
+                      />
                     </div>
                   </div>
                 )}

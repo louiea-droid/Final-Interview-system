@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Megaphone } from "lucide-react";
 
 import FullscreenSwitch from "../components/FullscreenSwitch";
-import AutoFitText from "../components/AutoFitText";
 import { subscribeAnnouncements, subscribeCandidates } from "../lib/firebaseBackend";
 import { isShownOnBoard } from "../lib/candidateVisibility";
 import { isShownOnBoard as isAnnouncementShownOnBoard } from "../lib/announcementVisibility";
@@ -13,13 +11,16 @@ import {
   subscribeAnnouncementStyle,
 } from "../lib/announcementStyle";
 import { resolveTextStyle } from "../lib/textStyle";
-import { isCarousel, resolveShapeStyle } from "../lib/shapeStyle";
+import { isCarousel, isZigzag, resolveShapeStyle } from "../lib/shapeStyle";
 import { resolveAnimationCss } from "../lib/animationStyle";
 import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from "../lib/boardGeometry";
 import PhotoCarousel from "../components/PhotoCarousel";
 import PhotoAdjuster from "../components/PhotoAdjuster";
 import VideoAdjuster from "../components/VideoAdjuster";
 import TextContent from "../components/TextContent";
+import CandidateBoard from "../components/CandidateBoard";
+import AnnouncementBanner from "../components/AnnouncementBanner";
+import ZigzagRule from "../components/ZigzagRule";
 
 /* Announcements cycle on their own timer, independent of the candidate sets. */
 const ANNOUNCEMENT_DURATION = 7000;
@@ -161,9 +162,11 @@ export default function DisplayPage({ usePublished = true }) {
    * DISPLAY SETTINGS
    * =========================================================
    *
-   * The candidate carousel (right column) shows a configurable number of
-   * candidates across each row - see `perRow` on layout.candidates -
-   * scrolling upward continuously rather than swapping discrete sets.
+   * The candidate carousel shows a configurable number of candidates
+   * across each row - see `perRow` on layout.candidates - scrolling
+   * upward continuously rather than swapping discrete sets. The cards
+   * themselves live in components/CandidateBoard.jsx, shared with the
+   * editor's canvas.
    */
 
   /* =========================================================
@@ -266,6 +269,48 @@ export default function DisplayPage({ usePublished = true }) {
     return usePublished ? subscribeBoardLayout(setLayout) : subscribeDraftLayout(setLayout);
   }, [usePublished]);
 
+  /*
+   * The board holds a 16:9 frame so that what the editor's canvas shows is
+   * exactly what paints here. On a screen that is not 16:9 that leaves bars
+   * top and bottom (or at the sides), which is the right trade while an
+   * admin is designing against the canvas - but wrong on the display itself,
+   * where the board should use the whole screen. So the lock is lifted only
+   * in fullscreen: windowed, the canvas and the board still agree.
+   */
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  /*
+   * A phone held upright is the one shape this board cannot use. It is 16:9,
+   * so on a 390x844 screen it collapses to a 390x219 strip with 625px of
+   * dead space and type down at 5px - unreadable.
+   *
+   * Turning it a quarter turn, the way a video player does, lets the same
+   * 16:9 frame span the long side of the screen: roughly 1.8x the size with
+   * nothing wasted, and one design rather than two. A phone already in
+   * landscape fits the board and is left alone; turning the handset also
+   * drops this, since the orientation query stops matching.
+   */
+  const [isPhonePortrait, setIsPhonePortrait] = useState(false);
+
+  useEffect(() => {
+    // the dashboard's small embedded preview is its own fixed shape
+    if (isPreviewEmbed || typeof window.matchMedia !== "function") return;
+
+    const query = window.matchMedia("(orientation: portrait) and (max-width: 820px)");
+    const sync = () => setIsPhonePortrait(query.matches);
+
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, [isPreviewEmbed]);
+
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    sync();
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+
   useEffect(() => {
     if (isPreviewEmbed) return;
 
@@ -315,27 +360,6 @@ export default function DisplayPage({ usePublished = true }) {
   }
 
   /*
-   * =========================================================
-   * CAROUSEL SCROLL SPEED
-   *
-   * A constant pace regardless of how many candidates there are -
-   * more candidates means a longer loop, not a faster one. The
-   * card list is rendered twice back to back and this animates it
-   * from 0 to -50%, i.e. exactly one copy's height, so it loops
-   * seamlessly no matter how tall a "copy" actually is.
-   * =========================================================
-   */
-
-  /* Set per board in the editor; the pace is per card, not per loop. */
-  const secondsPerCard = layout.candidates.secondsPerCard ?? 4;
-
-  const carouselDuration = Math.max(
-    /* a short list still needs long enough not to be a blur */
-    secondsPerCard * 4,
-    candidates.length * secondsPerCard
-  );
-
-  /*
    * The board is one free-form surface: every entry in layerOrder paints in
    * that order, the candidate board and the announcement strip included.
    * Nothing is pinned to a column any more, so an element sits exactly
@@ -359,7 +383,12 @@ export default function DisplayPage({ usePublished = true }) {
           transform: "translate(-50%, -50%)",
         }}
       >
-        {renderCandidateCarousel()}
+        <CandidateBoard
+          candidates={candidates}
+          perRow={box.perRow ?? 2}
+          secondsPerCard={box.secondsPerCard ?? 4}
+          lightMode={lightMode}
+        />
       </div>
     );
   }
@@ -383,31 +412,13 @@ export default function DisplayPage({ usePublished = true }) {
           transform: "translate(-50%, -50%)",
         }}
       >
-        <div
+        <AnnouncementBanner
           key={announcements[currentAnnouncement]?.id}
-          className={`
-            flex
-            h-full
-            w-full
-            items-center
-            justify-center
-            gap-2
-            rounded-[2px]
-            border
-            border-[#c9a03c]
-            px-[clamp(12px,2.4vw,22px)]
-            py-[clamp(6px,1.2vw,12px)]
-            text-center
-            animate-[fadeIn_.7s_ease-in-out]
-            ${lightMode ? "bg-[#fdf6f3] text-[#7a5a12]" : "bg-[#2e0505] text-[#f0d689]"}
-          `}
-        >
-          <Megaphone size={18} className="shrink-0" aria-hidden="true" />
-
-          <p className="leading-snug" style={resolveAnnouncementStyle(announcementStyle)}>
-            {announcements[currentAnnouncement]?.message}
-          </p>
-        </div>
+          className="animate-[fadeIn_.7s_ease-in-out]"
+          message={announcements[currentAnnouncement]?.message}
+          style={resolveAnnouncementStyle(announcementStyle)}
+          lightMode={lightMode}
+        />
       </div>
     );
   }
@@ -449,7 +460,13 @@ export default function DisplayPage({ usePublished = true }) {
       if (!shape || !isVisible(shape)) return null;
       return (
         <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)}>
-          {isCarousel(shape) ? (
+          {isZigzag(shape) ? (
+            <ZigzagRule
+              color={shape.stroke.color}
+              width={shape.stroke.width}
+              peaks={shape.peaks}
+            />
+          ) : isCarousel(shape) ? (
             <PhotoCarousel
               photos={shape.photos}
               direction={shape.animation.direction}
@@ -541,161 +558,6 @@ export default function DisplayPage({ usePublished = true }) {
   }
 
 
-  /* Groups a flat list into rows of `size` - unlike a flat grid, a lone
-     last candidate is marked to span the full row instead of leaving an
-     empty cell next to it. */
-  function chunkIntoRows(list, size) {
-    const rows = [];
-    for (let i = 0; i < list.length; i += size) {
-      rows.push(list.slice(i, i + size));
-    }
-    return rows;
-  }
-
-  /* One candidate box for the carousel - photo on top, gold name bar below.
-     The photo keeps a fixed aspect ratio rather than filling whatever
-     height its row is given, so a card's height simply follows from its
-     width - which is what makes `perRow` (below) "auto adjust" card size
-     just by changing how many sit across a row, with no separate height
-     setting to keep in sync. */
-  function renderCandidateCard(candidate, key) {
-    return (
-      <div
-        key={key}
-        className={`flex flex-col overflow-hidden rounded-[3px] border ${lightMode ? "border-[#d8ab9c] bg-[#fdf6f3]" : "border-[#c9a03c] bg-[#2e0505]"}`}
-      >
-        <div
-          className={`
-            relative
-            aspect-[11/10]
-            overflow-hidden
-            ${
-              lightMode
-                ? "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#f6ded4_0%,#e8c3b6_45%,#d8ab9c_100%)]"
-                : "bg-[radial-gradient(ellipse_70%_70%_at_50%_45%,#a51d1d_0%,#6d1010_45%,#2e0505_100%)]"
-            }
-          `}
-        >
-          {candidate.photo_url && (
-            <div
-              className="absolute inset-0 bg-cover bg-top bg-no-repeat"
-              style={{ backgroundImage: `url("${candidate.photo_url}")` }}
-            />
-          )}
-        </div>
-
-        <div
-          className={`
-            relative
-            flex
-            min-h-[clamp(30px,9cqh,55px)]
-            flex-col
-            items-center
-            justify-center
-            gap-0.5
-            px-2
-            py-1
-
-            bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
-          `}
-        >
-          <AutoFitText
-            minScale={0.55}
-            className="
-              font-magneton
-              text-center
-              leading-[1.1]
-              tracking-[0.01em]
-              text-[clamp(17px,4.6cqh,28px)]
-              text-[#560606]
-              [text-shadow:1px_1px_1px_rgba(63,39,10,.3)]
-            "
-          >
-            {candidate.name}
-          </AutoFitText>
-
-          {candidate.course && (
-            <span
-              className="
-                truncate
-                text-[clamp(8px,1.7cqh,13px)]
-                font-bold
-                uppercase
-                tracking-wider
-                text-[#2e1604]/80
-              "
-            >
-              {candidate.course}
-            </span>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  /* The right column's whole candidate board: a loading skeleton, an empty
-     message, or the looping carousel - two copies of the candidate list
-     stacked so translateY(-50%) always lands exactly on the seam between
-     them, regardless of how tall each copy actually is.
-     `perRow` (set from the editor's Candidate Board panel, 2 by default)
-     is how many candidates sit across one row; a row's height then simply
-     follows its cards' own aspect ratio, so raising or lowering `perRow`
-     auto-adjusts card size to fit that many across instead of requiring a
-     separate height setting to keep in sync. A row shorter than `perRow`
-     (the last one, when the count doesn't divide evenly) gets its own
-     column count so its cards stretch to fill the row rather than leaving
-     empty cells. */
-  function renderCandidateCarousel() {
-    const perRow = layout.candidates.perRow ?? 2;
-
-    if (candidates.length === 0) {
-      return (
-        <div
-          className={`
-            flex
-            h-full
-            w-full
-            items-center
-            justify-center
-            px-2
-            text-center
-            text-[clamp(11px,1.3vw,14px)]
-            ${lightMode ? "text-[#7a5a12]" : "text-[#f0d689]"}
-          `}
-        >
-          No final interview applicants currently listed.
-        </div>
-      );
-    }
-
-    const rows = chunkIntoRows(candidates, perRow);
-
-    return (
-      <div className="relative h-full w-full overflow-hidden [container-type:size]">
-        <div
-          className="absolute inset-x-0 top-0 flex flex-col gap-[2cqh]"
-          style={{ animation: `carousel-scroll ${carouselDuration}s linear infinite` }}
-        >
-          {[0, 1].map((copy) => (
-            <div key={copy} className="flex flex-col gap-[2cqh]">
-              {rows.map((row, rowIndex) => (
-                <div
-                  key={rowIndex}
-                  className="grid shrink-0 gap-[2cqw]"
-                  style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}
-                >
-                  {row.map((candidate, cellIndex) =>
-                    renderCandidateCard(candidate, `${copy}-${rowIndex}-${cellIndex}`)
-                  )}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <main
       className={`
@@ -785,20 +647,46 @@ export default function DisplayPage({ usePublished = true }) {
       )}
 
       {/*
-        The board itself: a centered 16:9 frame, letterboxed against
-        whatever the screen's actual ratio is, with the video showing
-        through the bars. It marks itself as the container-query basis, so
-        an element's cqw/cqh sizing is relative to the whole board rather
-        than to a column of it - and, being locked to the same 16:9 ratio
-        as the editor's canvas, an element sits at the same spot here as it
-        does in the preview, regardless of the display's own aspect ratio.
+        The board itself. It marks itself as the container-query basis, so an
+        element's cqw/cqh sizing is relative to the whole board rather than
+        to a column of it.
+
+        Windowed, it holds a centered 16:9 frame - the same ratio as the
+        editor's canvas - so an element sits at the same spot in both, and
+        the video shows through the bars on a screen of another shape.
+        Fullscreen it takes the whole screen instead, because bars on the
+        display are just wasted wall. Every element is positioned as a
+        percentage of the board, so they all move with it; on a 16:10 screen
+        that means the design stands about 11% taller than the canvas shows
+        it, which is the cost of using the full height.
       */}
 
       <div
         style={{
           containerType: "size",
-          width: "min(100dvw, 100dvh * 16 / 9)",
-          height: "min(100dvh, 100dvw * 9 / 16)",
+          ...(isPhonePortrait
+            ? {
+                /* width and height swap which viewport axis they measure
+                   against, so the board's long edge runs down the screen's */
+                width: "min(100dvh, 100dvw * 16 / 9)",
+                height: "min(100dvw, 100dvh * 9 / 16)",
+                /*
+                 * Turned sideways the board is wider than the screen, and
+                 * `margin: auto` cannot centre a box that overflows its
+                 * container - the auto margins resolve to zero and it hangs
+                 * off one edge. Pinning the centre and pulling back by half
+                 * its own size centres it whatever its size.
+                 */
+                inset: "auto",
+                left: "50%",
+                top: "50%",
+                margin: 0,
+                transform: "translate(-50%, -50%) rotate(90deg)",
+              }
+            : {
+                width: isFullscreen ? "100dvw" : "min(100dvw, 100dvh * 16 / 9)",
+                height: isFullscreen ? "100dvh" : "min(100dvh, 100dvw * 9 / 16)",
+              }),
         }}
         className="absolute inset-0 z-[2] m-auto overflow-hidden"
       >

@@ -17,6 +17,7 @@ export const SHAPE_KINDS = [
   { value: 'ellipse', label: 'Ellipse' },
   { value: 'triangle', label: 'Triangle' },
   { value: 'line', label: 'Line' },
+  { value: 'zigzag', label: 'Lightning line' },
   { value: 'frame', label: 'Photo frame' },
   { value: 'box', label: 'Box' },
 ];
@@ -45,6 +46,19 @@ const SHAPE_PRESETS = {
   ellipse: { width: 16, height: 16, radius: 0, fill: solidFill('#d45d59', 0.85) },
   triangle: { width: 16, height: 14, radius: 0, fill: solidFill('#f4ca5d', 0.9) },
   line: { width: 30, height: 0.6, radius: 999, fill: solidFill('#c9a03c', 1) },
+  /*
+   * A zigzag rule. Unlike every other kind its `stroke` is the line itself
+   * rather than a border, and it paints no fill - see resolveShapeStyle and
+   * ZigzagRule.jsx. `peaks` is how many up-and-down cycles it makes.
+   */
+  zigzag: {
+    width: 16,
+    height: 2.4,
+    radius: 0,
+    fill: solidFill('#c9a03c', 0),
+    stroke: { color: '#c9a03c', width: 2 },
+    peaks: 6,
+  },
   /*
    * `photos` backs the carousel animation (see PhotoCarousel.jsx) - a frame
    * with two or more of them and animation.type 'carousel' slides between
@@ -94,6 +108,11 @@ export function isFrame(shape) {
   return shape.kind === 'frame';
 }
 
+/** Whether a shape is the zigzag rule, whose stroke is its line, not a border. */
+export function isZigzag(shape) {
+  return shape.kind === 'zigzag';
+}
+
 /** Whether a frame should render as a sliding photo carousel rather than its static `fill`. */
 export function isCarousel(shape) {
   return isFrame(shape) && shape.animation?.type === 'carousel' && (shape.photos?.length ?? 0) > 1;
@@ -129,6 +148,9 @@ export function normalizeShapes(shapes) {
           width: clamp(shape.stroke?.width ?? 0, 0, 40),
         },
         fill: normalizeFill(shape.fill, SHAPE_PRESETS[kind]?.fill ?? BASE_SHAPE.fill),
+        ...(kind === 'zigzag'
+          ? { peaks: Math.round(clamp(shape.peaks ?? SHAPE_PRESETS.zigzag.peaks, 1, 40)) }
+          : {}),
         photos: kind === 'frame' && Array.isArray(shape.photos)
           ? shape.photos.filter((url) => typeof url === 'string' && url)
           : [],
@@ -146,14 +168,17 @@ export function resolveShapeStyle(shape) {
     height: `${shape.height}%`,
     transform: `translate(-50%, -50%) rotate(${shape.rotation}deg)`,
     borderRadius: shape.kind === 'ellipse' ? '50%' : `${shape.radius}px`,
-    ...(shape.stroke.width > 0
+    /* the zigzag's stroke is the drawn line, so it gets no border and no
+       fill - ZigzagRule.jsx paints it instead */
+    ...(shape.stroke.width > 0 && !isZigzag(shape)
       ? { border: `${shape.stroke.width}px solid ${shape.stroke.color}` }
       : {}),
     ...(shape.kind === 'triangle'
       ? { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }
       : {}),
-    // a carousel frame paints its photos itself (see PhotoCarousel.jsx), not through `fill`
-    ...(isCarousel(shape) ? {} : fillBoxCss(shape.fill)),
+    // a carousel frame paints its photos itself (see PhotoCarousel.jsx), and
+    // a zigzag paints its own line - neither goes through `fill`
+    ...(isCarousel(shape) || isZigzag(shape) ? {} : fillBoxCss(shape.fill)),
     ...resolveAnimationCss(shape.animation),
   };
 }

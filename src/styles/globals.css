@@ -4609,9 +4609,40 @@ svg {
   border-radius: 8px;
   border: 1px solid var(--border-light);
 
-  background: radial-gradient(ellipse at 50% 20%, #2a0606 0%, #12010a 55%, #0b0102 100%);
+  /* the live board's own ground - its background video sits on top, below */
+  background: #0b0102;
+  /* keeps the backdrop/grid/surface z-indexes below local to the board */
+  isolation: isolate;
 
   transition: width 0.15s ease, height 0.15s ease;
+}
+
+/*
+ * The live board's backdrop, so contrast and legibility can be judged on
+ * the canvas rather than only on /visual: the same looping video at the
+ * same opacity, under the same dark wash. Everything else on the canvas
+ * stacks above it.
+ */
+.vb-canvas-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.75;
+
+  pointer-events: none;
+}
+
+.vb-canvas-bg-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+
+  background: rgba(0, 0, 0, 0.25);
+  pointer-events: none;
 }
 
 /*
@@ -4621,6 +4652,7 @@ svg {
  */
 .vb-canvas-surface {
   position: relative;
+  z-index: 2;
   container-type: size;
   overflow: hidden;
   width: 100%;
@@ -4667,6 +4699,7 @@ svg {
   content: '';
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
 
   /* .vb-canvas is now a 3-column grid itself - without this the overlay,
@@ -4742,13 +4775,16 @@ svg {
   border-radius: 2px;
 }
 
-/*
- * A compact preview of the live board's candidate carousel - two boxes per
- * row, photo over a gold name bar, same look as VisualBoard.jsx's cards
- * (duplicated here on purpose, since this admin page can't import from a
- * file it isn't allowed to touch).
- */
-/* A positioned box on the canvas: the candidate board, or the strip. */
+/* The logo, photos and videos: their inline width is the element's real
+   size, so the button's padding is dropped here - it would otherwise eat
+   6px out of the image and draw it slightly smaller than the live board. */
+.vb-element-media {
+  padding: 0;
+}
+
+/* A positioned box on the canvas: the candidate board, or the strip. Both
+   hold the live board's own component (CandidateBoard, AnnouncementBanner),
+   so they look here exactly as they will on /visual. */
 .vb-box {
   position: absolute;
   display: flex;
@@ -4785,74 +4821,17 @@ svg {
   outline-offset: 2px;
 }
 
-.vb-candidates {
-  align-items: flex-start;
+/*
+ * The strip shows the current announcement. While there are none, the live
+ * board hides the strip entirely - here it stays, dimmed and dashed, so it
+ * can still be grabbed and placed.
+ */
+.vb-announcements.is-placeholder {
+  opacity: 0.55;
 }
 
-/* the strip stands in for the real announcement, which comes from data */
-.vb-announcements {
-  gap: 7px;
-  padding: 7px 12px;
-
-  border: 1px solid #c9a03c;
-  background: rgba(46, 5, 5, 0.85);
-
-  color: #f0d689;
-  font-size: 11.5px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.vb-candidate-preview-grid {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 1fr 1fr;
-  gap: 4%;
-}
-
-.vb-candidate-preview-card {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 2px;
-}
-
-.vb-candidate-preview-photo {
-  display: flex;
-  width: 100%;
-  aspect-ratio: 11 / 10;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-
-  background: radial-gradient(ellipse 70% 70% at 50% 45%, #a51d1d 0%, #6d1010 45%, #2e0505 100%);
-  color: #8b8b8b;
-}
-
-.vb-candidate-preview-photo img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.vb-candidate-preview-name {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-
-  padding: 3% 6%;
-
-  background: linear-gradient(to bottom, #f2d888 0%, #dbb14b 38%, #b0821c 74%, #8b6615 100%);
-  color: #560606;
-  font-size: 8px;
-  font-weight: 700;
-  text-align: center;
-}
-
-.vb-candidates-empty {
-  color: #8b7a7a;
-  font-size: 11px;
-  white-space: nowrap;
+.vb-announcements.is-placeholder > div {
+  border-style: dashed;
 }
 
 /* ---------------- shapes and photo frames on the canvas ---------------- */
@@ -5175,6 +5154,27 @@ svg {
 
 .vb-properties .scale-field-value {
   font-size: 11px;
+}
+
+/* Types an exact value where a slider alone would be too coarse - it sits
+   in a .scale-field in place of the readout span. */
+.scale-field-input {
+  width: 56px;
+  flex-shrink: 0;
+
+  padding: 3px 5px;
+
+  border-radius: 5px;
+  border: 1px solid var(--border-light);
+
+  background: var(--card);
+  color: var(--text);
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.scale-field-input:focus-visible {
+  border-color: rgba(162, 29, 27, 0.65);
 }
 
 /* ---------------- segmented toggles ---------------- */
@@ -5531,7 +5531,7 @@ svg {
 }
 
 .vb-divider-line {
-  width: 1px;
+  width: var(--vb-divider-thickness, 1px);
   height: 100%;
 
   background: linear-gradient(
@@ -5565,7 +5565,7 @@ svg {
 }
 
 .vb-divider-box .vb-divider-line {
-  width: 1px;
+  width: var(--vb-divider-thickness, 1px);
   height: 100%;
 
   background: linear-gradient(
@@ -5582,7 +5582,7 @@ svg {
 
 .vb-divider-box.is-horizontal .vb-divider-line {
   width: 100%;
-  height: 1px;
+  height: var(--vb-divider-thickness, 1px);
 
   background: linear-gradient(
     to right,

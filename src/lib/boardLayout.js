@@ -33,6 +33,7 @@ import {
   DEFAULT_EXTRA_TEXT_STYLE,
   DEFAULT_HEADING_STYLE,
   DEFAULT_TEXT_SIZES,
+  clampTextSize,
   normalizeTextStyle,
 } from './textStyle';
 import { normalizeShapes } from './shapeStyle';
@@ -46,6 +47,19 @@ import { DEFAULT_ANIMATION, normalizeAnimation } from './animationStyle';
  * reinterpreted into a scramble.
  */
 export const LAYOUT_VERSION = 3;
+
+/*
+ * A smaller step than LAYOUT_VERSION: a change in what a stored number means
+ * that CAN be carried over, so nothing is dropped. Revision 1: a text's `y`
+ * is now exactly where its centre paints. Before it, /visual drew each text
+ * in a <p> that kept the browser's default 1em top margin, so every text
+ * landed one font size lower on the live board than the editor showed it
+ * (fontSize is in cqh - a share of the board's height - the same unit as
+ * y). A layout from before this gets that offset folded into y once, so the
+ * live board keeps looking exactly as it did and the editor now agrees
+ * with it.
+ */
+export const LAYOUT_REVISION = 1;
 
 /*
  * The candidate board and the announcement strip are boxes rather than
@@ -93,6 +107,7 @@ export const DEFAULT_DIVIDER = {
 
 export const DEFAULT_LAYOUT = {
   version: LAYOUT_VERSION,
+  revision: LAYOUT_REVISION,
   logo: { visible: true, url: null, x: 24, y: 16, scale: 1, animation: DEFAULT_ANIMATION },
   candidates: DEFAULT_CANDIDATES,
   announcements: DEFAULT_ANNOUNCEMENTS,
@@ -149,9 +164,9 @@ function normalizeText(text, base = DEFAULT_EXTRA_TEXT_STYLE, baseSize = DEFAULT
     x: clamp(text.x, 0, 100),
     y: clamp(text.y, 0, 100),
     // `scale` was a multiplier of a per-role base size before sizes were stored outright
-    fontSize: Number.isFinite(text.fontSize)
-      ? clamp(text.fontSize, 0.3, 40)
-      : clamp(baseSize * (Number(text.scale) || 1), 0.3, 40),
+    fontSize: clampTextSize(
+      Number.isFinite(text.fontSize) ? text.fontSize : baseSize * (Number(text.scale) || 1)
+    ),
     visible: text.visible !== false,
     locked: text.locked === true,
     /* How wide the text may run before wrapping, as a share of the board. */
@@ -311,6 +326,14 @@ function normalizeLayout(parsed) {
   // an admin who removed every text keeps an empty board, rather than the defaults
   const hasTextData = Boolean(parsed.heading || parsed.closing || Array.isArray(parsed.texts));
 
+  /* Texts saved before revision 1 painted one font size below their stored
+     y on the live board - see LAYOUT_REVISION. Folding that in here keeps
+     the live board exactly where it was. */
+  const storedTexts =
+    (parsed.revision ?? 0) < 1
+      ? texts.map((text) => ({ ...text, y: clamp(text.y + text.fontSize, 0, 100) }))
+      : texts;
+
   const layout = {
     logo: {
       ...DEFAULT_LAYOUT.logo,
@@ -320,13 +343,14 @@ function normalizeLayout(parsed) {
     candidates: normalizeBox(parsed.candidates, DEFAULT_CANDIDATES),
     announcements: normalizeBox(parsed.announcements, DEFAULT_ANNOUNCEMENTS),
     dividers: normalizeDividers(parsed),
-    texts: hasTextData ? texts : DEFAULT_LAYOUT.texts,
+    texts: hasTextData ? storedTexts : DEFAULT_LAYOUT.texts,
     images: normalizeImages(parsed.images),
     videos: Array.isArray(parsed.videos) ? parsed.videos : [],
     shapes: normalizeShapes(parsed.shapes),
   };
 
   layout.version = LAYOUT_VERSION;
+  layout.revision = LAYOUT_REVISION;
   layout.layerOrder = normalizeLayerOrder(parsed.layerOrder, layout);
 
   return layout;

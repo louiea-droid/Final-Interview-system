@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 
 import { DEFAULT_LAYOUT, isVisible, saveDraftLayout } from './boardLayout';
+import { clampTextSize } from './textStyle';
 import { DEFAULT_EXTRA_TEXT_STYLE, DEFAULT_TEXT_SIZES } from './textStyle';
 import { createShape } from './shapeStyle';
 import { imageFill, normalizeFill, videoFill } from './fill';
@@ -536,6 +537,23 @@ export function useBoardLayoutEditor(
    * Resizes a text block by dragging its corner. Type is sized against the
    * board's height, so the drag measures vertically from the block's centre.
    */
+  /*
+   * Resizes a text by dragging its corner handle. The size moves in
+   * proportion to how far the handle is dragged from where it was grabbed,
+   * rather than being recomputed from the handle's absolute distance to the
+   * text's centre. Two things were wrong with the latter:
+   *
+   * - it measured that distance with Math.abs, so dragging the handle in
+   *   past the centre to shrink the text turned around at the centre and
+   *   grew it again - pushing the size down made it jump up instead;
+   * - it read the distance as half the font size, but a text's box is as
+   *   tall as its line height times its number of lines, so grabbing the
+   *   handle on a two-line heading doubled its size before the pointer had
+   *   moved at all.
+   *
+   * Working from the grab point fixes both: nothing changes until the
+   * pointer moves, and the size only ever follows the direction of the drag.
+   */
   function beginFontResize(id) {
     return (event) => {
       event.preventDefault();
@@ -544,14 +562,28 @@ export function useBoardLayoutEditor(
       const text = findElement(latestLayoutRef.current, 'text', id);
       if (!text || text.locked) return;
 
+      const startRect = boundsRef.current?.getBoundingClientRect();
+      if (!startRect) return;
+
+      const centerY = startRect.top + (text.y / 100) * startRect.height;
+      /* which side of the centre the handle was grabbed on, so "away from
+         the centre" means bigger whichever side that is */
+      const direction = event.clientY < centerY ? -1 : 1;
+      /* guarded against zero: a handle grabbed exactly on the centre would
+         otherwise make every later position an infinite multiple of it */
+      const startOffset = Math.max(Math.abs(event.clientY - centerY), 4);
+      const startSize = text.fontSize;
+
       dragWith((moveEvent, rect) => {
-        const centerY = rect.top + (text.y / 100) * rect.height;
-        const halfHeight = (Math.abs(moveEvent.clientY - centerY) * 100) / rect.height;
+        const center = rect.top + (text.y / 100) * rect.height;
+        const offset = (moveEvent.clientY - center) * direction;
 
         commitFrom(
           (current) =>
             patchElement(current, 'text', id, {
-              fontSize: Math.min(40, Math.max(0.3, halfHeight * 2)),
+              /* clamped at zero rather than mirrored: dragging past the
+                 centre holds the text at its smallest instead of growing */
+              fontSize: clampTextSize(startSize * Math.max(offset / startOffset, 0)),
             }),
           { immediate: false }
         );
@@ -801,7 +833,7 @@ export function useBoardLayoutEditor(
 
   /* A text element's size - its font size, as a share of the board's height. */
   function setFontSize(id, fontSize) {
-    updateElement('text', id, { fontSize });
+    updateElement('text', id, { fontSize: clampTextSize(fontSize) });
   }
 
   function setTextContent(id, text) {
@@ -1136,6 +1168,7 @@ export function useBoardLayoutEditor(
   function resetLayout() {
     commitFrom(() => ({
       version: DEFAULT_LAYOUT.version,
+      revision: DEFAULT_LAYOUT.revision,
       logo: { ...DEFAULT_LAYOUT.logo },
       candidates: { ...DEFAULT_LAYOUT.candidates },
       announcements: { ...DEFAULT_LAYOUT.announcements },
