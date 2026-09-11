@@ -5,6 +5,7 @@ import {
   CalendarClock,
   Megaphone,
   MoveHorizontal,
+  PaintBucket,
   Palette,
   Pencil,
   Plus,
@@ -19,6 +20,7 @@ import { formatCurrentDate, formatScheduledTime } from '../lib/adminTime';
 import TablePagination from '../components/TablePagination';
 import { useToast } from '../components/ToastProvider';
 import FillEditor from '../components/FillEditor';
+import { fillBoxCss } from '../lib/fill';
 import {
   DEFAULT_ANNOUNCEMENT_STYLE,
   normalizeAnnouncementStyle,
@@ -60,6 +62,15 @@ function fromDateTimeLocal(value) {
    and images) is still one click away behind the palette button. */
 const QUICK_COLORS = ['#f4ca5d', '#ffffff', '#a51d1d', '#2f8fd6', '#8b5bf5'];
 
+/* A one-click swatch row for the banner's own background, same idea as
+   QUICK_COLORS - the full palette (gradients included) is one click away
+   behind the paint-bucket button. */
+const BACKGROUND_QUICK_COLORS = ['#2e0505', '#0b1f3a', '#0d2b1c', '#241033', '#1a1a1a'];
+
+/* A handful of common choices for the banner's leading icon - any other
+   emoji can still be typed into the field beside them. */
+const ICON_OPTIONS = ['📢', '📣', '🔔', '⭐', '🎉', '⚠️'];
+
 export default function AdminAnnouncements() {
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -92,34 +103,43 @@ export default function AdminAnnouncements() {
   // The fill popover renders through a portal (see below) since the panel
   // it lives in clips overflow for its rounded corners - a plain absolutely
   // positioned child would be cut off instead of floating above the page.
+  // `openFillPopover` says which field it's editing ('fill' for the message
+  // text, 'background' for the banner itself) - only one is ever open.
+  const [openFillPopover, setOpenFillPopover] = useState(null);
   const [fillPopoverPos, setFillPopoverPos] = useState(null);
   const fillButtonRef = useRef(null);
+  const backgroundFillButtonRef = useRef(null);
   const fillPopoverRef = useRef(null);
 
-  function toggleFillPopover() {
-    if (fillPopoverPos) {
+  function toggleFillPopover(field, buttonRef) {
+    if (openFillPopover === field) {
+      setOpenFillPopover(null);
       setFillPopoverPos(null);
       return;
     }
 
-    const rect = fillButtonRef.current.getBoundingClientRect();
+    const rect = buttonRef.current.getBoundingClientRect();
     setFillPopoverPos({
       top: rect.bottom + 8,
       left: Math.max(8, rect.right - 260),
     });
+    setOpenFillPopover(field);
   }
 
   // Closes the fill popover on an outside click, same as any other dropdown.
   useEffect(() => {
-    if (!fillPopoverPos) return;
+    if (!openFillPopover) return;
 
     function handlePointerDown(event) {
       if (fillButtonRef.current?.contains(event.target)) return;
+      if (backgroundFillButtonRef.current?.contains(event.target)) return;
       if (fillPopoverRef.current?.contains(event.target)) return;
+      setOpenFillPopover(null);
       setFillPopoverPos(null);
     }
 
     function handleScroll() {
+      setOpenFillPopover(null);
       setFillPopoverPos(null);
     }
 
@@ -129,7 +149,7 @@ export default function AdminAnnouncements() {
       document.removeEventListener('mousedown', handlePointerDown);
       window.removeEventListener('scroll', handleScroll, true);
     };
-  }, [fillPopoverPos]);
+  }, [openFillPopover]);
 
   function updateStyle(patch) {
     setStyle((current) => {
@@ -489,7 +509,7 @@ export default function AdminAnnouncements() {
                   }`}
                   style={{ background: color }}
                   title={color}
-                  aria-label={`Fill ${color}`}
+                  aria-label={`Text color ${color}`}
                   onClick={() => updateStyle({ fill: { type: 'solid', color, opacity: 1 } })}
                 />
               ))}
@@ -497,26 +517,102 @@ export default function AdminAnnouncements() {
               <button
                 ref={fillButtonRef}
                 type="button"
-                className={`announcement-toolbar-icon-button ${fillPopoverPos ? 'active' : ''}`}
-                title="More colors"
-                aria-label="More colors"
-                aria-expanded={Boolean(fillPopoverPos)}
-                onClick={toggleFillPopover}
+                className={`announcement-toolbar-icon-button ${openFillPopover === 'fill' ? 'active' : ''}`}
+                title="More text colors"
+                aria-label="More text colors"
+                aria-expanded={openFillPopover === 'fill'}
+                onClick={() => toggleFillPopover('fill', fillButtonRef)}
               >
                 <Palette size={13} />
               </button>
+            </div>
 
-              {fillPopoverPos &&
-                createPortal(
-                  <div
-                    ref={fillPopoverRef}
-                    className="announcement-toolbar-popover"
-                    style={{ top: fillPopoverPos.top, left: fillPopoverPos.left }}
-                  >
+            <span className="vb-toolbar-divider" aria-hidden="true" />
+
+            <div className="announcement-toolbar-group announcement-toolbar-swatches">
+              {BACKGROUND_QUICK_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  className={`announcement-toolbar-swatch ${
+                    style.background.type === 'solid' && style.background.color === color ? 'active' : ''
+                  }`}
+                  style={{ background: color }}
+                  title={color}
+                  aria-label={`Background color ${color}`}
+                  onClick={() => updateStyle({ background: { type: 'solid', color, opacity: 1 } })}
+                />
+              ))}
+
+              <button
+                ref={backgroundFillButtonRef}
+                type="button"
+                className={`announcement-toolbar-icon-button ${openFillPopover === 'background' ? 'active' : ''}`}
+                title="More background colors"
+                aria-label="More background colors"
+                aria-expanded={openFillPopover === 'background'}
+                onClick={() => toggleFillPopover('background', backgroundFillButtonRef)}
+              >
+                <PaintBucket size={13} />
+              </button>
+            </div>
+
+            {openFillPopover &&
+              createPortal(
+                <div
+                  ref={fillPopoverRef}
+                  className="announcement-toolbar-popover"
+                  style={{ top: fillPopoverPos.top, left: fillPopoverPos.left }}
+                >
+                  {openFillPopover === 'fill' ? (
                     <FillEditor fill={style.fill} onChange={(fill) => updateStyle({ fill })} />
-                  </div>,
-                  document.body
-                )}
+                  ) : (
+                    <FillEditor
+                      fill={style.background}
+                      onChange={(background) => updateStyle({ background })}
+                    />
+                  )}
+                </div>,
+                document.body
+              )}
+
+            <span className="vb-toolbar-divider" aria-hidden="true" />
+
+            <div className="announcement-toolbar-group announcement-toolbar-icon-picker">
+              <label className="announcement-toolbar-icon-toggle" title="Show the icon">
+                <input
+                  type="checkbox"
+                  checked={style.showIcon}
+                  onChange={(event) => updateStyle({ showIcon: event.target.checked })}
+                />
+                <span aria-hidden="true">{style.icon}</span>
+              </label>
+
+              {style.showIcon &&
+                ICON_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`announcement-toolbar-icon-option ${style.icon === option ? 'active' : ''}`}
+                    aria-label={`Use ${option} as the icon`}
+                    onClick={() => updateStyle({ icon: option })}
+                  >
+                    {option}
+                  </button>
+                ))}
+
+              {style.showIcon && (
+                <input
+                  type="text"
+                  className="announcement-toolbar-icon-input"
+                  value={style.icon}
+                  maxLength={8}
+                  placeholder="✏️"
+                  title="Type any other emoji"
+                  aria-label="Custom icon"
+                  onChange={(event) => updateStyle({ icon: event.target.value })}
+                />
+              )}
             </div>
 
             <button
@@ -530,8 +626,12 @@ export default function AdminAnnouncements() {
             </button>
           </div>
 
-          <div className="announcement-style-preview">
-            <Megaphone size={18} className="announcement-style-preview-icon" aria-hidden="true" />
+          <div className="announcement-style-preview" style={fillBoxCss(style.background)}>
+            {style.showIcon && (
+              <span className="announcement-style-preview-icon" aria-hidden="true">
+                {style.icon}
+              </span>
+            )}
             <p style={resolveAnnouncementStyle(style)}>
               {message.trim() || 'Final interviews resume at 1:00 PM.'}
             </p>

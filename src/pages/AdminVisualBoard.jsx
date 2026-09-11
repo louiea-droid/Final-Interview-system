@@ -4,6 +4,7 @@ import {
   AlignLeft,
   AlignRight,
   Box as BoxIcon,
+  BoxSelect,
   ChevronDown,
   ChevronUp,
   ChevronsDown,
@@ -181,6 +182,10 @@ export default function AdminVisualBoard() {
   const [selected, setSelected] = useState(null); // { kind, id? } | null
   const [multiSelected, setMultiSelected] = useState([]); // [{ kind, id }] - shift-click grouping
   const [activePanel, setActivePanel] = useState('elements');
+  /* Which of the selected frame's carousel photos the Zoom/Move sliders
+     below the grid are currently editing - reset whenever the selection
+     changes so a stale index from a different frame can't linger. */
+  const [editingPhotoIndex, setEditingPhotoIndex] = useState(null);
   const [candidates, setCandidates] = useState([]);
   /* What the live announcement strip is currently showing, so the canvas
      can show the same - and can tell when the live board would hide it. */
@@ -205,6 +210,11 @@ export default function AdminVisualBoard() {
   const [snapEnabled, setSnapEnabled] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  // Dragging on empty canvas draws a marquee instead of just deselecting.
+  const [boxSelectMode, setBoxSelectMode] = useState(false);
+  // The marquee's own rect (px, relative to the canvas surface) while a
+  // box-select drag is in progress - null the rest of the time.
+  const [boxSelectRect, setBoxSelectRect] = useState(null);
 
   const [templateModal, setTemplateModal] = useState(null); // null | 'save' | 'apply'
   const [templateName, setTemplateName] = useState('');
@@ -234,6 +244,7 @@ export default function AdminVisualBoard() {
       return () => showToast.dismiss(id);
     },
     snapEnabled,
+    multiSelected,
   });
 
   // The draft loads once, when the editor opens - there is normally only
@@ -465,6 +476,7 @@ export default function AdminVisualBoard() {
   function select(kind, id) {
     setSelected({ kind, id });
     setMultiSelected([]);
+    setEditingPhotoIndex(null);
     if (PANEL_BY_KIND[kind]) setActivePanel(PANEL_BY_KIND[kind]);
   }
 
@@ -483,9 +495,20 @@ export default function AdminVisualBoard() {
    * usual. The first shift-click folds whatever was already singly selected
    * into the group too, so "click A, shift-click B" ends with both selected
    * rather than just B.
+   *
+   * In box-select mode, every drag draws a marquee instead - including one
+   * that starts on top of an element rather than bare canvas. Without this,
+   * a board with little or no empty space to click (this one, for
+   * instance) would leave box select with nowhere to actually start a drag
+   * from.
    */
   function handlePointerDown(kind, id) {
     return (event) => {
+      if (boxSelectMode) {
+        startBoxSelect(event);
+        return;
+      }
+
       if (event.shiftKey) {
         event.preventDefault();
         event.stopPropagation();
@@ -500,9 +523,110 @@ export default function AdminVisualBoard() {
         return;
       }
 
-      if (multiSelected.length > 0) setMultiSelected([]);
+      /*
+       * Starting a plain drag on something already part of the current
+       * multi-selection (however it was built - shift-click or box select)
+       * keeps that selection intact and drags the whole thing together -
+       * see the multiSelected handling in beginDrag. Clicking anything
+       * else collapses back to a single selection, as before.
+       */
+      const isPartOfMultiSelection = multiSelected.some(
+        (item) => item.kind === kind && item.id === id
+      );
+      if (multiSelected.length > 0 && !isPartOfMultiSelection) setMultiSelected([]);
       grab(kind, id)(event);
     };
+  }
+
+  /*
+   * Box (marquee) select - drag a rectangle across empty canvas to select
+   * every element it touches, rather than shift-clicking each one. Only
+   * armed while boxSelectMode is on, so a plain drag on empty canvas keeps
+   * meaning "deselect" the rest of the time.
+   *
+   * Elements are found by their actual rendered position (getBoundingClientRect
+   * on every [data-vb-kind] node) rather than by their stored x/y/width/height,
+   * so it stays correct through rotation, zoom, and the resize handles some
+   * kinds add - anything simpler would have to reimplement all of that.
+   */
+  function startBoxSelect(event) {
+    const surface = middleColumnRef.current;
+    if (!surface) return;
+
+    event.preventDefault();
+    const surfaceRect = surface.getBoundingClientRect();
+
+    function toLocal(clientX, clientY) {
+      return {
+        x: Math.min(Math.max(clientX - surfaceRect.left, 0), surfaceRect.width),
+        y: Math.min(Math.max(clientY - surfaceRect.top, 0), surfaceRect.height),
+      };
+    }
+
+    const start = toLocal(event.clientX, event.clientY);
+
+    function rectBetween(point) {
+      const left = Math.min(start.x, point.x);
+      const top = Math.min(start.y, point.y);
+      return {
+        left,
+        top,
+        width: Math.abs(point.x - start.x),
+        height: Math.abs(point.y - start.y),
+      };
+    }
+
+    setBoxSelectRect(rectBetween(start));
+
+    function handleMove(moveEvent) {
+      setBoxSelectRect(rectBetween(toLocal(moveEvent.clientX, moveEvent.clientY)));
+    }
+
+    function handleUp(upEvent) {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+
+      const finalRect = rectBetween(toLocal(upEvent.clientX, upEvent.clientY));
+      setBoxSelectRect(null);
+
+      // A plain click (no real drag) inside box-select mode still just clears
+      // the selection, the same as it would with the mode off.
+      if (finalRect.width < 4 && finalRect.height < 4) {
+        setSelected(null);
+        setMultiSelected([]);
+        return;
+      }
+
+      const picked = [];
+      surface.querySelectorAll('[data-vb-kind]').forEach((node) => {
+        const nodeRect = node.getBoundingClientRect();
+        const left = nodeRect.left - surfaceRect.left;
+        const top = nodeRect.top - surfaceRect.top;
+        const intersects =
+          left < finalRect.left + finalRect.width &&
+          left + nodeRect.width > finalRect.left &&
+          top < finalRect.top + finalRect.height &&
+          top + nodeRect.height > finalRect.top;
+
+        if (intersects) {
+          picked.push({ kind: node.dataset.vbKind, id: node.dataset.vbId || null });
+        }
+      });
+
+      if (picked.length >= 2) {
+        setSelected(null);
+        setMultiSelected(picked);
+      } else if (picked.length === 1) {
+        setSelected(picked[0]);
+        setMultiSelected([]);
+      } else {
+        setSelected(null);
+        setMultiSelected([]);
+      }
+    }
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
   }
 
   /*
@@ -757,7 +881,14 @@ export default function AdminVisualBoard() {
   /* Selecting on the canvas and starting a drag are the same gesture. */
   function grab(kind, id) {
     return (event) => {
-      select(kind, id);
+      // select() would collapse the multi-selection to just this one
+      // element - skip it for a member of the current multi-selection, so
+      // beginDrag sees the whole thing still selected and moves it as a
+      // group (see the multiSelected handling there).
+      const isPartOfMultiSelection = multiSelected.some(
+        (item) => item.kind === kind && item.id === id
+      );
+      if (!isPartOfMultiSelection) select(kind, id);
       editor.beginDrag(kind, id)(event);
     };
   }
@@ -835,6 +966,8 @@ export default function AdminVisualBoard() {
             isMultiSelected('divider', divider.id) ? 'multi-selected' : ''
           }`}
           style={dividerStyle(divider)}
+          data-vb-kind="divider"
+          data-vb-id={divider.id}
           onPointerDown={handlePointerDown('divider', divider.id)}
           onContextMenu={handleContextMenu('divider', divider.id)}
         >
@@ -864,6 +997,7 @@ export default function AdminVisualBoard() {
             isMultiSelected('candidates') ? 'multi-selected' : ''
           }`}
           style={boxStyle(box)}
+          data-vb-kind="candidates"
           onPointerDown={handlePointerDown('candidates', null)}
           onContextMenu={handleContextMenu('candidates', null)}
         >
@@ -903,6 +1037,7 @@ export default function AdminVisualBoard() {
             isMultiSelected('announcements') ? 'multi-selected' : ''
           }`}
           style={boxStyle(box)}
+          data-vb-kind="announcements"
           onPointerDown={handlePointerDown('announcements', null)}
           onContextMenu={handleContextMenu('announcements', null)}
           title={
@@ -914,6 +1049,9 @@ export default function AdminVisualBoard() {
           <AnnouncementBanner
             message={liveAnnouncement ? liveAnnouncement.message : 'Announcements'}
             style={resolveAnnouncementStyle(announcementStyle)}
+            showIcon={announcementStyle.showIcon}
+            icon={announcementStyle.icon}
+            background={announcementStyle.background}
           />
 
           {selectedOnCanvas && (
@@ -941,6 +1079,7 @@ export default function AdminVisualBoard() {
             ...scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH),
             ...resolveAnimationCss(layout.logo.animation),
           }}
+          data-vb-kind="logo"
           onPointerDown={handlePointerDown('logo')}
           onContextMenu={handleContextMenu('logo', null)}
         >
@@ -969,6 +1108,8 @@ export default function AdminVisualBoard() {
             isMultiSelected('text', text.id) ? 'multi-selected' : ''
           }`}
           style={{ ...positionStyle(text), ...resolveAnimationCss(text.animation) }}
+          data-vb-kind="text"
+          data-vb-id={text.id}
           onPointerDown={handlePointerDown('text', text.id)}
           onContextMenu={handleContextMenu('text', text.id)}
         >
@@ -1002,6 +1143,8 @@ export default function AdminVisualBoard() {
             ...scaledPositionStyle(image, PHOTO_BASE_WIDTH),
             ...resolveAnimationCss(image.animation),
           }}
+          data-vb-kind="image"
+          data-vb-id={image.id}
           onPointerDown={handlePointerDown('image', image.id)}
           onContextMenu={handleContextMenu('image', image.id)}
         >
@@ -1030,6 +1173,8 @@ export default function AdminVisualBoard() {
             isMultiSelected('video', video.id) ? 'multi-selected' : ''
           }`}
           style={scaledPositionStyle(video, PHOTO_BASE_WIDTH)}
+          data-vb-kind="video"
+          data-vb-id={video.id}
           onPointerDown={handlePointerDown('video', video.id)}
           onContextMenu={handleContextMenu('video', video.id)}
         >
@@ -1063,6 +1208,8 @@ export default function AdminVisualBoard() {
             isEmptyFrame ? 'is-empty-frame' : ''
           } ${isMultiSelected('shape', shape.id) ? 'multi-selected' : ''}`}
           style={resolveShapeStyle(shape)}
+          data-vb-kind="shape"
+          data-vb-id={shape.id}
           onPointerDown={handlePointerDown('shape', shape.id)}
           onContextMenu={handleContextMenu('shape', shape.id)}
         >
@@ -1255,6 +1402,16 @@ export default function AdminVisualBoard() {
               <Magnet size={15} />
               <span>Snap</span>
             </button>
+            <button
+              type="button"
+              className={`vb-toolbar-button ${boxSelectMode ? 'active' : ''}`}
+              onClick={() => setBoxSelectMode((current) => !current)}
+              aria-pressed={boxSelectMode}
+              title="Box select - drag a rectangle across the canvas to select everything it touches"
+            >
+              <BoxSelect size={15} />
+              <span>Box Select</span>
+            </button>
           </div>
 
           <span className="vb-toolbar-spacer" />
@@ -1275,7 +1432,7 @@ export default function AdminVisualBoard() {
             title="Apply a saved template"
           >
             <FolderOpen size={15} />
-            <span>Apply Template</span>
+            <span>Apply</span>
           </button>
 
           <span className="vb-toolbar-divider" aria-hidden="true" />
@@ -1745,19 +1902,36 @@ export default function AdminVisualBoard() {
                   the selection every time an element was dragged into space.
                 */}
                 <div
-                  className="vb-canvas-surface"
+                  className={`vb-canvas-surface ${boxSelectMode ? 'vb-box-select-mode' : ''}`}
                   ref={middleColumnRef}
                   onPointerDown={(event) => {
-                    if (event.target === event.currentTarget) {
-                      setSelected(null);
-                      setMultiSelected([]);
+                    if (event.target !== event.currentTarget) return;
+
+                    if (boxSelectMode) {
+                      startBoxSelect(event);
+                      return;
                     }
+
+                    setSelected(null);
+                    setMultiSelected([]);
                   }}
                 >
                   {layout.layerOrder.map(renderLayerEntry)}
 
                   {editor.centerGuide.x && <div className="vb-guide vb-guide-vertical" aria-hidden="true" />}
                   {editor.centerGuide.y && <div className="vb-guide vb-guide-horizontal" aria-hidden="true" />}
+
+                  {boxSelectRect && (
+                    <div
+                      className="vb-box-select-rect"
+                      style={{
+                        left: boxSelectRect.left,
+                        top: boxSelectRect.top,
+                        width: boxSelectRect.width,
+                        height: boxSelectRect.height,
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -2364,18 +2538,41 @@ export default function AdminVisualBoard() {
                     <label className="form-label">Carousel photos</label>
                     <p className="vb-properties-hint">
                       Add two or more to unlock the Carousel animation below - it slides between
-                      them instead of showing the single photo above.
+                      them instead of showing the single photo above. Click a photo to crop and
+                      position it on its own.
                     </p>
 
                     <div className="vb-carousel-photos">
-                      {selectedShape.photos.map((url, index) => (
-                        <div key={index} className="vb-carousel-photo">
-                          <img src={url} alt="" />
+                      {selectedShape.photos.map((photo, index) => (
+                        <div
+                          key={index}
+                          className={`vb-carousel-photo ${editingPhotoIndex === index ? 'active' : ''}`}
+                        >
+                          <button
+                            type="button"
+                            className="vb-carousel-photo-select"
+                            aria-label={`Edit photo ${index + 1}`}
+                            aria-pressed={editingPhotoIndex === index}
+                            onClick={() =>
+                              setEditingPhotoIndex((current) => (current === index ? null : index))
+                            }
+                          >
+                            <img src={photo.url} alt="" />
+                          </button>
                           <button
                             type="button"
                             className="vb-carousel-photo-remove"
                             aria-label={`Remove photo ${index + 1}`}
-                            onClick={() => editor.removeFramePhoto(selected.id, index)}
+                            onClick={() => {
+                              editor.removeFramePhoto(selected.id, index);
+                              setEditingPhotoIndex((current) =>
+                                current === null || current < index
+                                  ? current
+                                  : current === index
+                                    ? null
+                                    : current - 1
+                              );
+                            }}
                           >
                             <X size={11} />
                           </button>
@@ -2387,14 +2584,78 @@ export default function AdminVisualBoard() {
                           id="vb-carousel-photo-add"
                           type="file"
                           accept="image/png,image/jpeg,image/webp"
+                          multiple
                           onChange={(event) => {
-                            void editor.addFramePhoto(selected.id, event.target.files?.[0] ?? null);
+                            void editor.addFramePhotos(selected.id, event.target.files);
                             event.target.value = '';
                           }}
                         />
                         <Plus size={16} />
                       </label>
                     </div>
+
+                    {editingPhotoIndex !== null && selectedShape.photos[editingPhotoIndex] && (
+                      <div className="vb-carousel-photo-editor">
+                        <label className="form-label" htmlFor="vb-carousel-photo-zoom">
+                          Zoom
+                        </label>
+                        <div className="scale-field">
+                          <input
+                            id="vb-carousel-photo-zoom"
+                            type="range"
+                            min="1"
+                            max="4"
+                            step="0.05"
+                            value={selectedShape.photos[editingPhotoIndex].zoom}
+                            onChange={(event) =>
+                              editor.adjustFramePhoto(selected.id, editingPhotoIndex, {
+                                zoom: Number(event.target.value),
+                              })
+                            }
+                          />
+                          <span className="scale-field-value">
+                            {selectedShape.photos[editingPhotoIndex].zoom.toFixed(2)}x
+                          </span>
+                        </div>
+
+                        <div className="vb-field-row">
+                          <label htmlFor="vb-carousel-photo-x">
+                            Move X
+                            <input
+                              id="vb-carousel-photo-x"
+                              className="form-input"
+                              type="range"
+                              min="-50"
+                              max="50"
+                              step="1"
+                              value={selectedShape.photos[editingPhotoIndex].offsetX}
+                              onChange={(event) =>
+                                editor.adjustFramePhoto(selected.id, editingPhotoIndex, {
+                                  offsetX: Number(event.target.value),
+                                })
+                              }
+                            />
+                          </label>
+                          <label htmlFor="vb-carousel-photo-y">
+                            Move Y
+                            <input
+                              id="vb-carousel-photo-y"
+                              className="form-input"
+                              type="range"
+                              min="-50"
+                              max="50"
+                              step="1"
+                              value={selectedShape.photos[editingPhotoIndex].offsetY}
+                              onChange={(event) =>
+                                editor.adjustFramePhoto(selected.id, editingPhotoIndex, {
+                                  offsetY: Number(event.target.value),
+                                })
+                              }
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

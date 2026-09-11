@@ -70,8 +70,8 @@ function CandidateCard({ candidate, lightMode }) {
           flex-col
           items-center
           justify-center
-          gap-0.5
-          px-2
+          gap-0
+          px-0
           py-1
 
           bg-[linear-gradient(to_bottom,#f2d888_0%,#dbb14b_38%,#b0821c_74%,#8b6615_100%)]
@@ -87,21 +87,23 @@ function CandidateCard({ candidate, lightMode }) {
             text-[clamp(17px,4.6cqh,28px)]
             text-[#560606]
             [text-shadow:1px_1px_1px_rgba(63,39,10,.3)]
-          "
-        >
+          ">
           {candidate.name}
         </AutoFitText>
 
         {candidate.course && (
           <span
             className="
+              w-full
               truncate
+              text-center
               text-[clamp(8px,1.7cqh,13px)]
               font-bold
               uppercase
               tracking-wider
               text-[#2e1604]/80
             "
+            title={candidate.course}
           >
             {candidate.course}
           </span>

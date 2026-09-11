@@ -19,7 +19,7 @@ const MAX_IMAGE_EDGE = 800;
  * client-side so one oversized file can't tie up someone's connection or
  * run up Storage costs for what is, after all, a looping background clip.
  */
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 const VIDEO_STORAGE_FOLDER = 'board-videos';
 
 /* Every photo the editor accepts (logo, board images, frame fills, carousel
@@ -71,7 +71,7 @@ function collectPositionedElements(layout) {
     ...layout.texts.map((item) => ({ kind: 'text', ...item })),
     ...layout.images.map((item) => ({ kind: 'image', ...item })),
     ...layout.videos.map((item) => ({ kind: 'video', ...item })),
-    ...layout.shapes.map((item) => ({ kind: 'shape', ...item })),
+    ...layout.shapes.map((item) => ({ ...item, kind: 'shape' })),
     ...layout.dividers.map((item) => ({ kind: 'divider', ...item })),
   ];
 }
@@ -201,7 +201,7 @@ async function migrateLegacyPhotos(layout) {
           : shape.fill;
 
       const photos = shape.photos?.length
-        ? await Promise.all(shape.photos.map((url) => migrate(url)))
+        ? await Promise.all(shape.photos.map(async (photo) => ({ ...photo, url: await migrate(photo.url) })))
         : shape.photos;
 
       return { ...shape, fill, photos };
@@ -244,7 +244,14 @@ export function useBoardLayoutEditor(
   layout,
   setLayout,
   boundsRef,
-  { onError, onSuccess, onProgress, persist = saveDraftLayout, snapEnabled = false } = {}
+  {
+    onError,
+    onSuccess,
+    onProgress,
+    persist = saveDraftLayout,
+    snapEnabled = false,
+    multiSelected = [],
+  } = {}
 ) {
   const latestLayoutRef = useRef(layout);
   const saveScheduledRef = useRef(false);
@@ -350,24 +357,27 @@ export function useBoardLayoutEditor(
    * event would be a lot of redundant JSON.stringify calls once a photo is
    * on the canvas.
    *
-   * The persist call is deliberately outside the updater passed to
-   * setLayout, not inside it: React (in development, under StrictMode)
-   * invokes a functional state update twice to check that it's pure, and
-   * discards every result but one - a side effect like `persist` sitting
-   * inside it would fire twice per edit, saving the same layout to
-   * Firestore (or, before, localStorage) two times over.
+   * `next` is computed from `latestLayoutRef.current` up front, once, and
+   * that same value is what both setLayout and persist use - the same
+   * pattern undo/redo already follow above. Passing setLayout a functional
+   * updater and then immediately reading latestLayoutRef.current back out,
+   * as this used to do, is a race: React doesn't necessarily run that
+   * updater before the very next line does the read, so persist would often
+   * save the *previous* edit instead of this one. Each edit's write would
+   * still eventually "catch up" on the next edit's call - except the last
+   * edit before navigating away or closing the tab, which would silently
+   * never reach Firestore. That's the draft losing your last change the
+   * moment you left the page.
    */
   function commitFrom(updater, { immediate = true } = {}) {
     recordHistory();
 
-    setLayout((current) => {
-      const next = updater(current);
-      latestLayoutRef.current = next;
-      return next;
-    });
+    const next = updater(latestLayoutRef.current);
+    latestLayoutRef.current = next;
+    setLayout(next);
 
     if (immediate) {
-      persist(latestLayoutRef.current);
+      persist(next);
     } else if (!saveScheduledRef.current) {
       saveScheduledRef.current = true;
       requestAnimationFrame(() => {
@@ -451,10 +461,25 @@ export function useBoardLayoutEditor(
 
       event.preventDefault();
 
+      /*
+       * Two ways a drag can carry more than the one element it started on:
+       * a permanent group (groupId, set by Group Selected) always moves
+       * together, and takes priority - but even without ever grouping them,
+       * dragging any one member of the *current* multi-selection (however
+       * it was made - shift-click or box select) moves the rest of that
+       * selection too, for exactly as long as it stays selected.
+       */
       const groupId = element?.groupId;
+      const isInMultiSelection =
+        multiSelected.length > 1 && multiSelected.some((item) => item.kind === kind && item.id === id);
+
       const groupStart = groupId
         ? collectPositionedElements(latestLayoutRef.current).filter((item) => item.groupId === groupId)
-        : null;
+        : isInMultiSelection
+          ? collectPositionedElements(latestLayoutRef.current).filter((item) =>
+              multiSelected.some((selected) => selected.kind === item.kind && selected.id === item.id)
+            )
+          : null;
       let dragOrigin = null;
 
       dragWith(
@@ -966,7 +991,7 @@ export function useBoardLayoutEditor(
     if (!file) return null;
 
     if (file.size > MAX_VIDEO_BYTES) {
-      reportError(new Error('That video is too large - keep it under 50MB.'));
+      reportError(new Error('That video is too large - keep it under 200MB.'));
       return null;
     }
 
@@ -1102,7 +1127,7 @@ export function useBoardLayoutEditor(
     if (!file) return;
 
     if (file.size > MAX_VIDEO_BYTES) {
-      reportError(new Error('That video is too large - keep it under 50MB.'));
+      reportError(new Error('That video is too large - keep it under 200MB.'));
       return;
     }
 
@@ -1133,21 +1158,36 @@ export function useBoardLayoutEditor(
    * image, since a carousel with animation.type 'carousel' cycles through
    * these instead of showing one static photo. Adding a second photo is
    * what makes the Carousel animation option appear at all (see isCarousel).
+   * Each photo carries its own pan/zoom (zoom/offsetX/offsetY), the same
+   * fields an image fill has, defaulted to an untouched 1x/0/0 crop and
+   * adjustable afterwards through adjustFramePhoto.
    */
-  async function addFramePhoto(id, file) {
-    if (!file) return;
+  async function addFramePhotos(id, files) {
+    const list = Array.from(files ?? []).filter(Boolean);
+    if (!list.length) return;
 
-    const clearProgress = reportProgress('Uploading photo...');
+    const clearProgress = reportProgress(
+      list.length > 1 ? `Uploading ${list.length} photos...` : 'Uploading photo...'
+    );
 
     try {
-      const url = await uploadImageToStorage(file);
+      const uploaded = await Promise.all(
+        list.map(async (file) => ({
+          url: await uploadImageToStorage(file),
+          zoom: 1,
+          offsetX: 0,
+          offsetY: 0,
+        }))
+      );
 
       commitFrom((current) => {
         const shape = findElement(current, 'shape', id);
         if (!shape) return current;
-        return patchElement(current, 'shape', id, { photos: [...(shape.photos ?? []), url] });
+        return patchElement(current, 'shape', id, { photos: [...(shape.photos ?? []), ...uploaded] });
       });
-      reportSuccess('Photo added to the carousel.');
+      reportSuccess(
+        list.length > 1 ? `${list.length} photos added to the carousel.` : 'Photo added to the carousel.'
+      );
     } catch (error) {
       reportError(error);
     } finally {
@@ -1161,6 +1201,20 @@ export function useBoardLayoutEditor(
       if (!shape) return current;
       return patchElement(current, 'shape', id, {
         photos: (shape.photos ?? []).filter((_, photoIndex) => photoIndex !== index),
+      });
+    });
+  }
+
+  /* Pans/zooms one carousel photo in place, same shape as adjustImageFill
+     but addressed by index within the frame's photo list. */
+  function adjustFramePhoto(id, index, patch) {
+    commitFrom((current) => {
+      const shape = findElement(current, 'shape', id);
+      if (!shape) return current;
+      return patchElement(current, 'shape', id, {
+        photos: (shape.photos ?? []).map((photo, photoIndex) =>
+          photoIndex === index ? { ...photo, ...patch } : photo
+        ),
       });
     });
   }
@@ -1229,8 +1283,9 @@ export function useBoardLayoutEditor(
     setShapeStroke,
     handleFramePhoto,
     handleFrameVideo,
-    addFramePhoto,
+    addFramePhotos,
     removeFramePhoto,
+    adjustFramePhoto,
     resetLayout,
     replaceLayout,
     moveLayer,

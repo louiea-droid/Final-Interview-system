@@ -122,6 +122,35 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
 }
 
+/*
+ * A carousel photo's own pan/zoom, same fields and ranges as an image
+ * fill's (see normalizeFill in fill.js) - each photo in the carousel can be
+ * framed independently instead of all sharing one crop. A plain string is
+ * an older photo saved before per-photo adjustment existed; it's wrapped
+ * with the same defaults a freshly added photo gets.
+ */
+function normalizePhoto(entry) {
+  if (typeof entry === 'string') {
+    return entry ? { url: entry, zoom: 1, offsetX: 0, offsetY: 0 } : null;
+  }
+
+  if (!entry || typeof entry !== 'object' || typeof entry.url !== 'string' || !entry.url) {
+    return null;
+  }
+
+  return {
+    url: entry.url,
+    zoom: clamp(Number.isFinite(Number(entry.zoom)) ? Number(entry.zoom) : 1, 1, 4),
+    offsetX: clamp(Number.isFinite(Number(entry.offsetX)) ? Number(entry.offsetX) : 0, -50, 50),
+    offsetY: clamp(Number.isFinite(Number(entry.offsetY)) ? Number(entry.offsetY) : 0, -50, 50),
+  };
+}
+
+function normalizePhotos(photos) {
+  if (!Array.isArray(photos)) return [];
+  return photos.map(normalizePhoto).filter(Boolean);
+}
+
 /* Shapes come back from storage, so every field is checked before it is used. */
 export function normalizeShapes(shapes) {
   if (!Array.isArray(shapes)) return [];
@@ -151,9 +180,7 @@ export function normalizeShapes(shapes) {
         ...(kind === 'zigzag'
           ? { peaks: Math.round(clamp(shape.peaks ?? SHAPE_PRESETS.zigzag.peaks, 1, 40)) }
           : {}),
-        photos: kind === 'frame' && Array.isArray(shape.photos)
-          ? shape.photos.filter((url) => typeof url === 'string' && url)
-          : [],
+        photos: kind === 'frame' ? normalizePhotos(shape.photos) : [],
         animation: normalizeAnimation(shape.animation),
       };
     });

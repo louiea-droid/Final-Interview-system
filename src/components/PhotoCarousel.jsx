@@ -31,13 +31,28 @@ const ENTER_FROM_TRANSFORM = {
   down: 'translateY(-100%)',
 };
 
-function slideStyle(url, fit) {
-  return {
-    backgroundImage: `url("${url}")`,
-    backgroundSize: fit,
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
-  };
+/*
+ * Each photo's own pan/zoom (see PhotoAdjuster.jsx, the single-fill
+ * equivalent) lives on an inner <img> rather than the slide div itself,
+ * since the slide div's own transform is already busy with the enter/exit
+ * slide animation - stacking both onto one transform would make the pan
+ * distance and the slide distance scale together instead of staying
+ * independent.
+ */
+function Photo({ photo, fit }) {
+  if (!photo) return null;
+
+  return (
+    <img
+      src={photo.url}
+      alt=""
+      className="absolute inset-0 h-full w-full"
+      style={{
+        objectFit: fit,
+        transform: `translate(${photo.offsetX}%, ${photo.offsetY}%) scale(${photo.zoom})`,
+      }}
+    />
+  );
 }
 
 export default function PhotoCarousel({ photos, direction = 'left', speed = 6, fit = 'cover' }) {
@@ -88,20 +103,22 @@ export default function PhotoCarousel({ photos, direction = 'left', speed = 6, f
         <div
           className="photo-carousel-slide"
           style={{
-            ...slideStyle(photos[outgoingIndex], fit),
             transform: settled ? EXIT_TRANSFORM[direction] : 'translate(0, 0)',
           }}
-        />
+        >
+          <Photo photo={photos[outgoingIndex]} fit={fit} />
+        </div>
       )}
 
       <div
         className="photo-carousel-slide"
         style={{
-          ...slideStyle(photos[index], fit),
           transform:
             outgoingIndex === null || settled ? 'translate(0, 0)' : ENTER_FROM_TRANSFORM[direction],
         }}
-      />
+      >
+        <Photo photo={photos[index]} fit={fit} />
+      </div>
     </div>
   );
 }

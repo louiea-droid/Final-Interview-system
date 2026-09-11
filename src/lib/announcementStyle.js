@@ -21,6 +21,11 @@ export const DEFAULT_ANNOUNCEMENT_STYLE = {
   shadow: 'soft',
   fill: solidFill('#f0d689'),
   fontSize: 2.6,
+  /* The banner's leading icon - any single emoji, on by default - and its
+     own background, both independent of the message text's own styling. */
+  showIcon: true,
+  icon: '📢',
+  background: solidFill('#2e0505'),
 };
 
 function clamp(value, min, max) {
@@ -44,6 +49,13 @@ export function normalizeAnnouncementStyle(saved) {
     : DEFAULT_ANNOUNCEMENT_STYLE.fontSize;
 
   merged.fill = normalizeFill(merged.fill, BOARD_GOLD_FILL);
+
+  merged.showIcon = merged.showIcon !== false;
+  merged.icon =
+    typeof merged.icon === 'string' && merged.icon.trim()
+      ? merged.icon.trim().slice(0, 8)
+      : DEFAULT_ANNOUNCEMENT_STYLE.icon;
+  merged.background = normalizeFill(merged.background, DEFAULT_ANNOUNCEMENT_STYLE.background);
 
   return merged;
 }

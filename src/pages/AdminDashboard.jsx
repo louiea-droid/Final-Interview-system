@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   CalendarClock,
   CalendarDays,
@@ -469,10 +470,10 @@ export default function AdminPage() {
             </div>
 
             <div className="visual-preview-actions">
-              <a href="/admin/visual-board" className="visual-preview-link">
+              <Link to="/admin/visual-board" className="visual-preview-link">
                 <Pencil size={11} />
                 Edit
-              </a>
+              </Link>
 
               <a
                 href="/visual"
@@ -671,18 +672,18 @@ export default function AdminPage() {
                       <button
                         type="button"
                         role="switch"
-                        aria-checked={isShownOnBoard(candidate)}
+                        aria-checked={isCandidateShownOnBoard(candidate)}
                         className={`visual-toggle ${
-                          isShownOnBoard(candidate) ? 'on' : ''
+                          isCandidateShownOnBoard(candidate) ? 'on' : ''
                         }`}
                         onClick={() =>
                           toggleShowOnBoard(
                             candidate.id,
-                            !isShownOnBoard(candidate)
+                            !isCandidateShownOnBoard(candidate)
                           )
                         }
                         aria-label={`${
-                          isShownOnBoard(candidate) ? 'Hide' : 'Show'
+                          isCandidateShownOnBoard(candidate) ? 'Hide' : 'Show'
                         } ${candidate.name} on the visual board`}
                       >
                         <span className="visual-toggle-track">
@@ -690,7 +691,7 @@ export default function AdminPage() {
                         </span>
 
                         <span className="visual-toggle-label">
-                          {isShownOnBoard(candidate) ? 'Shown' : 'Hidden'}
+                          {isCandidateShownOnBoard(candidate) ? 'Shown' : 'Hidden'}
                         </span>
                       </button>
 

@@ -362,49 +362,6 @@ button {
   border-radius: inherit;
 }
 
-.settings-avatar-field {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 15px;
-}
-
-.settings-avatar-preview {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  flex-shrink: 0;
-  overflow: hidden;
-  border: 1px solid var(--border-light);
-  border-radius: 50%;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.settings-avatar-preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.settings-avatar-copy {
-  display: grid;
-  gap: 5px;
-}
-
-.settings-avatar-input {
-  max-width: 240px;
-  color: var(--text-soft);
-  font-size: 12px;
-}
-
-.settings-avatar-copy small {
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
 /* =========================================
    METRIC CARDS
 ========================================= */
@@ -1029,7 +986,8 @@ button {
 
 .announcement-style-preview-icon {
   flex-shrink: 0;
-  color: #f0d689;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .announcement-style-preview p {
@@ -1192,6 +1150,78 @@ button {
   margin-left: auto;
 }
 
+/* The checkbox that turns the banner's icon on/off, showing the currently
+   chosen emoji right on the toggle itself rather than a generic switch. */
+.announcement-toolbar-icon-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 4px 8px;
+
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.announcement-toolbar-icon-toggle input {
+  accent-color: #f4ca5d;
+}
+
+.announcement-toolbar-icon-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.announcement-toolbar-icon-option:hover {
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.announcement-toolbar-icon-option.active {
+  background: rgba(212, 93, 89, 0.16);
+  border-color: var(--red-status);
+}
+
+.announcement-toolbar-icon-input {
+  width: 44px;
+  height: 30px;
+  padding: 0 8px;
+
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+
+  color: inherit;
+  font-size: 15px;
+  text-align: center;
+
+  outline: none;
+}
+
+.announcement-toolbar-icon-input:focus {
+  border-color: rgba(244, 202, 93, 0.6);
+  box-shadow: 0 0 0 3px rgba(244, 202, 93, 0.15);
+}
+
 .announcement-toolbar-popover {
   position: fixed;
   z-index: 60;
@@ -1210,10 +1240,6 @@ button {
 .settings-options {
   display: grid;
   gap: 10px;
-}
-
-.settings-profile-grid {
-  grid-template-columns: repeat(2, 1fr);
 }
 
 .settings-option {
@@ -1297,6 +1323,44 @@ button {
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+.vb-volume-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  margin-bottom: 6px;
+}
+
+.vb-volume-label-row .form-label {
+  margin-bottom: 0;
+}
+
+/* Doubles as the mute/unmute toggle - the icon itself already shows which
+   state a click will move to (see the conditional Volume2/VolumeX). */
+.vb-volume-mute-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex-shrink: 0;
+
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+
+  color: #929292;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.vb-volume-mute-button:hover {
+  color: #f1f1f1;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .form-input,
@@ -2236,10 +2300,6 @@ button {
   .form-grid {
     grid-template-columns: 1fr;
   }
-
-  .settings-profile-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 480px) {
@@ -2330,6 +2390,7 @@ button {
 .photo-carousel-slide {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   transition: transform 0.8s ease-in-out;
 }
 
@@ -3856,13 +3917,11 @@ svg {
   background: rgba(91, 55, 55, 0.08);
 }
 
-.admin-layout.light-mode .record-edit-file-input,
-.admin-layout.light-mode .settings-avatar-input {
+.admin-layout.light-mode .record-edit-file-input {
   color: #4d3737;
 }
 
-.admin-layout.light-mode .record-edit-file-input::file-selector-button,
-.admin-layout.light-mode .settings-avatar-input::file-selector-button {
+.admin-layout.light-mode .record-edit-file-input::file-selector-button {
   margin-right: 8px;
   padding: 5px 9px;
   border: 1px solid rgba(91, 55, 55, 0.2);
@@ -3873,8 +3932,7 @@ svg {
   cursor: pointer;
 }
 
-.admin-layout.light-mode .record-edit-file-input::file-selector-button:hover,
-.admin-layout.light-mode .settings-avatar-input::file-selector-button:hover {
+.admin-layout.light-mode .record-edit-file-input::file-selector-button:hover {
   background: #ead7d2;
 }
 
@@ -4895,6 +4953,21 @@ svg {
   transform: translateY(-50%);
 }
 
+/* Box select mode: a crosshair cursor over empty canvas says a drag there
+   starts a marquee now, not just a deselect. */
+.vb-canvas-surface.vb-box-select-mode {
+  cursor: crosshair;
+}
+
+.vb-box-select-rect {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+
+  border: 1px solid var(--red-status);
+  background: rgba(212, 93, 89, 0.14);
+}
+
 /* an empty photo frame reads as a placeholder here, but paints nothing live */
 .vb-shape.is-empty-frame {
   background: rgba(255, 255, 255, 0.05);
@@ -4971,7 +5044,24 @@ svg {
   border: 1px solid var(--border-light);
 }
 
-.vb-carousel-photo img {
+/* Highlights whichever photo the Zoom/Move sliders below the grid are
+   currently editing. */
+.vb-carousel-photo.active {
+  border-color: var(--red-status);
+  box-shadow: 0 0 0 1px var(--red-status);
+}
+
+.vb-carousel-photo-select {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.vb-carousel-photo-select img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -5019,6 +5109,12 @@ svg {
 
 .vb-carousel-photo-add input {
   display: none;
+}
+
+.vb-carousel-photo-editor {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-light);
 }
 
 .vb-group-button {

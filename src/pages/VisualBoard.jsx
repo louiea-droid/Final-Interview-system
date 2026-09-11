@@ -417,7 +417,9 @@ export default function DisplayPage({ usePublished = true }) {
           className="animate-[fadeIn_.7s_ease-in-out]"
           message={announcements[currentAnnouncement]?.message}
           style={resolveAnnouncementStyle(announcementStyle)}
-          lightMode={lightMode}
+          showIcon={announcementStyle.showIcon}
+          icon={announcementStyle.icon}
+          background={announcementStyle.background}
         />
       </div>
     );

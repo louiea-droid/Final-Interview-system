@@ -1,5 +1,14 @@
-import { useEffect, useState } from 'react';
-import { Image as ImageIcon, Palette, Plus, Trash2, Video as VideoIcon, Waves } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Image as ImageIcon,
+  Palette,
+  Plus,
+  Trash2,
+  Video as VideoIcon,
+  Volume2,
+  VolumeX,
+  Waves,
+} from 'lucide-react';
 
 import {
   COLOR_FORMATS,
@@ -61,6 +70,11 @@ export default function FillEditor({
   videoUploadId,
 }) {
   const resolved = normalizeFill(fill);
+
+  // Remembers the volume a mute-click zeroed out, so clicking the icon
+  // again restores it instead of just jumping to full - the same
+  // mute/unmute convention every media player uses.
+  const lastVolumeRef = useRef(1);
 
   const [format, setFormat] = useState('hex');
   const [colorDraft, setColorDraft] = useState('');
@@ -361,7 +375,7 @@ export default function FillEditor({
                 <span className="photo-upload-title">
                   {resolved.url ? 'Replace video' : 'Insert a video'}
                 </span>
-                <span className="photo-upload-subtitle">MP4, WEBM or MOV, up to 50MB</span>
+                <span className="photo-upload-subtitle">MP4, WEBM or MOV, up to 200MB</span>
               </div>
             </label>
           </div>
@@ -392,6 +406,55 @@ export default function FillEditor({
               </button>
             )}
           </div>
+
+          <div className="form-group">
+            <div className="vb-volume-label-row">
+              <button
+                type="button"
+                className="vb-volume-mute-button"
+                onClick={() => {
+                  const current = resolved.volume ?? 0;
+                  if (current > 0) {
+                    lastVolumeRef.current = current;
+                    onChange({ ...resolved, volume: 0 });
+                  } else {
+                    onChange({ ...resolved, volume: lastVolumeRef.current || 1 });
+                  }
+                }}
+                title={(resolved.volume ?? 0) <= 0 ? 'Unmute' : 'Mute'}
+                aria-label={(resolved.volume ?? 0) <= 0 ? 'Unmute' : 'Mute'}
+              >
+                {(resolved.volume ?? 0) <= 0 ? <VolumeX size={13.65} /> : <Volume2 size={13.65} />}
+              </button>
+              <label className="form-label" htmlFor="vb-fill-volume">
+                Volume
+              </label>
+            </div>
+            <div className="scale-field">
+              <input
+                id="vb-fill-volume"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={resolved.volume ?? 0}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  if (next > 0) lastVolumeRef.current = next;
+                  onChange({ ...resolved, volume: next });
+                }}
+              />
+              <span className="scale-field-value">
+                {Math.round((resolved.volume ?? 0) * 100)}%
+              </span>
+            </div>
+          </div>
+          {(resolved.volume ?? 0) > 0 && (
+            <p className="vb-properties-hint">
+              Most browsers block autoplay with sound on a page nobody has interacted with -
+              this will likely still play muted on the actual /visual board, even with volume up.
+            </p>
+          )}
         </>
       )}
 

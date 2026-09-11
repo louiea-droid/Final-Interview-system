@@ -179,11 +179,17 @@ export function imageFill(url = null, fit = 'cover', opacity = 1, offsetX = 0, o
   return { type: 'image', url, fit, opacity, offsetX, offsetY, zoom };
 }
 
-/* A video fill behaves exactly like an image fill - same pan/zoom fields,
-   same fit/opacity - just rendered through a <video> instead (see
-   VideoAdjuster.jsx). */
-export function videoFill(url = null, fit = 'cover', opacity = 1, offsetX = 0, offsetY = 0, zoom = 1) {
-  return { type: 'video', url, fit, opacity, offsetX, offsetY, zoom };
+/*
+ * A video fill behaves exactly like an image fill - same pan/zoom fields,
+ * same fit/opacity - just rendered through a <video> instead (see
+ * VideoAdjuster.jsx). `volume` (0 to 1) defaults to 0 - silent, so it
+ * autoplays as a looping background clip the moment it's inserted - since
+ * most browsers block autoplay-with-sound on a page nobody has interacted
+ * with yet, which the unattended /visual board always is; see the note in
+ * VideoAdjuster.jsx.
+ */
+export function videoFill(url = null, fit = 'cover', opacity = 1, offsetX = 0, offsetY = 0, zoom = 1, volume = 0) {
+  return { type: 'video', url, fit, opacity, offsetX, offsetY, zoom, volume };
 }
 
 export function gradientFill(gradient, angle, stops, opacity = 1) {
@@ -292,6 +298,11 @@ export function normalizeFill(fill, fallback = BOARD_GOLD_FILL) {
       offsetX: clamp(Number.isFinite(Number(fill.offsetX)) ? Number(fill.offsetX) : 0, -50, 50),
       offsetY: clamp(Number.isFinite(Number(fill.offsetY)) ? Number(fill.offsetY) : 0, -50, 50),
       zoom: clamp(Number.isFinite(Number(fill.zoom)) ? Number(fill.zoom) : 1, 1, 4),
+      // Silent by default so a fresh clip behaves like a background loop
+      // straight away - only videos have a volume at all.
+      ...(fill.type === 'video'
+        ? { volume: clamp(Number.isFinite(Number(fill.volume)) ? Number(fill.volume) : 0, 0, 1) }
+        : {}),
     };
   }
 

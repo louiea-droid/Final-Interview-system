@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   ClipboardList,
   LayoutDashboard,
@@ -144,55 +144,56 @@ export default function AdminProtectedLayout() {
 
         <div className="sidebar-section">
 
-          <a
-            className={`sidebar-link ${pathname === '/admin' ? 'active' : ''}`}
-            href="/admin"
+          <NavLink
+            className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+            to="/admin"
+            end
             onClick={() => setSidebarOpen(false)}
             title={collapsed ? 'Dashboard' : undefined}
           >
             <LayoutDashboard size={19} strokeWidth={2.1} />
             <span>Dashboard</span>
-          </a>
+          </NavLink>
 
-          <a
-            className={`sidebar-link ${pathname.startsWith('/admin/records') ? 'active' : ''}`}
-            href="/admin/records"
+          <NavLink
+            className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+            to="/admin/records"
             onClick={() => setSidebarOpen(false)}
             title={collapsed ? 'Records' : undefined}
           >
             <ClipboardList size={19} strokeWidth={2.1} />
             <span>Records</span>
-          </a>
+          </NavLink>
 
-          <a
-            className={`sidebar-link ${pathname.startsWith('/admin/announcements') ? 'active' : ''}`}
-            href="/admin/announcements"
+          <NavLink
+            className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+            to="/admin/announcements"
             onClick={() => setSidebarOpen(false)}
             title={collapsed ? 'Announcements' : undefined}
           >
             <Megaphone size={19} strokeWidth={2.1} />
             <span>Announcements</span>
-          </a>
+          </NavLink>
 
-          <a
-            className={`sidebar-link ${pathname.startsWith('/admin/visual-board') ? 'active' : ''}`}
-            href="/admin/visual-board"
+          <NavLink
+            className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+            to="/admin/visual-board"
             onClick={() => setSidebarOpen(false)}
             title={collapsed ? 'Visual Board' : undefined}
           >
             <LayoutTemplate size={19} strokeWidth={2.1} />
             <span>Visual Board</span>
-          </a>
+          </NavLink>
 
-          <a
-            className={`sidebar-link ${pathname.startsWith('/admin/settings') ? 'active' : ''}`}
-            href="/admin/settings"
+          <NavLink
+            className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+            to="/admin/settings"
             onClick={() => setSidebarOpen(false)}
             title={collapsed ? 'Settings' : undefined}
           >
             <Settings size={19} strokeWidth={2.1} />
             <span>Settings</span>
-          </a>
+          </NavLink>
         </div>
 
         <div className="sidebar-account">
