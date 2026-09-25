@@ -19,6 +19,7 @@ import {
   FolderOpen,
   Frame,
   Grid3x3,
+  GripVertical,
   Group,
   Image as ImageIcon,
   ImagePlus,
@@ -97,6 +98,11 @@ import {
   subscribeAnnouncementStyle,
 } from '../lib/announcementStyle';
 import { useToast } from '../components/ToastProvider';
+import AlignBar from '../components/AlignBar';
+import CanvasContextMenu from '../components/CanvasContextMenu';
+import SmartGuides from '../components/SmartGuides';
+import CanvasTextEditor from '../components/CanvasTextEditor';
+import SelectionHandles, { ALL_HANDLES, CORNER_HANDLES, TEXT_HANDLES } from '../components/SelectionHandles';
 
 const ALIGN_ICONS = { left: AlignLeft, center: AlignCenter, right: AlignRight };
 
@@ -177,6 +183,12 @@ function labelShapes(shapes) {
   });
 }
 
+const ARROW_STEPS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+function isTypingTarget(target) {
+  return target instanceof HTMLElement && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+}
+
 export default function AdminVisualBoard() {
   const [layout, setLayout] = useState(DEFAULT_LAYOUT);
   const [selected, setSelected] = useState(null); // { kind, id? } | null
@@ -186,6 +198,7 @@ export default function AdminVisualBoard() {
      below the grid are currently editing - reset whenever the selection
      changes so a stale index from a different frame can't linger. */
   const [editingPhotoIndex, setEditingPhotoIndex] = useState(null);
+  const [editingTextId, setEditingTextId] = useState(null);
   const [candidates, setCandidates] = useState([]);
   /* What the live announcement strip is currently showing, so the canvas
      can show the same - and can tell when the live board would hide it. */
@@ -193,10 +206,15 @@ export default function AdminVisualBoard() {
   const [announcementStyle, setAnnouncementStyle] = useState(DEFAULT_ANNOUNCEMENT_STYLE);
 
   /* { kind, id, x, y } while the right-click order menu is open */
-  const [orderMenu, setOrderMenu] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+
+  /* { kind, id } of the layers-panel row being dragged, or null. */
+  const [draggingLayer, setDraggingLayer] = useState(null);
+  /* Key of the layers-panel row currently being dragged over, for a drop-line hint. */
+  const [layerDropTarget, setLayerDropTarget] = useState(null);
 
   /* The element Ctrl+C remembered, for Ctrl+V to copy. */
-  const [clipboard, setClipboard] = useState(null);
+  const [clipboard, setClipboard] = useState([]);
   const [isDirty, setIsDirty] = useState(false);
   // Publishing writes the whole layout document (photos and all) to
   // Firestore, which can take a good while for a board with a lot of
@@ -207,11 +225,12 @@ export default function AdminVisualBoard() {
   // A percentage of "fit" (see MIN_ZOOM/MAX_ZOOM) - 100 exactly fills the stage.
   const [zoom, setZoom] = useState(100);
   const [showGrid, setShowGrid] = useState(false);
-  const [snapEnabled, setSnapEnabled] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   // Dragging on empty canvas draws a marquee instead of just deselecting.
   const [boxSelectMode, setBoxSelectMode] = useState(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
   // The marquee's own rect (px, relative to the canvas surface) while a
   // box-select drag is in progress - null the rest of the time.
   const [boxSelectRect, setBoxSelectRect] = useState(null);
@@ -244,6 +263,7 @@ export default function AdminVisualBoard() {
       return () => showToast.dismiss(id);
     },
     snapEnabled,
+    gridSnap: showGrid,
     multiSelected,
   });
 
@@ -361,57 +381,148 @@ export default function AdminVisualBoard() {
     if (!document.fullscreenElement) layoutRef.current?.requestFullscreen();
   }
 
-  /* Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y to redo - but not
-     while the user is typing in a field. */
   useEffect(() => {
     function handleKeydown(event) {
-      const isEditing = event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]');
-      if (isEditing) return;
+      if (isTypingTarget(event.target)) return;
 
       const isMeta = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      const selection = currentSelection();
 
-      /* Delete needs no modifier - it is the obvious key for it. */
+      if (event.key === 'Escape') {
+        setSelected(null);
+        setMultiSelected([]);
+        setContextMenu(null);
+        return;
+      }
+
       if (!isMeta && (event.key === 'Delete' || event.key === 'Backspace')) {
-        if (!selected) return;
+        if (!selection.length) return;
         event.preventDefault();
-        removeSelected();
+        removeSelection();
+        return;
+      }
+
+      if (!isMeta && event.key === 'Enter' && selected?.kind === 'text') {
+        event.preventDefault();
+        setEditingTextId(selected.id);
+        return;
+      }
+
+      const arrow = ARROW_STEPS[event.key];
+      if (arrow && !isMeta) {
+        if (!selection.length) return;
+        event.preventDefault();
+        const distance = event.shiftKey ? 5 : 0.5;
+        editor.nudgeSelection(selection, arrow[0] * distance, arrow[1] * distance);
         return;
       }
 
       if (!isMeta) return;
 
-      const key = event.key.toLowerCase();
-
-      if (key === 'z' && event.shiftKey) {
+      if (key === 'z') {
         event.preventDefault();
-        editor.redo();
-      } else if (key === 'z') {
-        event.preventDefault();
-        editor.undo();
+        if (event.shiftKey) editor.redo();
+        else editor.undo();
       } else if (key === 'y') {
         event.preventDefault();
         editor.redo();
-      } else if (key === 'c') {
-        /* Copy remembers the selection; paste puts a copy of it down. */
-        if (!selected) return;
+      } else if (key === 'a') {
         event.preventDefault();
-        setClipboard(selected);
+        selectAll();
+      } else if (key === 'c' || key === 'x' || key === 'd') {
+        if (!selection.length) return;
+        event.preventDefault();
+        if (key === 'c') copySelection();
+        else if (key === 'x') cutSelection();
+        else duplicateSelection();
       } else if (key === 'v') {
-        if (!clipboard) return;
+        if (!clipboard.length) return;
         event.preventDefault();
-        const copyId = editor.duplicateElement(clipboard.kind, clipboard.id);
-        if (copyId) setSelected({ kind: clipboard.kind, id: copyId });
-        else showToast(`There can only be one ${describe(clipboard).toLowerCase()}.`);
-      } else if (key === 'd') {
-        if (!selected) return;
+        pasteClipboard();
+      } else if (key === 'g') {
         event.preventDefault();
-        duplicateSelected();
+        if (event.shiftKey) ungroupSelection();
+        else groupSelection();
+      } else if (event.code === 'BracketRight' || event.code === 'BracketLeft') {
+        if (!selection.length) return;
+        event.preventDefault();
+        const forward = event.code === 'BracketRight';
+        orderSelection(event.shiftKey ? (forward ? 'front' : 'back') : forward ? 'up' : 'down');
+      } else if (key === '=' || key === '+') {
+        event.preventDefault();
+        zoomBy(10);
+      } else if (key === '-') {
+        event.preventDefault();
+        zoomBy(-10);
+      } else if (key === '0') {
+        event.preventDefault();
+        setZoom(100);
       }
     }
 
     window.addEventListener('keydown', handleKeydown);
     return () => window.removeEventListener('keydown', handleKeydown);
-  }, [editor, selected, clipboard, layout]);
+  }, [editor, selected, multiSelected, clipboard, layout]);
+
+  /* Ctrl/Cmd + scroll zooms the canvas instead of the page. */
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    function onWheel(event) {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      zoomBy(event.deltaY < 0 ? 10 : -10);
+    }
+
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    return () => stage.removeEventListener('wheel', onWheel);
+  }, []);
+
+  /* Holding Space turns a drag on the canvas into panning the stage. */
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.code !== 'Space' || isTypingTarget(event.target)) return;
+      event.preventDefault();
+      if (!event.repeat) setSpaceHeld(true);
+    }
+
+    function onKeyUp(event) {
+      if (event.code !== 'Space' || isTypingTarget(event.target)) return;
+      event.preventDefault();
+      setSpaceHeld(false);
+    }
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  function panStage(event) {
+    if (!spaceHeld) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const stage = stageRef.current;
+    const start = { x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop };
+
+    function move(moveEvent) {
+      stage.scrollLeft = start.left - (moveEvent.clientX - start.x);
+      stage.scrollTop = start.top - (moveEvent.clientY - start.y);
+    }
+
+    function up() {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    }
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
 
   /*
    * Sizes the workspace to whatever is left below the header and toolbar,
@@ -474,7 +585,16 @@ export default function AdminVisualBoard() {
   }
 
   function select(kind, id) {
+    /*
+     * Clearing editingTextId below unmounts the canvas text editor before
+     * its blur can fire - and only Chrome reliably fires blur just from a
+     * focused node being removed, so on Firefox/Safari the edit was
+     * silently lost. Blurring it here, while it's still in the DOM, saves
+     * it through the ordinary onBlur path in every browser.
+     */
+    if (editingTextId) document.activeElement?.blur?.();
     setSelected({ kind, id });
+    setEditingTextId(null);
     setMultiSelected([]);
     setEditingPhotoIndex(null);
     if (PANEL_BY_KIND[kind]) setActivePanel(PANEL_BY_KIND[kind]);
@@ -486,7 +606,7 @@ export default function AdminVisualBoard() {
   }
 
   function isMultiSelected(kind, id) {
-    return multiSelected.some((item) => item.kind === kind && item.id === id);
+    return multiSelected.some((item) => item.kind === kind && (item.id ?? null) === (id ?? null));
   }
 
   /*
@@ -513,11 +633,11 @@ export default function AdminVisualBoard() {
         event.preventDefault();
         event.stopPropagation();
         setMultiSelected((current) => {
-          const base = current.length > 0 ? current : selected ? [selected] : [];
-          const exists = base.some((item) => item.kind === kind && item.id === id);
+          const base = current.length > 0 ? current : selected ? [{ kind: selected.kind, id: selected.id ?? null }] : [];
+          const exists = base.some((item) => item.kind === kind && (item.id ?? null) === (id ?? null));
           return exists
-            ? base.filter((item) => !(item.kind === kind && item.id === id))
-            : [...base, { kind, id }];
+            ? base.filter((item) => !(item.kind === kind && (item.id ?? null) === (id ?? null)))
+            : [...base, { kind, id: id ?? null }];
         });
         setSelected(null);
         return;
@@ -531,7 +651,7 @@ export default function AdminVisualBoard() {
        * else collapses back to a single selection, as before.
        */
       const isPartOfMultiSelection = multiSelected.some(
-        (item) => item.kind === kind && item.id === id
+        (item) => item.kind === kind && (item.id ?? null) === (id ?? null)
       );
       if (multiSelected.length > 0 && !isPartOfMultiSelection) setMultiSelected([]);
       grab(kind, id)(event);
@@ -635,79 +755,62 @@ export default function AdminVisualBoard() {
    * layers panel.
    */
   useEffect(() => {
-    if (!orderMenu) return;
+    if (!contextMenu) return;
 
-    const close = () => setOrderMenu(null);
+    const close = () => setContextMenu(null);
     const onKey = (event) => {
       if (event.key === 'Escape') close();
     };
+    /* A press inside the menu is choosing an item, not dismissing it. */
+    const closeOutside = (event) => {
+      if (!event.target.closest?.('.vb-context-menu')) close();
+    };
 
     // capture, so the menu closes even if the target stops propagation
-    window.addEventListener('pointerdown', close, true);
+    window.addEventListener('pointerdown', closeOutside, true);
     window.addEventListener('scroll', close, true);
     window.addEventListener('keydown', onKey);
 
     return () => {
-      window.removeEventListener('pointerdown', close, true);
+      window.removeEventListener('pointerdown', closeOutside, true);
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [orderMenu]);
-
-  /*
-   * Arrow keys nudge whatever is selected. This is what makes an element
-   * that something larger is sitting on top of still movable: pick it in
-   * the layers panel, then walk it out from under the thing covering it.
-   * Shift takes bigger steps.
-   */
-  useEffect(() => {
-    if (!selected) return;
-
-    function onKeyDown(event) {
-      const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[
-        event.key
-      ];
-      if (!step) return;
-
-      // never steal the arrows from a field being typed in
-      const tag = event.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable) {
-        return;
-      }
-
-      const element = findElement(layout, selected.kind, selected.id);
-      if (!element || element.locked) return;
-
-      event.preventDefault();
-
-      const distance = event.shiftKey ? 5 : 0.5;
-      editor.setPosition(
-        selected.kind,
-        selected.id,
-        element.x + step[0] * distance,
-        element.y + step[1] * distance
-      );
-    }
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selected, layout, editor]);
+  }, [contextMenu]);
 
   function handleContextMenu(kind, id) {
     return (event) => {
       event.preventDefault();
       event.stopPropagation();
 
-      select(kind, id);
-      setMultiSelected([]);
-      setOrderMenu({ kind, id, x: event.clientX, y: event.clientY });
+      /* right-clicking part of the multi-selection acts on all of it */
+      const inMulti = multiSelected.some((item) => item.kind === kind && (item.id ?? null) === (id ?? null));
+      if (!inMulti) select(kind, id);
+      setContextMenu({ x: event.clientX, y: event.clientY, onElement: true });
     };
   }
 
-  function orderAndClose(direction) {
-    if (!orderMenu) return;
-    editor.moveLayer(orderMenu.kind, orderMenu.id, direction);
-    setOrderMenu(null);
+  function runMenuAction(action) {
+    setContextMenu(null);
+    const selection = currentSelection();
+
+    switch (action) {
+      case 'cut': cutSelection(); break;
+      case 'copy': copySelection(); break;
+      case 'paste': pasteClipboard(); break;
+      case 'duplicate': duplicateSelection(); break;
+      case 'delete': removeSelection(); break;
+      case 'lock': editor.setLockedMany(selection, !selectionLocked); break;
+      case 'hide':
+        editor.hideMany(selection);
+        setSelected(null);
+        setMultiSelected([]);
+        break;
+      case 'group': groupSelection(); break;
+      case 'ungroup': ungroupSelection(); break;
+      case 'selectAll': selectAll(); break;
+      default: orderSelection(action);
+    }
   }
 
   function handleGroup() {
@@ -807,38 +910,103 @@ export default function AdminVisualBoard() {
     deselectIfSelected('shape', id);
   }
 
-  function removeSelected() {
-    if (!selected) return;
+  /* The current selection as a list - multi first, else the single one. */
+  function currentSelection() {
+    if (multiSelected.length) return multiSelected;
+    return selected ? [{ kind: selected.kind, id: selected.id ?? null }] : [];
+  }
 
-    const element = findElement(layout, selected.kind, selected.id);
-    if (element?.locked) {
-      showToast('That element is locked.');
+  function selectMany(list) {
+    if (list.length === 1) {
+      setSelected(list[0]);
+      setMultiSelected([]);
+    } else {
+      setSelected(null);
+      setMultiSelected(list);
+    }
+  }
+
+  function removeSelection() {
+    const selection = currentSelection();
+    if (!selection.length) return;
+
+    const { removed, hidden, locked } = editor.removeMany(selection);
+
+    if (locked && !removed && !hidden) {
+      showToast(locked === 1 ? 'That element is locked.' : 'Those elements are locked.');
       return;
     }
-
-    const outcome = editor.removeElement(selected.kind, selected.id);
-
-    if (outcome === 'hidden') {
-      showToast(`${describe(selected)} hidden - turn it back on from Layers.`);
+    if (hidden) {
+      showToast(
+        `${hidden === 1 ? 'One element was' : `${hidden} elements were`} hidden - turn it back on from Layers.`
+      );
     }
 
     setSelected(null);
     setMultiSelected([]);
   }
 
-  /* Copies the selected element, and selects the copy. */
-  function duplicateSelected() {
-    if (!selected) return;
-
-    const copyId = editor.duplicateElement(selected.kind, selected.id);
-
-    if (!copyId) {
-      showToast(`There can only be one ${describe(selected).toLowerCase()}.`);
+  function duplicateSelection() {
+    const copies = editor.duplicateMany(currentSelection());
+    if (!copies.length) {
+      showToast('The logo and the boxes are one of a kind - they can’t be copied.');
       return;
     }
+    selectMany(copies);
+  }
 
-    setSelected({ kind: selected.kind, id: copyId });
-    setMultiSelected([]);
+  function copySelection() {
+    const snapshots = editor.snapshotElements(currentSelection());
+    if (!snapshots.length) {
+      showToast('The logo and the boxes are one of a kind - they can’t be copied.');
+      return false;
+    }
+    setClipboard(snapshots);
+    return true;
+  }
+
+  function cutSelection() {
+    if (copySelection()) removeSelection();
+  }
+
+  function pasteClipboard() {
+    if (!clipboard.length) return;
+    selectMany(editor.pasteSnapshots(clipboard));
+  }
+
+  function groupSelection() {
+    if (multiSelected.length >= 2) handleGroup();
+  }
+
+  function ungroupSelection() {
+    const groupIds = new Set(
+      currentSelection()
+        .map(({ kind, id }) => findElement(layout, kind, id)?.groupId)
+        .filter(Boolean)
+    );
+    groupIds.forEach((groupId) => editor.ungroup(groupId));
+  }
+
+  function orderSelection(direction) {
+    const selection = currentSelection();
+    if (selection.length === 1) editor.moveLayer(selection[0].kind, selection[0].id, direction);
+    else if (selection.length > 1) editor.moveLayers(selection, direction);
+  }
+
+  function selectAll() {
+    selectMany(editor.selectableElements());
+  }
+
+  function alignSelection(edge) {
+    editor.alignSelection(currentSelection(), edge);
+  }
+
+  function distributeSelection(axis) {
+    editor.distributeSelection(currentSelection(), axis);
+  }
+
+  function zoomBy(step) {
+    setZoom((current) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current + step)));
   }
 
   /* A readable name for a selection, for messages. */
@@ -886,7 +1054,7 @@ export default function AdminVisualBoard() {
       // beginDrag sees the whole thing still selected and moves it as a
       // group (see the multiSelected handling there).
       const isPartOfMultiSelection = multiSelected.some(
-        (item) => item.kind === kind && item.id === id
+        (item) => item.kind === kind && (item.id ?? null) === (id ?? null)
       );
       if (!isPartOfMultiSelection) select(kind, id);
       editor.beginDrag(kind, id)(event);
@@ -974,10 +1142,9 @@ export default function AdminVisualBoard() {
           <span className="vb-divider-line" aria-hidden="true" />
 
           {selectedOnCanvas && (
-            <span
-              className="vb-shape-resize"
-              title="Drag to set its length"
-              onPointerDown={editor.beginDividerResize(divider.id)}
+            <SelectionHandles
+              handles={divider.orientation === 'horizontal' ? ['w', 'e'] : ['n', 's']}
+              onResize={(h) => editor.beginDividerResize(divider.id, h.x || h.y)}
             />
           )}
         </div>
@@ -1009,11 +1176,7 @@ export default function AdminVisualBoard() {
           />
 
           {selectedOnCanvas && (
-            <span
-              className="vb-shape-resize"
-              title="Drag to resize"
-              onPointerDown={editor.beginResizeBox('candidates')}
-            />
+            <SelectionHandles handles={ALL_HANDLES} onResize={(h) => editor.beginHandleResize('candidates', null, h)} />
           )}
         </div>
       );
@@ -1055,11 +1218,7 @@ export default function AdminVisualBoard() {
           />
 
           {selectedOnCanvas && (
-            <span
-              className="vb-shape-resize"
-              title="Drag to resize"
-              onPointerDown={editor.beginResizeBox('announcements')}
-            />
+            <SelectionHandles handles={ALL_HANDLES} onResize={(h) => editor.beginHandleResize('announcements', null, h)} />
           )}
         </div>
       );
@@ -1086,10 +1245,12 @@ export default function AdminVisualBoard() {
           <img src={layout.logo.url || '/visual/logo.png'} alt="" className="vb-logo-img" />
 
           {isSelected('logo') && (
-            <span
-              className="vb-shape-resize"
-              title="Drag to resize"
-              onPointerDown={editor.beginScaleResize('logo', null, LOGO_BASE_WIDTH)}
+            <SelectionHandles
+              handles={CORNER_HANDLES}
+              rotation={layout.logo.rotation ?? 0}
+              inverseScale={1 / layout.logo.scale}
+              onResize={(h) => editor.beginHandleResize('logo', null, h)}
+              onRotate={editor.beginRotate('logo', null)}
             />
           )}
         </button>
@@ -1099,6 +1260,20 @@ export default function AdminVisualBoard() {
     if (entry.kind === 'text') {
       const text = layout.texts.find((item) => item.id === entry.id);
       if (!text || !isVisible(text)) return null;
+
+      if (editingTextId === text.id) {
+        return (
+          <div key={text.id} className="vb-text-editing" style={positionStyle(text)}>
+            <CanvasTextEditor
+              text={text}
+              onDone={(value) => {
+                if (value !== text.text) editor.setTextContent(text.id, value);
+                setEditingTextId(null);
+              }}
+            />
+          </div>
+        );
+      }
 
       return (
         <button
@@ -1112,16 +1287,20 @@ export default function AdminVisualBoard() {
           data-vb-id={text.id}
           onPointerDown={handlePointerDown('text', text.id)}
           onContextMenu={handleContextMenu('text', text.id)}
+          onDoubleClick={() => {
+            if (!text.locked) setEditingTextId(text.id);
+          }}
         >
           <span style={resolveTextStyle(text)}>
             <TextContent text={text} />
           </span>
 
           {isSelected('text', text.id) && (
-            <span
-              className="vb-shape-resize"
-              title="Drag to resize"
-              onPointerDown={editor.beginFontResize(text.id)}
+            <SelectionHandles
+              handles={TEXT_HANDLES}
+              rotation={text.rotation ?? 0}
+              onResize={(h) => editor.beginHandleResize('text', text.id, h)}
+              onRotate={editor.beginRotate('text', text.id)}
             />
           )}
         </button>
@@ -1151,10 +1330,12 @@ export default function AdminVisualBoard() {
           <img src={image.url} alt="" className="vb-photo-img" />
 
           {isSelected('image', image.id) && (
-            <span
-              className="vb-shape-resize"
-              title="Drag to resize"
-              onPointerDown={editor.beginScaleResize('image', image.id, PHOTO_BASE_WIDTH)}
+            <SelectionHandles
+              handles={CORNER_HANDLES}
+              rotation={image.rotation ?? 0}
+              inverseScale={1 / image.scale}
+              onResize={(h) => editor.beginHandleResize('image', image.id, h)}
+              onRotate={editor.beginRotate('image', image.id)}
             />
           )}
         </button>
@@ -1181,10 +1362,12 @@ export default function AdminVisualBoard() {
           <video src={video.url} className="vb-photo-img" muted loop autoPlay playsInline />
 
           {isSelected('video', video.id) && (
-            <span
-              className="vb-shape-resize"
-              title="Drag to resize"
-              onPointerDown={editor.beginScaleResize('video', video.id, PHOTO_BASE_WIDTH)}
+            <SelectionHandles
+              handles={CORNER_HANDLES}
+              rotation={video.rotation ?? 0}
+              inverseScale={1 / video.scale}
+              onResize={(h) => editor.beginHandleResize('video', video.id, h)}
+              onRotate={editor.beginRotate('video', video.id)}
             />
           )}
         </button>
@@ -1200,6 +1383,15 @@ export default function AdminVisualBoard() {
         !shape.fill.url &&
         !isCarousel(shape);
       const selectedOnCanvas = isSelected('shape', shape.id);
+      /*
+       * left/top/width/height/transform position and size .vb-shape itself,
+       * so SelectionHandles (a sibling of .vb-shape-fill below, positioned
+       * absolute against .vb-shape) stays put. Everything else - border,
+       * fill, a triangle's clip-path - goes on the inner .vb-shape-fill
+       * instead: clip-path also clips a node's descendants' hit-testing,
+       * and SelectionHandles must stay clickable outside the silhouette.
+       */
+      const { left, top, width, height, transform, ...shapeFillStyle } = resolveShapeStyle(shape);
 
       return (
         <div
@@ -1207,39 +1399,42 @@ export default function AdminVisualBoard() {
           className={`vb-shape ${selectedOnCanvas ? 'selected' : ''} ${
             isEmptyFrame ? 'is-empty-frame' : ''
           } ${isMultiSelected('shape', shape.id) ? 'multi-selected' : ''}`}
-          style={resolveShapeStyle(shape)}
+          style={{ left, top, width, height, transform }}
           data-vb-kind="shape"
           data-vb-id={shape.id}
           onPointerDown={handlePointerDown('shape', shape.id)}
           onContextMenu={handleContextMenu('shape', shape.id)}
         >
-          {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
+          <div className="vb-shape-fill" style={shapeFillStyle}>
+            {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
 
-          {isZigzag(shape) ? (
-            <ZigzagRule
-              color={shape.stroke.color}
-              width={shape.stroke.width}
-              peaks={shape.peaks}
-            />
-          ) : isCarousel(shape) ? (
-            <PhotoCarousel
-              photos={shape.photos}
-              direction={shape.animation.direction}
-              speed={shape.animation.speed}
-              fit={shape.fill.fit}
-            />
-          ) : (
-            <>
-              {shape.fill.type === 'image' && <PhotoAdjuster fill={shape.fill} />}
-              {shape.fill.type === 'video' && <VideoAdjuster fill={shape.fill} />}
-            </>
-          )}
+            {isZigzag(shape) ? (
+              <ZigzagRule
+                color={shape.stroke.color}
+                width={shape.stroke.width}
+                peaks={shape.peaks}
+              />
+            ) : isCarousel(shape) ? (
+              <PhotoCarousel
+                photos={shape.photos}
+                direction={shape.animation.direction}
+                speed={shape.animation.speed}
+                fit={shape.fill.fit}
+              />
+            ) : (
+              <>
+                {shape.fill.type === 'image' && <PhotoAdjuster fill={shape.fill} />}
+                {shape.fill.type === 'video' && <VideoAdjuster fill={shape.fill} />}
+              </>
+            )}
+          </div>
 
           {selectedOnCanvas && (
-            <span
-              className="vb-shape-resize"
-              title="Drag to resize"
-              onPointerDown={editor.beginResize(shape.id)}
+            <SelectionHandles
+              handles={ALL_HANDLES}
+              rotation={shape.rotation}
+              onResize={(h) => editor.beginHandleResize('shape', shape.id, h)}
+              onRotate={editor.beginRotate('shape', shape.id)}
             />
           )}
         </div>
@@ -1278,6 +1473,10 @@ export default function AdminVisualBoard() {
 
   const isTextSelected = selected?.kind === 'text';
   const shapeLabels = labelShapes(layout.shapes);
+  const selectionNow = currentSelection();
+  const selectionLocked =
+    selectionNow.length > 0 &&
+    selectionNow.every(({ kind, id }) => findElement(layout, kind, id)?.locked);
 
   return (
     <>
@@ -1397,7 +1596,7 @@ export default function AdminVisualBoard() {
               className={`vb-toolbar-button ${snapEnabled ? 'active' : ''}`}
               onClick={() => setSnapEnabled((current) => !current)}
               aria-pressed={snapEnabled}
-              title="Snap to center, edges, grid, and other elements"
+              title="Snap to other elements, the board edges and centre (hold Ctrl to drag freely)"
             >
               <Magnet size={15} />
               <span>Snap</span>
@@ -1785,11 +1984,43 @@ export default function AdminVisualBoard() {
                     const locked = info.element?.locked ?? false;
                     const Icon = info.Icon;
 
+                    const isDragging = draggingLayer?.kind === entry.kind && draggingLayer?.id === entry.id;
+
                     return (
                       <div
                         key={key}
-                        className={`vb-layer-row ${isSelected(entry.kind, entry.id) ? 'active' : ''}`}
+                        className={`vb-layer-row ${isSelected(entry.kind, entry.id) ? 'active' : ''} ${
+                          isDragging ? 'dragging' : ''
+                        } ${layerDropTarget === key && !isDragging ? 'drop-target' : ''}`}
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = 'move';
+                          setDraggingLayer({ kind: entry.kind, id: entry.id });
+                        }}
+                        onDragEnd={() => {
+                          setDraggingLayer(null);
+                          setLayerDropTarget(null);
+                        }}
+                        onDragEnter={() => setLayerDropTarget(key)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          if (draggingLayer && !isDragging) {
+                            editor.reorderLayer(
+                              draggingLayer.kind,
+                              draggingLayer.id,
+                              entry.kind,
+                              entry.id
+                            );
+                          }
+                          setDraggingLayer(null);
+                          setLayerDropTarget(null);
+                        }}
                       >
+                        <span className="vb-layer-grip" aria-hidden="true">
+                          <GripVertical size={13} />
+                        </span>
+
                         <button
                           type="button"
                           className="vb-layer-icon-button"
@@ -1813,6 +2044,7 @@ export default function AdminVisualBoard() {
                         <button
                           type="button"
                           className="vb-layer-name"
+                          title={info.label}
                           onClick={() => select(entry.kind, entry.id)}
                         >
                           <Icon size={13} />
@@ -1872,7 +2104,11 @@ export default function AdminVisualBoard() {
           {/* ================= CANVAS ================= */}
 
           <div className="vb-canvas-col">
-            <div className="vb-canvas-stage" ref={stageRef}>
+            <div
+              className={`vb-canvas-stage ${spaceHeld ? 'is-panning' : ''}`}
+              ref={stageRef}
+              onPointerDownCapture={panStage}
+            >
               <div
                 className={`vb-canvas ${showGrid ? 'show-grid' : ''}`}
                 ref={canvasRef}
@@ -1904,6 +2140,11 @@ export default function AdminVisualBoard() {
                 <div
                   className={`vb-canvas-surface ${boxSelectMode ? 'vb-box-select-mode' : ''}`}
                   ref={middleColumnRef}
+                  onContextMenu={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    event.preventDefault();
+                    setContextMenu({ x: event.clientX, y: event.clientY, onElement: false });
+                  }}
                   onPointerDown={(event) => {
                     if (event.target !== event.currentTarget) return;
 
@@ -1918,8 +2159,7 @@ export default function AdminVisualBoard() {
                 >
                   {layout.layerOrder.map(renderLayerEntry)}
 
-                  {editor.centerGuide.x && <div className="vb-guide vb-guide-vertical" aria-hidden="true" />}
-                  {editor.centerGuide.y && <div className="vb-guide vb-guide-horizontal" aria-hidden="true" />}
+                  <SmartGuides guides={editor.guides} />
 
                   {boxSelectRect && (
                     <div
@@ -1937,25 +2177,60 @@ export default function AdminVisualBoard() {
             </div>
 
             <p className="vb-canvas-hint">
-              Click an element to select it, drag to move it, and drag a selected shape's corner
-              to resize it. Changes save to your draft as you go - click Publish to put them on
-              the live board.
+              Click to select, drag to move, drag a handle to resize or rotate, double-click text to
+              edit it. Changes save to your draft as you go - click Publish to put them on the live
+              board.
             </p>
           </div>
 
           {/* ================= PROPERTIES ================= */}
 
           <div className="vb-properties">
+            {selected && multiSelected.length < 2 && (
+              <AlignBar onAlign={alignSelection} toBoard />
+            )}
+
             {multiSelected.length >= 2 ? (
               <>
                 <h3 className="vb-properties-title">{multiSelected.length} Elements Selected</h3>
-                <p className="vb-properties-hint">
-                  Group them so dragging any one moves the rest together.
-                </p>
-                <button type="button" className="primary-button vb-group-button" onClick={handleGroup}>
-                  <Group size={13} />
-                  Group Selected
-                </button>
+                <AlignBar
+                  onAlign={alignSelection}
+                  onDistribute={distributeSelection}
+                  canDistribute={multiSelected.length >= 3}
+                />
+                <div className="vb-multi-actions">
+                  <button type="button" className="primary-button" onClick={handleGroup}>
+                    <Group size={13} />
+                    Group
+                  </button>
+                  <button type="button" className="secondary-button" onClick={duplicateSelection}>
+                    <Copy size={13} />
+                    Duplicate
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => editor.setLockedMany(multiSelected, !selectionLocked)}
+                  >
+                    {selectionLocked ? <LockOpen size={13} /> : <Lock size={13} />}
+                    {selectionLocked ? 'Unlock' : 'Lock'}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      editor.hideMany(multiSelected);
+                      setMultiSelected([]);
+                    }}
+                  >
+                    <EyeOff size={13} />
+                    Hide
+                  </button>
+                  <button type="button" className="secondary-button vb-danger-button" onClick={removeSelection}>
+                    <Trash2 size={13} />
+                    Delete
+                  </button>
+                </div>
               </>
             ) : !selected ? (
               <div className="vb-properties-empty">
@@ -2139,7 +2414,7 @@ export default function AdminVisualBoard() {
                       <button
                         type="button"
                         className="delete-button vb-remove-button"
-                        onClick={removeSelected}
+                        onClick={removeSelection}
                         title="Remove (Delete)"
                       >
                         <Trash2 size={12} />
@@ -3048,6 +3323,27 @@ export default function AdminVisualBoard() {
                   </div>
                 )}
 
+                {['text', 'logo', 'image', 'video'].includes(selected.kind) && (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="vb-element-rotation">
+                      Rotate
+                    </label>
+                    <input
+                      id="vb-element-rotation"
+                      className="form-input"
+                      type="number"
+                      min="-180"
+                      max="180"
+                      value={Math.round(selectedElement.rotation ?? 0)}
+                      onChange={(event) =>
+                        editor.updateElement(selected.kind, selected.id, {
+                          rotation: Math.max(-180, Math.min(180, Number(event.target.value) || 0)),
+                        })
+                      }
+                    />
+                  </div>
+                )}
+
                 <div className="vb-element-actions">
                   {(selected.kind === 'image' ||
                     selected.kind === 'video' ||
@@ -3057,7 +3353,7 @@ export default function AdminVisualBoard() {
                     <button
                       type="button"
                       className="secondary-button vb-duplicate-button"
-                      onClick={duplicateSelected}
+                      onClick={duplicateSelection}
                       title="Duplicate (Ctrl+D)"
                     >
                       <Copy size={12} />
@@ -3068,7 +3364,7 @@ export default function AdminVisualBoard() {
                   <button
                     type="button"
                     className="delete-button vb-remove-button"
-                    onClick={removeSelected}
+                    onClick={removeSelection}
                     title="Remove (Delete)"
                   >
                     <Trash2 size={12} />
@@ -3146,6 +3442,7 @@ export default function AdminVisualBoard() {
               <div className="vb-template-list">
                 {templates.map((template) => (
                   <div key={template.id} className="vb-template-row">
+                    <TemplatePreview layout={template.layout} />
                     <div className="vb-template-row-info">
                       <strong>{template.name}</strong>
                       <span>{new Date(template.savedAt).toLocaleString()}</span>
@@ -3175,32 +3472,109 @@ export default function AdminVisualBoard() {
         </div>
       )}
 
-      {orderMenu && (
-        <div
-          className="vb-order-menu"
-          style={{ left: orderMenu.x, top: orderMenu.y }}
-          /* the dismiss listener runs in capture, so keep it off this menu */
-          onPointerDown={(event) => event.stopPropagation()}
-          role="menu"
-        >
-          <button type="button" role="menuitem" onClick={() => orderAndClose('front')}>
-            <ChevronsUp size={13} />
-            <span>Bring to front</span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => orderAndClose('up')}>
-            <ChevronUp size={13} />
-            <span>Bring forward</span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => orderAndClose('down')}>
-            <ChevronDown size={13} />
-            <span>Send backward</span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => orderAndClose('back')}>
-            <ChevronsDown size={13} />
-            <span>Send to back</span>
-          </button>
+      {editor.rotating && (
+        <div className="vb-rotate-tooltip" style={{ left: editor.rotating.x + 14, top: editor.rotating.y + 14 }}>
+          {Math.round(editor.rotating.rotation)}°
         </div>
       )}
+
+      {contextMenu && (
+        <CanvasContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onElement={contextMenu.onElement}
+          locked={selectionLocked}
+          canPaste={clipboard.length > 0}
+          canGroup={multiSelected.length >= 2}
+          canUngroup={selectionNow.some(({ kind, id }) => findElement(layout, kind, id)?.groupId)}
+          onAction={runMenuAction}
+          onAlign={(edge) => {
+            setContextMenu(null);
+            alignSelection(edge);
+          }}
+        />
+      )}
     </>
+  );
+}
+
+/*
+ * A miniature, non-interactive render of a saved template's layout, so
+ * choosing one in "Apply a Template" doesn't mean guessing from its name and
+ * timestamp alone. Every position and size on the board is already a
+ * percentage (or a cqw/cqh unit sized against the board's own box), so the
+ * same geometry that paints the real board paints this thumbnail correctly
+ * just by giving it `container-type: size` and a 16:9 box of its own.
+ */
+function TemplatePreview({ layout }) {
+  if (!layout) {
+    return <div className="vb-template-preview vb-template-preview-empty" aria-hidden="true" />;
+  }
+
+  return (
+    <div className="vb-template-preview" style={{ containerType: 'size' }} aria-hidden="true">
+      {layout.dividers.filter(isVisible).map((divider) => {
+        const vertical = divider.orientation !== 'horizontal';
+        return (
+          <span
+            key={divider.id}
+            className="vb-template-preview-divider"
+            style={{
+              left: `${divider.x}%`,
+              top: `${divider.y}%`,
+              width: vertical ? '1px' : `${divider.length}%`,
+              height: vertical ? `${divider.length}%` : '1px',
+            }}
+          />
+        );
+      })}
+
+      {layout.shapes.filter(isVisible).map((shape) => (
+        <div key={shape.id} className="vb-template-preview-shape" style={resolveShapeStyle(shape)} />
+      ))}
+
+      {isVisible(layout.candidates) && (
+        <div
+          className="vb-template-preview-box"
+          style={{
+            left: `${layout.candidates.x}%`,
+            top: `${layout.candidates.y}%`,
+            width: `${layout.candidates.width}%`,
+            height: `${layout.candidates.height}%`,
+          }}
+        />
+      )}
+
+      {isVisible(layout.announcements) && (
+        <div
+          className="vb-template-preview-box vb-template-preview-box-announcements"
+          style={{
+            left: `${layout.announcements.x}%`,
+            top: `${layout.announcements.y}%`,
+            width: `${layout.announcements.width}%`,
+            height: `${layout.announcements.height}%`,
+          }}
+        />
+      )}
+
+      {layout.logo?.visible && layout.logo?.url && (
+        <img
+          className="vb-template-preview-logo"
+          src={layout.logo.url}
+          alt=""
+          style={scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH)}
+        />
+      )}
+
+      {layout.texts.filter(isVisible).map((text) => (
+        <div
+          key={text.id}
+          className="vb-template-preview-text"
+          style={{ ...positionStyle(text), ...resolveTextStyle(text) }}
+        >
+          {text.text}
+        </div>
+      ))}
+    </div>
   );
 }

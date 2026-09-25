@@ -1,37 +1,26 @@
 'use client';
 
 import { useState } from 'react';
-import Cropper, {} from 'react-easy-crop';
+import Cropper from 'react-easy-crop';
 
-import { getCroppedImageFile,} from '../lib/cropImage';
 import { useToast } from './ToastProvider';
 
 export default function PhotoCropModal({
   imageSrc,
-  fileName,
+  initialCrop,
   onSave,
   onClose,
 }) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const [croppedArea, setCroppedArea] = useState(null);
   const showToast = useToast();
 
-  async function handleSave() {
-    if (!croppedAreaPixels) return;
-
-    setSaving(true);
-
-    try {
-      const file = await getCroppedImageFile(imageSrc, croppedAreaPixels, fileName);
-      onSave(file);
-      onClose();
-    } catch {
-      showToast.error('Cropping failed. Please try again.');
-    } finally {
-      setSaving(false);
-    }
+  function handleSave() {
+    if (!croppedArea) return;
+    onSave(croppedArea);
+    showToast.success('Crop saved. Save the candidate to keep it.');
+    onClose();
   }
 
   return (
@@ -66,9 +55,10 @@ export default function PhotoCropModal({
             aspect={1}
             cropShape="rect"
             showGrid
+            initialCroppedAreaPercentages={initialCrop ?? undefined}
             onCropChange={setCrop}
             onZoomChange={setZoom}
-            onCropComplete={(_area, pixels) => setCroppedAreaPixels(pixels)}
+            onCropComplete={(area) => setCroppedArea(area)}
           />
         </div>
 
@@ -94,9 +84,9 @@ export default function PhotoCropModal({
             type="button"
             className="confirm-delete-button"
             onClick={handleSave}
-            disabled={saving || !croppedAreaPixels}
+            disabled={!croppedArea}
           >
-            {saving ? 'Saving...' : 'Save Crop'}
+            Save Crop
           </button>
         </div>
       </div>

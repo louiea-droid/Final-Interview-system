@@ -10,6 +10,8 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Search,
+  Timer,
   Trash2,
   Type,
 } from 'lucide-react';
@@ -76,6 +78,7 @@ export default function AdminAnnouncements() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [searchTerm, setSearchTerm] = useState('');
   const showToast = useToast();
 
   const [message, setMessage] = useState('');
@@ -289,15 +292,27 @@ export default function AdminAnnouncements() {
     setAnnouncementToDelete(null);
   }
 
+  const filteredAnnouncements = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return announcements;
+    return announcements.filter((announcement) =>
+      announcement.message.toLowerCase().includes(term)
+    );
+  }, [announcements, searchTerm]);
+
   const pagedAnnouncements = useMemo(
-    () => announcements.slice((page - 1) * pageSize, page * pageSize),
-    [announcements, page, pageSize]
+    () => filteredAnnouncements.slice((page - 1) * pageSize, page * pageSize),
+    [filteredAnnouncements, page, pageSize]
   );
 
   useEffect(() => {
-    const pageCount = Math.max(1, Math.ceil(announcements.length / pageSize));
+    const pageCount = Math.max(1, Math.ceil(filteredAnnouncements.length / pageSize));
     if (page > pageCount) setPage(pageCount);
-  }, [announcements.length, page, pageSize]);
+  }, [filteredAnnouncements.length, page, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm]);
 
   return (
     <>
@@ -497,6 +512,20 @@ export default function AdminAnnouncements() {
                 />
                 <span className="announcement-toolbar-slider-value">{style.lineHeight.toFixed(2)}</span>
               </label>
+
+              <label className="announcement-toolbar-slider" title="Cycle speed">
+                <Timer size={13} />
+                <input
+                  type="range"
+                  min="3"
+                  max="30"
+                  step="1"
+                  aria-label="Cycle speed, in seconds per announcement"
+                  value={style.cycleSeconds}
+                  onChange={(event) => updateStyle({ cycleSeconds: Number(event.target.value) })}
+                />
+                <span className="announcement-toolbar-slider-value">{style.cycleSeconds}s</span>
+              </label>
             </div>
 
             <div className="announcement-toolbar-group announcement-toolbar-swatches">
@@ -653,8 +682,20 @@ export default function AdminAnnouncements() {
           </div>
 
           <div className="panel-count">
-            {announcements.length} announcement{announcements.length === 1 ? '' : 's'}
+            {filteredAnnouncements.length} announcement{filteredAnnouncements.length === 1 ? '' : 's'}
           </div>
+        </div>
+
+        <div className="table-search">
+          <Search size={13} />
+          <input
+            type="search"
+            className="table-search-input"
+            placeholder="Search announcements..."
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            aria-label="Search announcements"
+          />
         </div>
 
         <div className="table-wrapper">
@@ -740,7 +781,11 @@ export default function AdminAnnouncements() {
                 {!pagedAnnouncements.length && (
                   <tr>
                     <td colSpan={4}>
-                      <div className="empty-state">No announcements posted yet.</div>
+                      <div className="empty-state">
+                        {searchTerm.trim()
+                          ? 'No announcements match your search.'
+                          : 'No announcements posted yet.'}
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -753,7 +798,7 @@ export default function AdminAnnouncements() {
           <TablePagination
             page={page}
             pageSize={pageSize}
-            totalItems={announcements.length}
+            totalItems={filteredAnnouncements.length}
             onPageChange={setPage}
             onPageSizeChange={(size) => {
               setPageSize(size);

@@ -1,13 +1,19 @@
 rules_version = '2';
 
-// Candidate photos are public on the board and uploaded from the admin
-// pages, which have no real auth of their own yet (see localAuth.js) - so,
-// like firestore.rules, this is wide open for now and expires the same day.
-// Tighten this to a real admin check once sign-in moves to Firebase Auth.
+// Candidate photos are public on the board; only the admin account uploads.
+// Keep the UID list in step with firestore.rules.
 service firebase.storage {
   match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.uid in ['tNRXV3YjwghpgnORmJrOPcGgHKr2'];
+    }
+
     match /{allPaths=**} {
-      allow read, write: if request.time < timestamp.date(2026, 10, 7);
+      allow read: if true;
+      allow write: if isAdmin()
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
     }
   }
 }

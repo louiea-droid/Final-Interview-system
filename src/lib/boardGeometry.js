@@ -11,12 +11,16 @@
 export const LOGO_BASE_WIDTH = 20;
 export const PHOTO_BASE_WIDTH = 11.5;
 
+function rotation(element) {
+  return element.rotation ? ` rotate(${element.rotation}deg)` : '';
+}
+
 /** Centres an element on its stored percentage position. */
 export function positionStyle(element) {
   return {
     left: `${element.x}%`,
     top: `${element.y}%`,
-    transform: 'translate(-50%, -50%)',
+    transform: `translate(-50%, -50%)${rotation(element)}`,
   };
 }
 
@@ -25,7 +29,7 @@ export function scaledPositionStyle(element, baseWidth) {
   return {
     left: `${element.x}%`,
     top: `${element.y}%`,
-    transform: `translate(-50%, -50%) scale(${element.scale})`,
+    transform: `translate(-50%, -50%) scale(${element.scale})${rotation(element)}`,
     width: `${baseWidth}cqw`,
   };
 }

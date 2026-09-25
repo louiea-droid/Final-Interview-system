@@ -14,9 +14,10 @@ No accounts and no backend. Candidate data lives in your browser's
 localStorage and starts from four sample candidates, so the board has
 something to show the first time you open it.
 
-Sign in at `/admin/login` with the `ADMIN_USERNAME` and `ADMIN_PASSWORD`
-from `.env.local` (see `.env.local.example`). Changing them needs a dev
-server restart, since they are read at build time.
+Sign in at `/admin/login` with a Firebase Authentication email/password
+account. Only the UIDs listed in `firestore.rules` and `storage.rules` can
+write; to add an admin, create the user in the Firebase console, add their
+UID to both files, and run `firebase deploy --only firestore:rules,storage`.
 
 ## Routes
 
@@ -44,18 +45,9 @@ photos as downscaled data URLs. `resetLocalData()` exported from that file
 clears everything and restores the sample candidates - handy from the
 browser console when testing.
 
-`src/lib/localAuth.js` is the matching sign-in stand-in.
-
 ## Going to a real backend
 
 Both local modules exist to be replaced. `localBackend.js` exposes the same
 query shape the admin pages already call (`from(...).select(...).eq(...)`)
 plus `subscribeCandidates` for the live board, so swapping in a real service
 means rewriting those two files rather than touching the screens.
-
-**When you do, note that the local auth is not security**: `vite.config.js`
-maps `ADMIN_USERNAME` and `ADMIN_PASSWORD` into the browser bundle, and the
-session is a localStorage flag - so anyone with the built site can read the
-credentials and sign themselves in. Under Next.js those values stayed on the
-server; restoring that needs an identity provider, or an endpoint that
-checks the password off-device.

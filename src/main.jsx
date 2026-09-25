@@ -49,11 +49,6 @@ createRoot(document.getElementById('root')).render(
             }
           />
 
-          {/*
-            Replaces the old Next.js middleware guard. While we are running
-            on the local backend this is a convenience redirect only - see
-            the note in lib/localAuth.js.
-          */}
           <Route
             path="/admin"
             element={

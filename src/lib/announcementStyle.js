@@ -26,6 +26,9 @@ export const DEFAULT_ANNOUNCEMENT_STYLE = {
   showIcon: true,
   icon: '📢',
   background: solidFill('#2e0505'),
+  /* Seconds each announcement stays on screen before the board cycles to
+     the next one - only matters when more than one is live at once. */
+  cycleSeconds: 7,
 };
 
 function clamp(value, min, max) {
@@ -56,6 +59,9 @@ export function normalizeAnnouncementStyle(saved) {
       ? merged.icon.trim().slice(0, 8)
       : DEFAULT_ANNOUNCEMENT_STYLE.icon;
   merged.background = normalizeFill(merged.background, DEFAULT_ANNOUNCEMENT_STYLE.background);
+  merged.cycleSeconds = Number.isFinite(Number(merged.cycleSeconds))
+    ? clamp(Number(merged.cycleSeconds), 3, 30)
+    : DEFAULT_ANNOUNCEMENT_STYLE.cycleSeconds;
 
   return merged;
 }

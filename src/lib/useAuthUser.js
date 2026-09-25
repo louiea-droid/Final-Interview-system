@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { onAuthChange } from './localAuth';
+import { onAuthChange } from './firebase/auth';
 
 /*
  * The signed-in admin, or null when signed out.

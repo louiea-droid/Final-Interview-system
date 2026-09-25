@@ -2,12 +2,25 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 
 import { DEFAULT_LAYOUT, isVisible, saveDraftLayout } from './boardLayout';
-import { clampTextSize } from './textStyle';
+import { MAX_TEXT_SIZE, MIN_TEXT_SIZE, clampTextSize } from './textStyle';
 import { DEFAULT_EXTRA_TEXT_STYLE, DEFAULT_TEXT_SIZES } from './textStyle';
 import { createShape } from './shapeStyle';
 import { imageFill, normalizeFill, videoFill } from './fill';
 import { storage } from './firebase/storage';
 import { DEFAULT_ANIMATION, normalizeAnimation } from './animationStyle';
+import {
+  BOARD_FRAME,
+  alignDeltas,
+  boundsOf,
+  distributeDeltas,
+  gapsAround,
+  resizeFromHandle,
+  resizeSpan,
+  rotationFromDrag,
+  shiftBounds,
+  snapMove,
+  unionBounds,
+} from './boardTransform';
 
 /* Photos and the logo are capped on the long edge so several fit in the quota. */
 const MAX_IMAGE_EDGE = 800;
@@ -45,6 +58,13 @@ const LIST_BY_KIND = {
   divider: 'dividers',
 };
 
+/* Kinds sized by `scale` × a base width: their node's layout size is pre-scale. */
+const SCALED_KINDS = { logo: true, image: true, video: true };
+
+function clampBoard(value) {
+  return Math.min(100, Math.max(0, value));
+}
+
 /* Undo history: how many steps are kept, and how close together in time
    edits have to be to collapse into a single step - a drag or a slider
    fires dozens of updates a second, and each of those should undo as one
@@ -52,10 +72,8 @@ const LIST_BY_KIND = {
 const HISTORY_LIMIT = 50;
 const HISTORY_BURST_MS = 500;
 
-/* Snapping: how close (in board percent) a drag has to land to a guide
-   before it catches, and the spacing of the grid lines it can snap to. */
-const SNAP_THRESHOLD = 1.2;
-const SNAP_GRID_STEP = 5;
+/* Snapping: how close (in board percent) a drag has to land to a guide before it catches. */
+const SNAP_THRESHOLD = 1;
 
 function clampPercent(value) {
   return Math.min(97, Math.max(3, Number.isFinite(value) ? value : 50));
@@ -74,39 +92,6 @@ function collectPositionedElements(layout) {
     ...layout.shapes.map((item) => ({ ...item, kind: 'shape' })),
     ...layout.dividers.map((item) => ({ kind: 'divider', ...item })),
   ];
-}
-
-/* Guide values a drag on `axis` can snap to: the center, both edges, the
-   grid lines, and every other element's own position - not the element
-   being dragged. */
-function collectSnapTargets(layout, kind, id, axis) {
-  const targets = new Set([3, 50, 97]);
-
-  for (let line = 0; line <= 100; line += SNAP_GRID_STEP) targets.add(line);
-
-  for (const element of collectPositionedElements(layout)) {
-    const isSelf = element.kind === kind && (kind === 'logo' || element.id === id);
-    if (isSelf) continue;
-    targets.add(axis === 'x' ? element.x : element.y);
-  }
-
-  return targets;
-}
-
-/* The closest guide within the threshold, or `value` unchanged. */
-function snapAxis(value, targets, threshold) {
-  let closest = value;
-  let closestDistance = threshold;
-
-  for (const target of targets) {
-    const distance = Math.abs(value - target);
-    if (distance < closestDistance) {
-      closestDistance = distance;
-      closest = target;
-    }
-  }
-
-  return closest;
 }
 
 /* Downscales `file` to a JPEG Blob no wider/taller than MAX_IMAGE_EDGE. */
@@ -250,6 +235,7 @@ export function useBoardLayoutEditor(
     onProgress,
     persist = saveDraftLayout,
     snapEnabled = false,
+    gridSnap = false,
     multiSelected = [],
   } = {}
 ) {
@@ -274,9 +260,9 @@ export function useBoardLayoutEditor(
     latestLayoutRef.current = layout;
   }, [layout]);
 
-  /* Which axis a drag currently reads as centered on - drives the canvas's
-     center guide lines. */
-  const [centerGuide, setCenterGuide] = useState({ x: false, y: false });
+  const NO_GUIDES = { lines: [], gaps: [] };
+  const [guides, setGuides] = useState(NO_GUIDES);
+  const [rotating, setRotating] = useState(null);
 
   function reportError(error) {
     if (onError) onError(error);
@@ -417,37 +403,179 @@ export function useBoardLayoutEditor(
     window.addEventListener('pointerup', up);
   }
 
-  /*
-   * Resizes the candidate board or the announcement strip by dragging its
-   * corner. Width follows the pointer's distance from the box's centre,
-   * doubled because the box is centred on its position; height does the
-   * same where the box has one.
-   */
-  function beginResizeBox(kind) {
-    return (event) => {
-      const box = findElement(latestLayoutRef.current, kind, null);
-      if (box?.locked) return;
+  function surfaceSize() {
+    const surface = boundsRef.current;
+    return surface ? { W: surface.clientWidth, H: surface.clientHeight } : null;
+  }
 
+  /* Size limits in px for a resize, so an anchored drag that hits one
+     doesn't drift (see resizeFromHandle). */
+  function resizeLimits(kind, element, start, W, H) {
+    if (kind === 'shape') return { minW: 0.004 * W, maxW: 2 * W, minH: 0.004 * H, maxH: 2 * H };
+    if (kind === 'candidates' || kind === 'announcements') {
+      return { minW: 0.08 * W, maxW: W, minH: 0.08 * H, maxH: H };
+    }
+    if (kind === 'text') {
+      return {
+        minW: (start.w * MIN_TEXT_SIZE) / element.fontSize,
+        maxW: (start.w * MAX_TEXT_SIZE) / element.fontSize,
+        minH: 1,
+        maxH: Infinity,
+      };
+    }
+    const scale = element.scale ?? 1;
+    return { minW: (start.w * 0.1) / scale, maxW: (start.w * 6) / scale, minH: 1, maxH: Infinity };
+  }
+
+  function sizePatch(kind, element, start, next, W, H) {
+    switch (kind) {
+      case 'shape':
+        return { width: (next.w / W) * 100, height: (next.h / H) * 100 };
+      case 'candidates':
+      case 'announcements':
+        return { width: (next.w / W) * 100, height: (next.h / H) * 100 };
+      case 'text':
+        /*
+         * A corner drag keeps proportions, scaling fontSize by next.w/start.w
+         * - but start.w is the text's drawn width, which wraps at boxWidth
+         * and so can be narrower than it. Leaving boxWidth fixed lets the
+         * next render wrap at a different width than the drag assumed,
+         * sliding the anchor. Scaling boxWidth by the same ratio keeps the
+         * wrap point in step with the font size, so it doesn't reflow.
+         */
+        return {
+          fontSize: clampTextSize((element.fontSize * next.w) / start.w),
+          boxWidth: Math.min(100, Math.max(5, ((element.boxWidth ?? 92) * next.w) / start.w)),
+        };
+      default:
+        return { scale: Math.min(6, Math.max(0.1, ((element.scale ?? 1) * next.w) / start.w)) };
+    }
+  }
+
+  /*
+   * Drags one of an element's handles. Photos, logo, video and text corners
+   * always keep proportions; shapes and boxes do while Shift is held. Alt
+   * resizes from the centre. A text's side handles set its wrap width
+   * (boxWidth) around its centre - its drawn width can be narrower than
+   * boxWidth, so anchoring a side would make the text drift.
+   */
+  function beginHandleResize(kind, id, handle) {
+    return (event) => {
       event.preventDefault();
       event.stopPropagation();
 
-      const hasHeight = box.height !== undefined;
+      const element = findElement(latestLayoutRef.current, kind, id);
+      const size = surfaceSize();
+      const node = nodeFor(kind, id);
+      if (!element || element.locked || !size || !node) return;
+
+      const { W, H } = size;
+      const scale = SCALED_KINDS[kind] ? element.scale ?? 1 : 1;
+      const start = {
+        cx: (element.x / 100) * W,
+        cy: (element.y / 100) * H,
+        w: node.offsetWidth * scale,
+        h: node.offsetHeight * scale,
+        rotation: element.rotation ?? 0,
+      };
+      const textSide = kind === 'text' && handle.y === 0;
+      const alwaysProportional = SCALED_KINDS[kind] || (kind === 'text' && !textSide);
+      const limits = textSide
+        ? { minW: 0.05 * W, maxW: W, minH: 1, maxH: Infinity }
+        : resizeLimits(kind, element, start, W, H);
 
       dragWith((moveEvent, rect) => {
-        const { x, y } = pointToPercent(moveEvent, rect);
+        const pointer = {
+          x: (moveEvent.clientX - rect.left) * (W / rect.width),
+          y: (moveEvent.clientY - rect.top) * (H / rect.height),
+        };
+        const next = resizeFromHandle(start, handle, pointer, {
+          ...limits,
+          keepRatio: alwaysProportional || moveEvent.shiftKey,
+          fromCenter: textSide || moveEvent.altKey,
+        });
+
+        const patch = textSide
+          ? { boxWidth: Math.min(100, Math.max(5, (next.w / W) * 100)) }
+          : {
+              x: clampBoard((next.cx / W) * 100),
+              y: clampBoard((next.cy / H) * 100),
+              ...sizePatch(kind, element, start, next, W, H),
+            };
+
+        commitFrom((current) => patchElement(current, kind, id, patch), { immediate: false });
+      });
+    };
+  }
+
+  /* Drags the round handle above an element; Shift snaps to 15°. */
+  function beginRotate(kind, id) {
+    return (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const element = findElement(latestLayoutRef.current, kind, id);
+      const surface = boundsRef.current;
+      if (!element || element.locked || !surface) return;
+
+      const rect = surface.getBoundingClientRect();
+      const center = {
+        x: rect.left + (element.x / 100) * rect.width,
+        y: rect.top + (element.y / 100) * rect.height,
+      };
+      const startPointer = { x: event.clientX, y: event.clientY };
+      const startRotation = element.rotation ?? 0;
+
+      dragWith(
+        (moveEvent) => {
+          const rotation = rotationFromDrag(
+            startRotation,
+            center,
+            startPointer,
+            { x: moveEvent.clientX, y: moveEvent.clientY },
+            moveEvent.shiftKey
+          );
+          setRotating({ rotation, x: moveEvent.clientX, y: moveEvent.clientY });
+          commitFrom((current) => patchElement(current, kind, id, { rotation }), { immediate: false });
+        },
+        () => setRotating(null)
+      );
+    };
+  }
+
+  /* Drags one end of a divider; the other end stays put unless Alt is held. */
+  function beginDividerResize(id, end) {
+    return (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const divider = findElement(latestLayoutRef.current, 'divider', id);
+      const size = surfaceSize();
+      if (!divider || divider.locked || !size) return;
+
+      const vertical = divider.orientation !== 'horizontal';
+      const extent = vertical ? size.H : size.W;
+      const span = {
+        center: ((vertical ? divider.y : divider.x) / 100) * extent,
+        length: (divider.length / 100) * extent,
+      };
+
+      dragWith((moveEvent, rect) => {
+        const pointer = vertical
+          ? (moveEvent.clientY - rect.top) * (size.H / rect.height)
+          : (moveEvent.clientX - rect.left) * (size.W / rect.width);
+        const next = resizeSpan(span, end, pointer, {
+          fromCenter: moveEvent.altKey,
+          min: 0.02 * extent,
+          max: extent,
+        });
 
         commitFrom(
-          (current) => {
-            const target = current[kind];
-            const size = (value) => Math.min(100, Math.max(8, value));
-            const patch = { width: size(Math.abs(x - target.x) * 2) };
-
-            if (hasHeight) {
-              patch.height = size(Math.abs(y - target.y) * 2);
-            }
-
-            return patchElement(current, kind, null, patch);
-          },
+          (current) =>
+            patchElement(current, 'divider', id, {
+              [vertical ? 'y' : 'x']: clampBoard((next.center / extent) * 100),
+              length: (next.length / extent) * 100,
+            }),
           { immediate: false }
         );
       });
@@ -461,185 +589,64 @@ export function useBoardLayoutEditor(
 
       event.preventDefault();
 
-      /*
-       * Two ways a drag can carry more than the one element it started on:
-       * a permanent group (groupId, set by Group Selected) always moves
-       * together, and takes priority - but even without ever grouping them,
-       * dragging any one member of the *current* multi-selection (however
-       * it was made - shift-click or box select) moves the rest of that
-       * selection too, for exactly as long as it stays selected.
-       */
-      const groupId = element?.groupId;
+      /* What moves: the element's whole group, or the current multi-selection
+         it belongs to, or just itself - always by the pointer's delta, so the
+         grab point stays under the cursor. */
       const isInMultiSelection =
-        multiSelected.length > 1 && multiSelected.some((item) => item.kind === kind && item.id === id);
+        multiSelected.length > 1 && multiSelected.some((item) => item.kind === kind && (item.id ?? null) === (id ?? null));
+      const members = (isInMultiSelection ? selectionUnits(multiSelected) : selectionUnits([{ kind, id }])).flat();
+      if (!members.length) return;
 
-      const groupStart = groupId
-        ? collectPositionedElements(latestLayoutRef.current).filter((item) => item.groupId === groupId)
-        : isInMultiSelection
-          ? collectPositionedElements(latestLayoutRef.current).filter((item) =>
-              multiSelected.some((selected) => selected.kind === item.kind && selected.id === item.id)
-            )
-          : null;
-      let dragOrigin = null;
+      const start = members.map((m) => ({ ...m, ...pick(findElement(latestLayoutRef.current, m.kind, m.id)) }));
+      const isMember = (e) => members.some((m) => m.kind === e.kind && (m.id ?? null) === (asItem(e).id ?? null));
+
+      const movingParts = members.map((m) => measure(m.kind, m.id)).filter(Boolean);
+      const movingStart = movingParts.length ? unionBounds(movingParts) : null;
+      const others = collectPositionedElements(latestLayoutRef.current)
+        .filter((e) => isVisible(e) && !isMember(e))
+        .map((e) => measure(e.kind, asItem(e).id))
+        .filter(Boolean);
+
+      /* Measured from the press itself, not the first move - otherwise that
+         first step of movement is lost. */
+      const startRect = boundsRef.current?.getBoundingClientRect();
+      if (!startRect) return;
+      const origin = {
+        x: ((event.clientX - startRect.left) / startRect.width) * 100,
+        y: ((event.clientY - startRect.top) / startRect.height) * 100,
+      };
 
       dragWith(
         (moveEvent, rect) => {
-          let { x, y } = pointToPercent(moveEvent, rect);
+          const pointer = {
+            x: ((moveEvent.clientX - rect.left) / rect.width) * 100,
+            y: ((moveEvent.clientY - rect.top) / rect.height) * 100,
+          };
+          let dx = pointer.x - origin.x;
+          let dy = pointer.y - origin.y;
 
-          if (groupStart) {
-            /* A grouped element moves by the same delta as every other
-               member, rather than snapping its own center to the pointer. */
-            dragOrigin ??= { x, y };
-            const dx = x - dragOrigin.x;
-            const dy = y - dragOrigin.y;
-
-            setCenterGuide({ x: false, y: false });
-            commitFrom(
-              (current) => {
-                let next = current;
-                for (const member of groupStart) {
-                  next = patchElement(next, member.kind, member.id, {
-                    x: clampPercent(member.x + dx),
-                    y: clampPercent(member.y + dy),
-                  });
-                }
-                return next;
-              },
-              { immediate: false }
-            );
-            return;
+          const snapping = snapEnabled && !(moveEvent.ctrlKey || moveEvent.metaKey) && movingStart;
+          if (snapping) {
+            const moved = shiftBounds(movingStart, dx, dy);
+            const snap = snapMove(moved, others, { threshold: SNAP_THRESHOLD, grid: gridSnap ? 5 : 0 });
+            dx += snap.dx;
+            dy += snap.dy;
+            setGuides({ lines: snap.guides, gaps: gapsAround(shiftBounds(moved, snap.dx, snap.dy), others) });
+          } else {
+            setGuides(NO_GUIDES);
           }
 
-          if (snapEnabled) {
-            const current = latestLayoutRef.current;
-            x = clampPercent(snapAxis(x, collectSnapTargets(current, kind, id, 'x'), SNAP_THRESHOLD));
-            y = clampPercent(snapAxis(y, collectSnapTargets(current, kind, id, 'y'), SNAP_THRESHOLD));
-          }
-
-          setCenterGuide({ x: Math.abs(x - 50) < 0.5, y: Math.abs(y - 50) < 0.5 });
-          commitFrom((current) => patchElement(current, kind, id, { x, y }), {
-            immediate: false,
-          });
+          commitFrom(
+            (current) =>
+              start.reduce(
+                (next, m) => patchElement(next, m.kind, m.id, { x: clampBoard(m.x + dx), y: clampBoard(m.y + dy) }),
+                current
+              ),
+            { immediate: false }
+          );
         },
-        () => setCenterGuide({ x: false, y: false })
+        () => setGuides(NO_GUIDES)
       );
-    };
-  }
-
-  /*
-   * Resizing a shape holds its centre still, so the corner handle stays under
-   * the cursor: half the box is the distance from the centre to the pointer.
-   */
-  /*
-   * Resizes the logo or a photo by dragging its corner. Both are sized as a
-   * multiplier of a base width, so the drag reads the half-width the pointer
-   * is asking for and divides by the base to get the multiplier.
-   */
-  function beginScaleResize(kind, id, baseWidth) {
-    return (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const element = findElement(latestLayoutRef.current, kind, id);
-      if (!element || element.locked) return;
-
-      dragWith((moveEvent, rect) => {
-        const centerX = rect.left + (element.x / 100) * rect.width;
-        const halfWidth = (Math.abs(moveEvent.clientX - centerX) * 100) / rect.width;
-
-        commitFrom(
-          (current) =>
-            patchElement(current, kind, id, {
-              scale: Math.min(6, Math.max(0.1, (halfWidth * 2) / baseWidth)),
-            }),
-          { immediate: false }
-        );
-      });
-    };
-  }
-
-  /*
-   * Resizes a text block by dragging its corner. Type is sized against the
-   * board's height, so the drag measures vertically from the block's centre.
-   */
-  /*
-   * Resizes a text by dragging its corner handle. The size moves in
-   * proportion to how far the handle is dragged from where it was grabbed,
-   * rather than being recomputed from the handle's absolute distance to the
-   * text's centre. Two things were wrong with the latter:
-   *
-   * - it measured that distance with Math.abs, so dragging the handle in
-   *   past the centre to shrink the text turned around at the centre and
-   *   grew it again - pushing the size down made it jump up instead;
-   * - it read the distance as half the font size, but a text's box is as
-   *   tall as its line height times its number of lines, so grabbing the
-   *   handle on a two-line heading doubled its size before the pointer had
-   *   moved at all.
-   *
-   * Working from the grab point fixes both: nothing changes until the
-   * pointer moves, and the size only ever follows the direction of the drag.
-   */
-  function beginFontResize(id) {
-    return (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const text = findElement(latestLayoutRef.current, 'text', id);
-      if (!text || text.locked) return;
-
-      const startRect = boundsRef.current?.getBoundingClientRect();
-      if (!startRect) return;
-
-      const centerY = startRect.top + (text.y / 100) * startRect.height;
-      /* which side of the centre the handle was grabbed on, so "away from
-         the centre" means bigger whichever side that is */
-      const direction = event.clientY < centerY ? -1 : 1;
-      /* guarded against zero: a handle grabbed exactly on the centre would
-         otherwise make every later position an infinite multiple of it */
-      const startOffset = Math.max(Math.abs(event.clientY - centerY), 4);
-      const startSize = text.fontSize;
-
-      dragWith((moveEvent, rect) => {
-        const center = rect.top + (text.y / 100) * rect.height;
-        const offset = (moveEvent.clientY - center) * direction;
-
-        commitFrom(
-          (current) =>
-            patchElement(current, 'text', id, {
-              /* clamped at zero rather than mirrored: dragging past the
-                 centre holds the text at its smallest instead of growing */
-              fontSize: clampTextSize(startSize * Math.max(offset / startOffset, 0)),
-            }),
-          { immediate: false }
-        );
-      });
-    };
-  }
-
-  function beginResize(id) {
-    return (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const shape = findElement(latestLayoutRef.current, 'shape', id);
-      if (!shape || shape.locked) return;
-
-      dragWith((moveEvent, rect) => {
-        const centerX = rect.left + (shape.x / 100) * rect.width;
-        const centerY = rect.top + (shape.y / 100) * rect.height;
-
-        const width = (Math.abs(moveEvent.clientX - centerX) * 2 * 100) / rect.width;
-        const height = (Math.abs(moveEvent.clientY - centerY) * 2 * 100) / rect.height;
-
-        commitFrom(
-          (current) =>
-            patchElement(current, 'shape', id, {
-              width: Math.min(200, Math.max(0.4, width)),
-              height: Math.min(200, Math.max(0.4, height)),
-            }),
-          { immediate: false }
-        );
-      });
     };
   }
 
@@ -703,6 +710,69 @@ export function useBoardLayoutEditor(
     });
   }
 
+  /*
+   * Moves every layer in `selection` one step (or all the way) in the same
+   * direction as moveLayer, as one block: calling moveLayer once per item
+   * is wrong for 'up'/'down' - two adjacent selected items just swap past
+   * each other and net nothing (see 'up' twice on an [X, A, B, Y] selection
+   * of [A, B]: A passes B, then B passes back past A). Selected items are
+   * processed front-most first for 'up' and back-most first for 'down', so
+   * each one only ever swaps past a non-selected neighbour, never doubles
+   * back across another item in the same selection.
+   */
+  function moveLayers(selection, direction) {
+    commitFrom((current) => {
+      const order = [...current.layerOrder];
+      const keys = new Set(selection.map((item) => layerKey(item)));
+      const isSelected = (entry) => keys.has(layerKey(entry));
+
+      if (direction === 'front' || direction === 'back') {
+        const picked = order.filter(isSelected);
+        const rest = order.filter((entry) => !isSelected(entry));
+        if (!picked.length) return current;
+        return { ...current, layerOrder: direction === 'front' ? [...rest, ...picked] : [...picked, ...rest] };
+      }
+
+      const step = direction === 'up' ? 1 : -1;
+      const entries = order.filter(isSelected);
+      if (direction === 'up') entries.reverse(); // front-most first
+
+      for (const entry of entries) {
+        const index = order.indexOf(entry);
+        const swapWith = index + step;
+        if (swapWith < 0 || swapWith >= order.length || isSelected(order[swapWith])) continue;
+        [order[index], order[swapWith]] = [order[swapWith], order[index]];
+      }
+
+      return { ...current, layerOrder: order };
+    });
+  }
+
+  /*
+   * Drops a dragged layer into the position a target layer currently
+   * occupies in layerOrder - used by the layers panel's drag-and-drop, as
+   * an alternative to stepping through moveLayer one swap at a time.
+   */
+  function reorderLayer(draggedKind, draggedId, targetKind, targetId) {
+    commitFrom((current) => {
+      const order = current.layerOrder;
+      const draggedKey = layerKey({ kind: draggedKind, id: draggedId });
+      const targetKey = layerKey({ kind: targetKind, id: targetId });
+
+      const draggedIndex = order.findIndex((entry) => layerKey(entry) === draggedKey);
+      const targetIndex = order.findIndex((entry) => layerKey(entry) === targetKey);
+
+      if (draggedIndex < 0 || targetIndex < 0 || draggedIndex === targetIndex) return current;
+
+      const nextOrder = [...order];
+      const [draggedEntry] = nextOrder.splice(draggedIndex, 1);
+      const insertIndex = targetIndex > draggedIndex ? targetIndex - 1 : targetIndex;
+      nextOrder.splice(insertIndex, 0, draggedEntry);
+
+      return { ...current, layerOrder: nextOrder };
+    });
+  }
+
   function setLocked(kind, id, locked) {
     updateElement(kind, id, { locked });
   }
@@ -760,37 +830,6 @@ export function useBoardLayoutEditor(
     }));
 
     return id;
-  }
-
-  /* Drag a divider's end to set how long it is. */
-  function beginDividerResize(id) {
-    return (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const divider = findElement(latestLayoutRef.current, 'divider', id);
-      if (!divider || divider.locked) return;
-
-      dragWith((moveEvent, rect) => {
-        const vertical = divider.orientation !== 'horizontal';
-
-        const center = vertical
-          ? rect.top + (divider.y / 100) * rect.height
-          : rect.left + (divider.x / 100) * rect.width;
-        const pointer = vertical ? moveEvent.clientY : moveEvent.clientX;
-        const extent = vertical ? rect.height : rect.width;
-
-        const length = (Math.abs(pointer - center) * 2 * 100) / extent;
-
-        commitFrom(
-          (current) =>
-            patchElement(current, 'divider', id, {
-              length: Math.min(100, Math.max(2, length)),
-            }),
-          { immediate: false }
-        );
-      });
-    };
   }
 
   /*
@@ -1047,6 +1086,10 @@ export function useBoardLayoutEditor(
               x: 50,
               y: 50,
               fontSize: DEFAULT_TEXT_SIZES.extra,
+              boxWidth: 92, // normalizeText's own default - set here too, so a
+              // corner resize on a text that hasn't been saved yet (and so
+              // hasn't been through that normalizer) has a real number to
+              // scale rather than reading undefined.
               visible: true,
               bulletList: false,
               style: { ...DEFAULT_EXTRA_TEXT_STYLE },
@@ -1241,17 +1284,234 @@ export function useBoardLayoutEditor(
     commitFrom(() => nextLayout);
   }
 
+  function nodeFor(kind, id) {
+    const surface = boundsRef.current;
+    if (!surface) return null;
+    return surface.querySelector(
+      id ? `[data-vb-kind="${kind}"][data-vb-id="${id}"]` : `[data-vb-kind="${kind}"]`
+    );
+  }
+
+  /* An element's board-% bounds as drawn, or null when it isn't on the canvas.
+     Layout sizes (offsetWidth) rather than getBoundingClientRect, so a
+     pulsing or bouncing animation can't make the measurement wobble. */
+  function measure(kind, id) {
+    const surface = boundsRef.current;
+    const node = nodeFor(kind, id);
+    const element = findElement(latestLayoutRef.current, kind, id);
+    if (!surface || !node || !element) return null;
+
+    const sized = node.querySelector(':scope > .vb-divider-line') ?? node;
+    const scale = SCALED_KINDS[kind] ? element.scale ?? 1 : 1;
+
+    return boundsOf(
+      {
+        x: element.x,
+        y: element.y,
+        wPx: sized.offsetWidth * scale,
+        hPx: sized.offsetHeight * scale,
+        rotation: element.rotation ?? 0,
+      },
+      { W: surface.clientWidth, H: surface.clientHeight }
+    );
+  }
+
+  function pick(element) {
+    return { x: element.x, y: element.y };
+  }
+
+  function asItem(element) {
+    return { kind: element.kind, id: LIST_BY_KIND[element.kind] ? element.id : null };
+  }
+
+  /* Each selected element widened to its whole group, so a group moves as
+     one piece. Locked elements drop out. */
+  function selectionUnits(selection) {
+    const all = collectPositionedElements(latestLayoutRef.current);
+    const seenGroups = new Set();
+    const units = [];
+
+    for (const item of selection) {
+      const element = findElement(latestLayoutRef.current, item.kind, item.id);
+      if (!element || element.locked) continue;
+
+      if (element.groupId) {
+        if (seenGroups.has(element.groupId)) continue;
+        seenGroups.add(element.groupId);
+        units.push(all.filter((e) => e.groupId === element.groupId && !e.locked).map(asItem));
+      } else {
+        units.push([{ kind: item.kind, id: item.id ?? null }]);
+      }
+    }
+
+    return units;
+  }
+
+  function moveUnits(units, deltas) {
+    commitFrom((current) => {
+      let next = current;
+      units.forEach((unit, index) => {
+        const { dx, dy } = deltas[index];
+        if (!dx && !dy) return;
+        for (const member of unit) {
+          const element = findElement(next, member.kind, member.id);
+          next = patchElement(next, member.kind, member.id, {
+            x: clampBoard(element.x + dx),
+            y: clampBoard(element.y + dy),
+          });
+        }
+      });
+      return next;
+    });
+  }
+
+  function measuredUnits(selection) {
+    return selectionUnits(selection)
+      .map((unit) => ({ unit, parts: unit.map((m) => measure(m.kind, m.id)).filter(Boolean) }))
+      .filter(({ parts }) => parts.length)
+      .map(({ unit, parts }) => ({ unit, bounds: unionBounds(parts) }));
+  }
+
+  function alignSelection(selection, edge) {
+    const measured = measuredUnits(selection);
+    if (!measured.length) return;
+    const bounds = measured.map((m) => m.bounds);
+    const frame = measured.length === 1 ? BOARD_FRAME : unionBounds(bounds);
+    moveUnits(measured.map((m) => m.unit), alignDeltas(bounds, edge, frame));
+  }
+
+  function distributeSelection(selection, axis) {
+    const measured = measuredUnits(selection);
+    if (measured.length < 3) return;
+    moveUnits(measured.map((m) => m.unit), distributeDeltas(measured.map((m) => m.bounds), axis));
+  }
+
+  function nudgeSelection(selection, dx, dy) {
+    const units = selectionUnits(selection);
+    moveUnits(units, units.map(() => ({ dx, dy })));
+  }
+
+  function removeMany(selection) {
+    const counts = { removed: 0, hidden: 0, locked: 0 };
+
+    commitFrom((current) => {
+      let next = current;
+      for (const { kind, id } of selection) {
+        const element = findElement(next, kind, id);
+        if (!element) continue;
+        if (element.locked) {
+          counts.locked += 1;
+          continue;
+        }
+        const list = LIST_BY_KIND[kind];
+        if (!list) {
+          next = patchElement(next, kind, id, { visible: false });
+          counts.hidden += 1;
+          continue;
+        }
+        next = removeLayer({ ...next, [list]: next[list].filter((item) => item.id !== id) }, kind, id);
+        counts.removed += 1;
+      }
+      return next;
+    });
+
+    return counts;
+  }
+
+  function patchSelection(selection, patch) {
+    commitFrom((current) =>
+      selection.reduce((next, { kind, id }) => patchElement(next, kind, id, patch), current)
+    );
+  }
+
+  function hideMany(selection) {
+    patchSelection(
+      selection.filter(({ kind, id }) => !findElement(latestLayoutRef.current, kind, id)?.locked),
+      { visible: false }
+    );
+  }
+
+  function setLockedMany(selection, locked) {
+    patchSelection(selection, { locked });
+  }
+
+  /* Detached copies for the clipboard - pasting works after the originals
+     are gone. One-of-a-kind elements (logo, boxes) can't be copied. */
+  function snapshotElements(selection) {
+    return selection
+      .filter(({ kind }) => LIST_BY_KIND[kind])
+      .map(({ kind, id }) => ({ kind, element: findElement(latestLayoutRef.current, kind, id) }))
+      .filter(({ element }) => element)
+      .map(({ kind, element }) => ({ kind, element: structuredClone(element) }));
+  }
+
+  /* Pastes copies offset down-right. Copies that shared a group keep a new
+     group of their own; a lone group member pastes ungrouped. */
+  function pasteSnapshots(snapshots) {
+    const pasted = [];
+    const groupCounts = new Map();
+    for (const { element } of snapshots) {
+      if (element.groupId) groupCounts.set(element.groupId, (groupCounts.get(element.groupId) ?? 0) + 1);
+    }
+    const newGroups = new Map();
+
+    commitFrom((current) => {
+      let next = current;
+      for (const { kind, element } of snapshots) {
+        const list = LIST_BY_KIND[kind];
+        const copy = {
+          ...structuredClone(element),
+          id: crypto.randomUUID(),
+          x: clampPercent(element.x + 3),
+          y: clampPercent(element.y + 3),
+          locked: false,
+        };
+        delete copy.groupId;
+        if (element.groupId && groupCounts.get(element.groupId) > 1) {
+          if (!newGroups.has(element.groupId)) newGroups.set(element.groupId, crypto.randomUUID());
+          copy.groupId = newGroups.get(element.groupId);
+        }
+        next = appendLayer({ ...next, [list]: [...next[list], copy] }, kind, copy.id);
+        pasted.push({ kind, id: copy.id });
+      }
+      return next;
+    });
+
+    return pasted;
+  }
+
+  function duplicateMany(selection) {
+    const snapshots = snapshotElements(selection);
+    return snapshots.length ? pasteSnapshots(snapshots) : [];
+  }
+
+  function selectableElements() {
+    return collectPositionedElements(latestLayoutRef.current)
+      .filter((element) => isVisible(element) && !element.locked)
+      .map(asItem);
+  }
+
   return {
     undo,
+    measure,
+    alignSelection,
+    distributeSelection,
+    nudgeSelection,
+    removeMany,
+    hideMany,
+    setLockedMany,
+    snapshotElements,
+    pasteSnapshots,
+    duplicateMany,
+    selectableElements,
     redo,
     canUndo: historyRef.current.undo.length > 0,
     canRedo: historyRef.current.redo.length > 0,
-    centerGuide,
+    guides,
     beginDrag,
-    beginResizeBox,
-    beginResize,
-    beginScaleResize,
-    beginFontResize,
+    beginHandleResize,
+    beginRotate,
+    rotating,
     duplicateElement,
     removeElement,
     addDivider,
@@ -1289,6 +1549,8 @@ export function useBoardLayoutEditor(
     resetLayout,
     replaceLayout,
     moveLayer,
+    moveLayers,
+    reorderLayer,
     setLocked,
     groupElements,
     ungroup,

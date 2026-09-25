@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { UserRound } from 'lucide-react';
 
+import CandidatePhoto from './CandidatePhoto';
 import { getStatusPillClass } from '../lib/candidateStatus';
 import { isShownOnBoard } from '../lib/candidateVisibility';
 
@@ -76,8 +77,9 @@ export default function CandidateDetailsModal({
               onClick={() => setPhotoZoomed(true)}
               aria-label={`Preview ${candidate.name}'s photo at full size`}
             >
-              <img
-                src={candidate.photo_url}
+              <CandidatePhoto
+                url={candidate.photo_url}
+                crop={candidate.photo_crop}
                 alt={candidate.name}
                 className="candidate-details-photo"
               />

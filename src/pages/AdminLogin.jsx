@@ -1,18 +1,15 @@
 import { useRef, useState } from 'react';
-import { Eye, EyeOff, Lock, User } from 'lucide-react';
+import { Eye, EyeOff, Lock, Mail } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useToast } from '../components/ToastProvider';
-import { signIn } from '../lib/localAuth';
+import { signIn } from '../lib/firebase/auth';
 
-/*
- * Signs in against the ADMIN_USERNAME / ADMIN_PASSWORD in .env.local.
- */
 export default function AdminLoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const showToast = useToast();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -35,13 +32,8 @@ export default function AdminLoginPage() {
     setSubmitting(true);
 
     try {
-      await signIn(username, password);
+      await signIn(email, password);
     } catch (error) {
-      /*
-       * signIn already declines to say which of the two was wrong; its
-       * message is shown as-is so a missing configuration reads as such
-       * rather than as a rejected password.
-       */
       showToast.error(error.message);
       inFlight.current = false;
       setSubmitting(false);
@@ -95,25 +87,25 @@ export default function AdminLoginPage() {
           </p>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="admin-username">
-              Username
+            <label className="form-label" htmlFor="admin-email">
+              Email
             </label>
 
             <div className="login-field">
               <span className="login-field-icon">
-                <User size={17} />
+                <Mail size={17} />
               </span>
 
               <input
-                id="admin-username"
+                id="admin-email"
                 className="form-input"
-                type="text"
+                type="email"
                 required
                 autoFocus
                 autoComplete="username"
                 disabled={submitting}
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
               />
             </div>
           </div>

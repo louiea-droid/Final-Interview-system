@@ -10,3 +10,5 @@ next-env.d.ts
 # build output
 dist/
 dist-test/
+# Playwright CLI output (may contain credentials)
+.playwright-cli/

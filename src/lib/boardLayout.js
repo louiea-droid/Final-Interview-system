@@ -121,6 +121,7 @@ export const DEFAULT_LAYOUT = {
       fontSize: DEFAULT_TEXT_SIZES.heading,
       visible: true,
       style: DEFAULT_HEADING_STYLE,
+      animation: DEFAULT_ANIMATION,
     },
     {
       id: 'closing',
@@ -130,6 +131,7 @@ export const DEFAULT_LAYOUT = {
       fontSize: DEFAULT_TEXT_SIZES.closing,
       visible: true,
       style: DEFAULT_CLOSING_STYLE,
+      animation: DEFAULT_ANIMATION,
     },
   ],
   images: [], // { id, url, x, y, scale, visible, locked?, groupId? }
@@ -171,6 +173,7 @@ function normalizeText(text, base = DEFAULT_EXTRA_TEXT_STYLE, baseSize = DEFAULT
     locked: text.locked === true,
     /* How wide the text may run before wrapping, as a share of the board. */
     boxWidth: clamp(text.boxWidth ?? 92, 5, 100),
+    rotation: Number.isFinite(text.rotation) ? clamp(text.rotation, -180, 180) : 0,
     /* Each non-empty line becomes its own bulleted item instead of one
        wrapped block of running text - for a list like "Our Brands". */
     bulletList: text.bulletList === true,

@@ -1965,6 +1965,34 @@ button {
   font-size: 12px;
 }
 
+.visibility-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+
+  margin-bottom: 12px;
+  padding: 8px 11px;
+
+  border: 1px solid rgba(215, 183, 91, 0.3);
+  border-radius: 6px;
+  background: rgba(215, 183, 91, 0.08);
+
+  color: var(--yellow);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.visibility-alert svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.visibility-alert a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .edit-button,
 .delete-button {
   width: 27px;
@@ -2478,6 +2506,49 @@ svg {
 
 .candidate-date-filter:focus {
   border-color: rgba(163, 52, 49, 0.8);
+}
+
+.table-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  min-width: 170px;
+  padding: 0 10px;
+
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  outline: none;
+
+  color: #8b8b8b;
+  background: #2a2a2a;
+
+  transition: border-color 0.18s ease;
+}
+
+.table-search:focus-within {
+  border-color: rgba(163, 52, 49, 0.8);
+}
+
+.table-search-input {
+  flex: 1;
+  min-width: 0;
+
+  border: none;
+  outline: none;
+  background: transparent;
+
+  color: #d3d3d3;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.table-search-input::placeholder {
+  color: #6f6f6f;
+}
+
+.table-panel > .table-search {
+  margin-bottom: 12px;
 }
 
 .candidate-date-groups {
@@ -3052,10 +3123,9 @@ svg {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.record-edit-photo-preview img {
+.record-edit-photo-preview [role="img"] {
   width: 100%;
   height: 100%;
-  object-fit: cover;
 }
 
 .record-edit-photo-preview-button {
@@ -3870,9 +3940,18 @@ svg {
 
 .admin-layout.light-mode .candidate-date-filter,
 .admin-layout.light-mode .status-select,
-.admin-layout.light-mode .direct-edit-status {
+.admin-layout.light-mode .direct-edit-status,
+.admin-layout.light-mode .table-search {
   color: #352525;
   background: #fffdfa;
+}
+
+.admin-layout.light-mode .table-search-input {
+  color: #352525;
+}
+
+.admin-layout.light-mode .table-search-input::placeholder {
+  color: #a08f8f;
 }
 
 .admin-layout.light-mode .secondary-button,
@@ -4191,7 +4270,7 @@ svg {
 /* ---------------- templates ---------------- */
 
 .vb-template-popup {
-  width: min(100%, 440px);
+  width: min(100%, 560px);
 }
 
 .vb-template-list {
@@ -4206,7 +4285,6 @@ svg {
 .vb-template-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
 
   padding: 9px 11px;
@@ -4217,6 +4295,7 @@ svg {
 
 .vb-template-row-info {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -4240,6 +4319,57 @@ svg {
   flex-shrink: 0;
   align-items: center;
   gap: 6px;
+}
+
+.vb-template-preview {
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+
+  width: 96px;
+  aspect-ratio: 16 / 9;
+
+  border: 1px solid var(--border-light);
+  border-radius: 5px;
+  background: linear-gradient(160deg, #1a0605, #2a0d0b);
+}
+
+.vb-template-preview-empty {
+  background: #1c1c1c;
+}
+
+.vb-template-preview-shape {
+  position: absolute;
+}
+
+.vb-template-preview-box {
+  position: absolute;
+  border: 1px dashed rgba(215, 183, 91, 0.55);
+  border-radius: 2px;
+  background: rgba(215, 183, 91, 0.08);
+}
+
+.vb-template-preview-box-announcements {
+  border-color: rgba(139, 91, 245, 0.55);
+  background: rgba(139, 91, 245, 0.1);
+}
+
+.vb-template-preview-logo {
+  position: absolute;
+  max-width: none;
+}
+
+.vb-template-preview-text {
+  position: absolute;
+  overflow: hidden;
+  max-width: 90cqw;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vb-template-preview-divider {
+  position: absolute;
+  background: rgba(215, 183, 91, 0.4);
 }
 
 /* ---------------- elements column: rail + panel ---------------- */
@@ -4436,10 +4566,32 @@ svg {
   gap: 2px;
 
   border-radius: 7px;
+  border-top: 1px solid transparent;
+
+  cursor: grab;
 }
 
 .vb-layer-row.active {
   background: rgba(212, 93, 89, 0.16);
+}
+
+.vb-layer-row.dragging {
+  opacity: 0.4;
+}
+
+.vb-layer-row.drop-target {
+  border-top-color: var(--red-status);
+}
+
+.vb-layer-grip {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+
+  width: 14px;
+
+  color: #5f5f5f;
 }
 
 .vb-layer-row.active .vb-layer-name {
@@ -4480,8 +4632,8 @@ svg {
   align-items: center;
   gap: 6px;
 
-  height: 26px;
-  padding: 0 4px;
+  min-height: 26px;
+  padding: 3px 4px;
 
   border: 0;
   border-radius: 5px;
@@ -4495,10 +4647,14 @@ svg {
   cursor: pointer;
 }
 
+.vb-layer-name svg {
+  flex-shrink: 0;
+}
+
 .vb-layer-name span {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: break-word;
+  white-space: normal;
+  line-height: 1.25;
 }
 
 .vb-layer-name:hover {
@@ -4929,30 +5085,6 @@ svg {
   outline-offset: 2px;
 }
 
-/* center alignment guides, shown while a drag lands exactly on 50% */
-.vb-guide {
-  position: absolute;
-  pointer-events: none;
-  z-index: 6;
-  background: #6ea8fe;
-}
-
-.vb-guide-vertical {
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  transform: translateX(-50%);
-}
-
-.vb-guide-horizontal {
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 1px;
-  transform: translateY(-50%);
-}
-
 /* Box select mode: a crosshair cursor over empty canvas says a drag there
    starts a marquee now, not just a deselect. */
 .vb-canvas-surface.vb-box-select-mode {
@@ -4978,21 +5110,18 @@ svg {
   pointer-events: none;
 }
 
-.vb-shape-resize {
-  position: absolute;
-  right: -5px;
-  bottom: -5px;
-
-  width: 11px;
-  height: 11px;
-
-  border-radius: 2px;
-  border: 1.5px solid #0b0102;
-
-  background: #f4ca5d;
-
-  cursor: nwse-resize;
-  touch-action: none;
+/*
+ * Holds a shape's fill/border/clip-path (a triangle's clip-path in
+ * particular), kept off the .vb-shape node itself: clip-path also clips
+ * descendants' hit-testing, which would make SelectionHandles - a sibling,
+ * not a child of this - unclickable outside the clipped silhouette.
+ */
+.vb-shape-fill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
 
 /* ---------------- properties column ---------------- */
@@ -5695,4 +5824,196 @@ svg {
   width: 100%;
   margin: 2px 0 4px;
   accent-color: #b62220;
+}
+
+/* ---------------- align bar and multi-selection actions ---------------- */
+
+.vb-align-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+}
+
+.vb-align-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.vb-align-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.vb-align-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border-light);
+}
+
+.vb-multi-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.vb-multi-actions > button {
+  justify-content: center;
+}
+
+.vb-danger-button {
+  color: #f08c88;
+}
+
+/* ---------------- smart guides ---------------- */
+
+.vb-smart-guide {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  background: #ff3ea5;
+}
+
+.vb-smart-guide.is-x {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.vb-smart-guide.is-y {
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+.vb-gap {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vb-gap.is-x {
+  height: 0;
+  border-top: 1px dashed #ff3ea5;
+}
+
+.vb-gap.is-y {
+  width: 0;
+  border-left: 1px dashed #ff3ea5;
+}
+
+.vb-gap > span {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #ff3ea5;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* ---------------- selection handles ---------------- */
+
+.vb-handles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.vb-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border: 1.5px solid #0b0102;
+  border-radius: 2px;
+  background: #f4ca5d;
+  pointer-events: auto;
+  touch-action: none;
+  transform: scale(var(--vb-handle-scale, 1));
+}
+
+.vb-handle-nw { left: 0; top: 0; }
+.vb-handle-n { left: 50%; top: 0; }
+.vb-handle-ne { left: 100%; top: 0; }
+.vb-handle-e { left: 100%; top: 50%; }
+.vb-handle-se { left: 100%; top: 100%; }
+.vb-handle-s { left: 50%; top: 100%; }
+.vb-handle-sw { left: 0; top: 100%; }
+.vb-handle-w { left: 0; top: 50%; }
+
+.vb-rotate-handle {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border: 1.5px solid #f4ca5d;
+  border-radius: 50%;
+  background: #fff;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+  transform: translateY(calc(-24px * var(--vb-handle-scale, 1))) scale(var(--vb-handle-scale, 1));
+}
+
+.vb-rotate-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 1px;
+  height: 10px;
+  background: #f4ca5d;
+}
+
+.vb-rotate-tooltip {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #111;
+  color: #fff;
+  font-size: 11px;
+}
+
+/* ---------------- on-canvas text editing ---------------- */
+
+.vb-text-editing {
+  position: absolute;
+  z-index: 8;
+}
+
+.vb-text-editor {
+  field-sizing: content;
+  min-width: 2ch;
+  padding: 3px;
+  border: 1px solid #6ea8fe;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  outline: none;
+  resize: none;
+  overflow: hidden;
+}
+
+.vb-canvas-stage.is-panning,
+.vb-canvas-stage.is-panning * {
+  cursor: grab !important;
 }

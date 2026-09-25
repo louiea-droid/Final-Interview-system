@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, KeyRound, LogOut, MonitorCog, Save } from 'lucide-react';
 
-import { currentUser, signOut } from '../lib/localAuth';
+import { currentUser, signOut } from '../lib/firebase/auth';
 
 const defaultSettings = {
   lightMode: false,
@@ -118,7 +118,7 @@ export default function SettingsPage() {
         <div className="form-container settings-options">
           <div className="settings-option">
             <span>
-              <strong>Signed in as {user?.username ?? 'Admin'}</strong>
+              <strong>Signed in as {user?.email ?? 'Admin'}</strong>
               <small>
                 This sign-in is a convenience, not a security boundary - the credentials it
                 checks against ship in the app itself.

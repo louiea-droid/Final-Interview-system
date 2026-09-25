@@ -1,4 +1,5 @@
 import AutoFitText from "./AutoFitText";
+import CandidatePhoto from "./CandidatePhoto";
 
 /*
  * The candidate board's contents: an empty-state message, or the looping
@@ -55,9 +56,12 @@ function CandidateCard({ candidate, lightMode }) {
         `}
       >
         {candidate.photo_url && (
-          <div
-            className="absolute inset-0 bg-cover bg-top bg-no-repeat"
-            style={{ backgroundImage: `url("${candidate.photo_url}")` }}
+          <CandidatePhoto
+            url={candidate.photo_url}
+            crop={candidate.photo_crop}
+            alt={candidate.name}
+            position="top"
+            className="absolute inset-0"
           />
         )}
       </div>

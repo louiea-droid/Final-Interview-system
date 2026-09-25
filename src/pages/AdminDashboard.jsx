@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  AlertTriangle,
   CalendarClock,
   CalendarDays,
   Clock3,
@@ -29,6 +30,7 @@ import { isShownOnBoard as isAnnouncementShownOnBoard, isUpcoming } from '../lib
 import { isVisible, subscribeBoardLayout } from '../lib/boardLayout';
 import { isCarousel } from '../lib/shapeStyle';
 import CandidateDetailsModal from '../components/CandidateDetailsModal';
+import CandidatePhoto from '../components/CandidatePhoto';
 import TablePagination from '../components/TablePagination';
 import { useToast } from '../components/ToastProvider';
 
@@ -427,6 +429,17 @@ export default function AdminPage() {
               {currentAnnouncement ? 'Currently on the visual board' : 'Nothing showing on the visual board'}
             </div>
 
+            {boardLayout && !isVisible(boardLayout.announcements) && (
+              <div className="visibility-alert">
+                <AlertTriangle size={13} />
+                <span>
+                  The announcements panel is hidden on the visual board - nothing will show here
+                  until it's turned back on in the{' '}
+                  <Link to="/admin/visual-board">Visual Board editor</Link>.
+                </span>
+              </div>
+            )}
+
           </div>
 
           <div className="metric-card upcoming-announcements">
@@ -565,6 +578,17 @@ export default function AdminPage() {
 
         </div>
 
+        {boardLayout && !isVisible(boardLayout.candidates) && (
+          <div className="visibility-alert">
+            <AlertTriangle size={13} />
+            <span>
+              The candidates panel is hidden on the visual board - each candidate's own Shown/Hidden
+              toggle below won't take effect until it's turned back on in the{' '}
+              <Link to="/admin/visual-board">Visual Board editor</Link>.
+            </span>
+          </div>
+        )}
+
         <div className="table-wrapper">
 
           {loading ? (
@@ -619,9 +643,10 @@ export default function AdminPage() {
                        </span>
 
                        {candidate.photo_url ? (
-<img
+<CandidatePhoto
   className="candidate-avatar"
-  src={candidate.photo_url}
+  url={candidate.photo_url}
+  crop={candidate.photo_crop}
   alt={candidate.name}
 />
 ) : (

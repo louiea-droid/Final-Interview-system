@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Pencil,
   Plus,
+  Search,
   Trash2,
   UserRound,
 } from 'lucide-react';
@@ -13,6 +14,7 @@ import { firebaseClient } from '../lib/firebaseBackend';
 import { isShownOnBoard } from '../lib/candidateVisibility';
 import { getStatusPillClass } from '../lib/candidateStatus';
 import CandidateDetailsModal from '../components/CandidateDetailsModal';
+import CandidatePhoto from '../components/CandidatePhoto';
 import TablePagination from '../components/TablePagination';
 import PhotoCropModal from '../components/PhotoCropModal';
 import DateField from '../components/DateField';
@@ -23,6 +25,7 @@ function createEmptyAddForm() {
     localId: crypto.randomUUID(),
     name: '',
     photo_file: null,
+    photo_crop: null,
     no_photo: false,
     course: '',
     interview_date: '',
@@ -38,6 +41,7 @@ const statuses = [
 export default function CandidatesPage() {
   const [candidates, setCandidates] = useState([]);
   const [selectedDate, setSelectedDate] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const showToast = useToast();
   const [editingDate, setEditingDate] = useState(null);
@@ -87,15 +91,18 @@ export default function CandidatesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const filteredCandidates = useMemo(
-    () =>
-      candidates.filter(
-        (candidate) =>
-          selectedDate === 'all' ||
-          getInterviewDateKey(candidate.interview_date) === selectedDate
-      ),
-    [candidates, selectedDate]
-  );
+  const filteredCandidates = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+
+    return candidates.filter((candidate) => {
+      const matchesDate =
+        selectedDate === 'all' ||
+        getInterviewDateKey(candidate.interview_date) === selectedDate;
+      const matchesSearch = !term || candidate.name.toLowerCase().includes(term);
+
+      return matchesDate && matchesSearch;
+    });
+  }, [candidates, selectedDate, searchTerm]);
 
   const pageCandidates = useMemo(
     () => filteredCandidates.slice((page - 1) * pageSize, page * pageSize),
@@ -127,6 +134,10 @@ export default function CandidatesPage() {
     if (page > pageCount) setPage(pageCount);
   }, [filteredCandidates.length, page, pageSize]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, selectedDate]);
+
   function startEditing(date, dateCandidates) {
     setEditingDate(date);
     setEditForms(
@@ -137,6 +148,7 @@ export default function CandidatesPage() {
         interview_date: candidate.interview_date ?? '',
         status: candidate.status,
         photo_file: null,
+        photo_crop: candidate.photo_crop ?? null,
         no_photo: !candidate.photo_url,
       }))
     );
@@ -175,6 +187,7 @@ export default function CandidatesPage() {
           .update({
             name: candidate.name,
             photo_url: photoUrl,
+            photo_crop: photoUrl ? candidate.photo_crop : null,
             course: candidate.course || null,
             interview_date: candidate.interview_date || null,
             status: candidate.status,
@@ -230,7 +243,7 @@ export default function CandidatesPage() {
       setEditForms((current) =>
         current.map((candidate) =>
           candidate.id === id
-            ? { ...candidate, photo_file: processedFile, no_photo: false }
+            ? { ...candidate, photo_file: processedFile, photo_crop: null, no_photo: false }
             : candidate
         )
       );
@@ -238,7 +251,7 @@ export default function CandidatesPage() {
       setEditForms((current) =>
         current.map((candidate) =>
           candidate.id === id
-            ? { ...candidate, photo_file: file, no_photo: false }
+            ? { ...candidate, photo_file: file, photo_crop: null, no_photo: false }
             : candidate
         )
       );
@@ -255,6 +268,7 @@ export default function CandidatesPage() {
       setCropTarget({
         candidateId: editForm.id,
         imageSrc: URL.createObjectURL(editForm.photo_file),
+        initialCrop: editForm.photo_crop,
         isObjectUrl: true,
       });
       return;
@@ -266,6 +280,7 @@ export default function CandidatesPage() {
     setCropTarget({
       candidateId: editForm.id,
       imageSrc: savedPhotoUrl,
+      initialCrop: editForm.photo_crop,
       isObjectUrl: false,
     });
   }
@@ -277,13 +292,13 @@ export default function CandidatesPage() {
     });
   }
 
-  function handleCroppedPhoto(file) {
+  function handleCroppedPhoto(crop) {
     if (!cropTarget) return;
 
     setEditForms((current) =>
       current.map((candidate) =>
         candidate.id === cropTarget.candidateId
-          ? { ...candidate, photo_file: file, no_photo: false }
+          ? { ...candidate, photo_crop: crop, no_photo: false }
           : candidate
       )
     );
@@ -371,22 +386,27 @@ export default function CandidatesPage() {
     setAddForms((current) =>
       current.map((form) =>
         form.localId === localId
-          ? { ...form, no_photo: noPhoto, photo_file: noPhoto ? null : form.photo_file }
+          ? {
+              ...form,
+              no_photo: noPhoto,
+              photo_file: noPhoto ? null : form.photo_file,
+              photo_crop: noPhoto ? null : form.photo_crop,
+            }
           : form
       )
     );
   }
 
-  function openAddPhotoCrop(localId, imageSrc) {
-    setAddCropTarget({ localId, imageSrc });
+  function openAddPhotoCrop(localId, imageSrc, initialCrop) {
+    setAddCropTarget({ localId, imageSrc, initialCrop });
   }
 
-  function handleAddCroppedPhoto(file) {
+  function handleAddCroppedPhoto(crop) {
     if (!addCropTarget) return;
     const { localId } = addCropTarget;
     setAddForms((current) =>
       current.map((form) =>
-        form.localId === localId ? { ...form, photo_file: file, no_photo: false } : form
+        form.localId === localId ? { ...form, photo_crop: crop, no_photo: false } : form
       )
     );
   }
@@ -410,13 +430,17 @@ export default function CandidatesPage() {
 
       setAddForms((current) =>
         current.map((form) =>
-          form.localId === localId ? { ...form, photo_file: processedFile, no_photo: false } : form
+          form.localId === localId
+            ? { ...form, photo_file: processedFile, photo_crop: null, no_photo: false }
+            : form
         )
       );
     } catch {
       setAddForms((current) =>
         current.map((form) =>
-          form.localId === localId ? { ...form, photo_file: file, no_photo: false } : form
+          form.localId === localId
+            ? { ...form, photo_file: file, photo_crop: null, no_photo: false }
+            : form
         )
       );
       showToast.error('Background removal failed; using the original photo.');
@@ -485,6 +509,7 @@ export default function CandidatesPage() {
         addForms.map((form, index) => ({
           name: form.name,
           photo_url: uploadResults[index].photoUrl,
+          photo_crop: uploadResults[index].photoUrl ? form.photo_crop : null,
           course: form.course || null,
           interview_date: form.interview_date || null,
           status: 'Scheduled',
@@ -551,6 +576,18 @@ export default function CandidatesPage() {
               </option>
             ))}
           </select>
+
+          <div className="table-search">
+            <Search size={13} />
+            <input
+              type="search"
+              className="table-search-input"
+              placeholder="Search by name..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              aria-label="Search candidates by name"
+            />
+          </div>
         </section>
 
         {loading ? (
@@ -626,9 +663,10 @@ export default function CandidatesPage() {
                         aria-label={`View ${candidate.name}'s details`}
                       >
                         {candidate.photo_url ? (
-                          <img
+                          <CandidatePhoto
                             className="candidate-directory-avatar"
-                            src={candidate.photo_url}
+                            url={candidate.photo_url}
+                            crop={candidate.photo_crop}
                             alt={candidate.name}
                           />
                         ) : (
@@ -672,7 +710,7 @@ export default function CandidatesPage() {
             className="candidate-list-state"
             style={{ '--rows-per-page': pageSize }}
           >
-            No candidates found for this date.
+            {searchTerm.trim() ? 'No candidates match your search.' : 'No candidates found for this date.'}
           </div>
         )}
 
@@ -743,8 +781,9 @@ export default function CandidatesPage() {
                           onClick={() => openPhotoCrop(editForm)}
                           aria-label="Preview and crop candidate photo"
                         >
-                          <img
-                            src={candidates.find((candidate) => candidate.id === editForm.id)?.photo_url ?? ''}
+                          <CandidatePhoto
+                            url={candidates.find((candidate) => candidate.id === editForm.id)?.photo_url ?? ''}
+                            crop={editForm.photo_file ? null : editForm.photo_crop}
                             alt="Current candidate"
                           />
                         </button>
@@ -777,7 +816,7 @@ export default function CandidatesPage() {
                             setEditForms((current) =>
                               current.map((candidate) =>
                                 candidate.id === editForm.id
-                                  ? { ...candidate, no_photo: event.target.checked, photo_file: null }
+                                  ? { ...candidate, no_photo: event.target.checked, photo_file: null, photo_crop: null }
                                   : candidate
                               )
                             )
@@ -903,7 +942,7 @@ export default function CandidatesPage() {
       {cropTarget && (
         <PhotoCropModal
           imageSrc={cropTarget.imageSrc}
-          fileName={`candidate-${cropTarget.candidateId}.png`}
+          initialCrop={cropTarget.initialCrop}
           onSave={handleCroppedPhoto}
           onClose={closePhotoCrop}
         />
@@ -989,7 +1028,7 @@ export default function CandidatesPage() {
       {addCropTarget && (
         <PhotoCropModal
           imageSrc={addCropTarget.imageSrc}
-          fileName="candidate-photo.png"
+          initialCrop={addCropTarget.initialCrop}
           onSave={handleAddCroppedPhoto}
           onClose={() => setAddCropTarget(null)}
         />
@@ -1051,10 +1090,10 @@ function AddCandidateCard({
             <button
               type="button"
               className="record-edit-photo-preview-button"
-              onClick={() => onOpenCrop(form.localId, previewUrl)}
+              onClick={() => onOpenCrop(form.localId, previewUrl, form.photo_crop)}
               aria-label="Preview and crop candidate photo"
             >
-              <img src={previewUrl} alt="Candidate preview" />
+              <CandidatePhoto url={previewUrl} crop={form.photo_crop} alt="Candidate preview" />
             </button>
           </div>
         )}

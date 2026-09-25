@@ -22,9 +22,6 @@ import CandidateBoard from "../components/CandidateBoard";
 import AnnouncementBanner from "../components/AnnouncementBanner";
 import ZigzagRule from "../components/ZigzagRule";
 
-/* Announcements cycle on their own timer, independent of the candidate sets. */
-const ANNOUNCEMENT_DURATION = 7000;
-
 /* ---------------- ember field ---------------- */
 
 function mulberry32(seed) {
@@ -249,10 +246,10 @@ export default function DisplayPage({ usePublished = true }) {
       setCurrentAnnouncement(
         (previous) => (previous + 1) % announcements.length
       );
-    }, ANNOUNCEMENT_DURATION);
+    }, announcementStyle.cycleSeconds * 1000);
 
     return () => window.clearInterval(timer);
-  }, [announcements.length]);
+  }, [announcements.length, announcementStyle.cycleSeconds]);
 
   /* =========================================================
      LOAD BOARD LAYOUT (live)
