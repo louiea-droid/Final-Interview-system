@@ -18,7 +18,7 @@ export const ALIGN_ACTIONS = [
   { edge: 'bottom', label: 'Align bottom', Icon: AlignEndHorizontal },
 ];
 
-export default function AlignBar({ onAlign, onDistribute, canDistribute, toBoard }) {
+export default function AlignBar({ onAlign, onDistribute, canDistribute, toBoard, disabled = false }) {
   const suffix = toBoard ? ' to the board' : '';
 
   return (
@@ -28,6 +28,7 @@ export default function AlignBar({ onAlign, onDistribute, canDistribute, toBoard
           key={edge}
           type="button"
           className="vb-align-button"
+          disabled={disabled}
           onClick={() => onAlign(edge)}
           title={label + suffix}
           aria-label={label + suffix}
@@ -42,6 +43,7 @@ export default function AlignBar({ onAlign, onDistribute, canDistribute, toBoard
           <button
             type="button"
             className="vb-align-button"
+            disabled={disabled}
             onClick={() => onDistribute('x')}
             title="Distribute horizontally"
             aria-label="Distribute horizontally"
@@ -51,6 +53,7 @@ export default function AlignBar({ onAlign, onDistribute, canDistribute, toBoard
           <button
             type="button"
             className="vb-align-button"
+            disabled={disabled}
             onClick={() => onDistribute('y')}
             title="Distribute vertically"
             aria-label="Distribute vertically"

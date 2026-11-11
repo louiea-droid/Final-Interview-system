@@ -70,6 +70,24 @@ assert.deepEqual(snapMove(box(10, 10, 12, 12), [], { threshold: 1, grid: 0 }), {
 // grid lines snap but are not drawn as guides
 assert.deepEqual(snapMove(box(9.5, 20.25, 11.5, 22.25), [], { threshold: 1, grid: 5 }), { dx: 0.5, dy: -0.25, guides: [] });
 
+// guide lines from the rulers are snap targets too, and show as guides when caught
+assert.deepEqual(snapMove(box(30.5, 10, 35.5, 12), [], { threshold: 1, grid: 0, extra: { x: [30], y: [] } }), {
+  dx: -0.5,
+  dy: 0,
+  guides: [{ axis: 'x', at: 30 }],
+});
+assert.deepEqual(snapMove(box(10, 71.25, 12, 73), [], { threshold: 1, grid: 0, extra: { x: [], y: [70.5] } }).dy, -0.75);
+// guides alone (Snap to elements off): the board's 0/50/100 lines and other elements don't catch
+assert.deepEqual(
+  snapMove(box(49.5, 10, 51.5, 12), [box(52, 0, 60, 5)], { threshold: 1, grid: 0, extra: { x: [20], y: [] }, guidesOnly: true }),
+  { dx: 0, dy: 0, guides: [] }
+);
+// ...nor does the grid
+assert.deepEqual(
+  snapMove(box(9.5, 20.25, 11.5, 22.25), [], { threshold: 1, grid: 5, extra: { x: [80], y: [] }, guidesOnly: true }),
+  { dx: 0, dy: 0, guides: [] }
+);
+
 // gapsAround: only neighbours overlapping on the other axis count
 assert.deepEqual(gapsAround(box(50, 40, 60, 50), [box(20, 42, 30, 48), box(70, 0, 80, 10)]), [
   { axis: 'x', from: 30, to: 50, at: 45 },

@@ -118,3 +118,20 @@ export function isSameDay(value, reference = new Date(), timeZone) {
   const day = toDayKey(value, timeZone);
   return day !== null && day === toDayKey(reference, timeZone);
 }
+
+/*
+ * A 'YYYY-MM-DD' day key written out as "Sep 10, 2026". Formatted in UTC
+ * from the key's own numbers, so the day never shifts with the viewer's zone.
+ */
+export function formatLongDate(key) {
+  const match = typeof key === 'string' && key.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '--';
+
+  const [, year, month, day] = match.map(Number);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}

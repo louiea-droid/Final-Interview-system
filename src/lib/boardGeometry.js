@@ -33,3 +33,19 @@ export function scaledPositionStyle(element, baseWidth) {
     width: `${baseWidth}cqw`,
   };
 }
+
+/**
+ * Limits one shared move so every point stays on the board (0-100), keeping
+ * a group's shape: clamping each member on its own stops the edge member
+ * while the rest keep going. Never pushes a point already off the board
+ * further out.
+ */
+export function clampGroupDelta(points, dx, dy) {
+  const axis = (key, delta) => {
+    const values = points.map((p) => p[key]);
+    const low = Math.min(0, 0 - Math.min(...values));
+    const high = Math.max(0, 100 - Math.max(...values));
+    return Math.min(high, Math.max(low, delta));
+  };
+  return points.length ? { dx: axis('x', dx), dy: axis('y', dy) } : { dx, dy };
+}

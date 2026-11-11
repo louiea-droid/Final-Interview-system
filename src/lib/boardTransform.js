@@ -115,12 +115,16 @@ function matchedGuides(axis, lines, targets) {
 /**
  * Snaps a moving box's edges and centre to the board's 0/50/100 lines, to
  * other elements' edges and centres, and (when `grid` is set) to grid lines.
- * Grid lines snap but are not reported as guides.
+ * Grid lines snap but are not reported as guides. `extra` adds the ruler's
+ * guide lines as targets; with `guidesOnly` (Snap to elements off) they're
+ * the only targets.
  */
-export function snapMove(moving, others, { threshold, grid = 0 }) {
-  const xs = [0, 50, 100, ...others.flatMap((o) => [o.left, o.cx, o.right])];
-  const ys = [0, 50, 100, ...others.flatMap((o) => [o.top, o.cy, o.bottom])];
-  const grids = gridLines(grid);
+export function snapMove(moving, others, { threshold, grid = 0, extra = { x: [], y: [] }, guidesOnly = false }) {
+  const board = guidesOnly ? [] : [0, 50, 100];
+  const near = guidesOnly ? [] : others;
+  const xs = [...board, ...near.flatMap((o) => [o.left, o.cx, o.right]), ...extra.x];
+  const ys = [...board, ...near.flatMap((o) => [o.top, o.cy, o.bottom]), ...extra.y];
+  const grids = guidesOnly ? [] : gridLines(grid);
 
   const dx = closestOffset([moving.left, moving.cx, moving.right], [...xs, ...grids], threshold);
   const dy = closestOffset([moving.top, moving.cy, moving.bottom], [...ys, ...grids], threshold);

@@ -9,8 +9,8 @@
  * fill behaves exactly like a rectangle.
  */
 
-import { fillBoxCss, imageFill, normalizeFill, solidFill } from './fill';
-import { DEFAULT_ANIMATION, normalizeAnimation, resolveAnimationCss } from './animationStyle';
+import { fillBoxCss, imageFill, normalizeFill, solidFill } from './fill.js';
+import { DEFAULT_ANIMATION, normalizeAnimation, resolveAnimationCss } from './animationStyle.js';
 
 export const SHAPE_KINDS = [
   { value: 'rectangle', label: 'Rectangle' },
@@ -26,6 +26,17 @@ export const FIT_OPTIONS = [
   { value: 'cover', label: 'Fill' },
   { value: 'contain', label: 'Fit' },
 ];
+
+/* The border a photo or video starts with: none, in the board's gold. */
+export const MEDIA_STROKE = { color: '#c9a03c', width: 0, style: 'solid' };
+
+export const STROKE_STYLES = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'dashed', label: 'Dashed' },
+  { value: 'dotted', label: 'Dotted' },
+];
+
+const STROKE_STYLE_VALUES = new Set(STROKE_STYLES.map((entry) => entry.value));
 
 const BASE_SHAPE = {
   kind: 'rectangle',
@@ -122,6 +133,33 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
 }
 
+/* A border - shapes, frames, photos and videos all carry one. A border
+   saved before line styles existed has no `style` and stays solid. */
+export function normalizeStroke(stroke, fallback) {
+  return {
+    color: stroke?.color ?? fallback.color,
+    width: clamp(stroke?.width ?? 0, 0, 40),
+    style: STROKE_STYLE_VALUES.has(stroke?.style) ? stroke.style : 'solid',
+  };
+}
+
+/** The CSS border a stroke draws, or nothing at width 0. */
+export function strokeCss(stroke) {
+  return stroke?.width > 0 ? { border: `${stroke.width}px ${stroke.style ?? 'solid'} ${stroke.color}` } : {};
+}
+
+/*
+ * A photo or video's border. Photos are sized in cqw and then `scale()`d, so
+ * a px border would look twice as thick on the editor's small canvas as on
+ * the full-size board, and grow with Size. Board px (a 1920x1080 board) drawn
+ * in cqh and divided by the scale keeps it the same everywhere.
+ */
+export function mediaStrokeCss(stroke, scale = 1) {
+  if (!(stroke?.width > 0)) return {};
+  const width = +(stroke.width / 10.8 / (scale || 1)).toFixed(4);
+  return { border: `${width}cqh ${stroke.style ?? 'solid'} ${stroke.color}` };
+}
+
 /*
  * A carousel photo's own pan/zoom, same fields and ranges as an image
  * fill's (see normalizeFill in fill.js) - each photo in the carousel can be
@@ -172,10 +210,7 @@ export function normalizeShapes(shapes) {
         height: clamp(shape.height, 0.2, 200),
         rotation: clamp(shape.rotation ?? 0, -180, 180),
         radius: clamp(shape.radius ?? 0, 0, 999),
-        stroke: {
-          color: shape.stroke?.color ?? BASE_SHAPE.stroke.color,
-          width: clamp(shape.stroke?.width ?? 0, 0, 40),
-        },
+        stroke: normalizeStroke(shape.stroke, BASE_SHAPE.stroke),
         fill: normalizeFill(shape.fill, SHAPE_PRESETS[kind]?.fill ?? BASE_SHAPE.fill),
         ...(kind === 'zigzag'
           ? { peaks: Math.round(clamp(shape.peaks ?? SHAPE_PRESETS.zigzag.peaks, 1, 40)) }
@@ -197,9 +232,7 @@ export function resolveShapeStyle(shape) {
     borderRadius: shape.kind === 'ellipse' ? '50%' : `${shape.radius}px`,
     /* the zigzag's stroke is the drawn line, so it gets no border and no
        fill - ZigzagRule.jsx paints it instead */
-    ...(shape.stroke.width > 0 && !isZigzag(shape)
-      ? { border: `${shape.stroke.width}px solid ${shape.stroke.color}` }
-      : {}),
+    ...(isZigzag(shape) ? {} : strokeCss(shape.stroke)),
     ...(shape.kind === 'triangle'
       ? { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }
       : {}),

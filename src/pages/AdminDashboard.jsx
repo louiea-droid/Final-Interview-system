@@ -23,6 +23,7 @@ import {
   formatScheduledTime,
   getEasternBatchStart,
   isSameDay,
+  formatLongDate,
   toDayKey,
 } from '../lib/adminTime';
 import { isShownOnBoard as isCandidateShownOnBoard } from '../lib/candidateVisibility';
@@ -819,9 +820,11 @@ function roundedTopBarPath(x, y, width, height, radius) {
 /*
  * Candidates per interview date.
  *
- * One series, so one hue and no legend - the panel title names it. The y
- * gridlines carry the magnitudes, which is why only the tallest bar, today's,
- * and the hovered one are labelled rather than every bar.
+ * One series, so one hue and no legend - the panel title names it; today
+ * is picked out by its bold date and TODAY label, not a colour of its own.
+ * Every bar shows its count while there's room. Once many dates squeeze the
+ * bars thin, only today's, the tallest (every one that ties) and the
+ * hovered bar keep theirs, and the y gridlines carry the rest.
  *
  * Geometry is computed from the measured pixel width rather than drawn in a
  * fixed viewBox and scaled: scaling a viewBox to fit stretches the text and
@@ -863,13 +866,15 @@ function InterviewDateChart({ data }) {
   const barWidth = Math.min(34, Math.max(5, band - 14));
 
   const todayKey = toDayKey(new Date(), LIST_TIME_ZONE);
-  const peakIndex = data.findIndex((point) => point.count === peak);
+
+  // room for a count over every bar without the numbers running together
+  const labelEveryBar = band >= 30;
 
   // keep x labels from colliding once the bands get narrow
   const labelEvery = band < 34 ? Math.ceil(34 / band) : 1;
 
   const summary = data
-    .map((point) => `${formatDateValue(point.date)}: ${point.count}`)
+    .map((point) => `${formatLongDate(point.date)}: ${point.count}`)
     .join(', ');
 
   const active = hovered === null ? null : data[hovered];
@@ -910,15 +915,13 @@ function InterviewDateChart({ data }) {
 
             const isToday = point.date === todayKey;
             const isHovered = hovered === index;
-            const labelled = isToday || index === peakIndex || isHovered;
+            const labelled = labelEveryBar || isToday || point.count === peak || isHovered;
 
             return (
               <g key={point.date}>
                 <path
                   d={roundedTopBarPath(x, y, barWidth, height, 4)}
-                  className={`interview-chart-bar${isToday ? ' is-today' : ''}${
-                    isHovered ? ' is-hovered' : ''
-                  }`}
+                  className={`interview-chart-bar${isHovered ? ' is-hovered' : ''}`}
                 />
 
                 {labelled && height > 0 && (
@@ -976,7 +979,7 @@ function InterviewDateChart({ data }) {
           style={{ left: `${PAD.left + hovered * band + band / 2}px` }}
           role="status"
         >
-          <strong>{formatDateValue(active.date)}</strong>
+          <strong>{formatLongDate(active.date)}</strong>
           <span>
             {active.count} candidate{active.count === 1 ? '' : 's'}
           </span>

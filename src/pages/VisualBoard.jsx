@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import FullscreenSwitch from "../components/FullscreenSwitch";
 import { subscribeAnnouncements, subscribeCandidates } from "../lib/firebaseBackend";
-import { isShownOnBoard } from "../lib/candidateVisibility";
+import { boardCandidates, nowKey } from "../lib/candidateVisibility";
+import { DEFAULT_BOARD_SETTINGS, subscribeBoardSettings } from "../lib/boardSettings";
 import { isShownOnBoard as isAnnouncementShownOnBoard } from "../lib/announcementVisibility";
-import { DEFAULT_LAYOUT, isVisible, subscribeBoardLayout, subscribeDraftLayout } from "../lib/boardLayout";
+import { DEFAULT_LAYOUT, isVisible, normalizeLayout, subscribeBoardLayout, subscribeDraftLayout } from "../lib/boardLayout";
 import {
   DEFAULT_ANNOUNCEMENT_STYLE,
   resolveAnnouncementStyle,
   subscribeAnnouncementStyle,
 } from "../lib/announcementStyle";
 import { resolveTextStyle } from "../lib/textStyle";
-import { isCarousel, isZigzag, resolveShapeStyle } from "../lib/shapeStyle";
+import { isCarousel, isZigzag, mediaStrokeCss, resolveShapeStyle } from "../lib/shapeStyle";
+import { withOpacity } from "../lib/opacity";
+import { normalizeCardSettings } from "../lib/candidateCard";
 import { resolveAnimationCss } from "../lib/animationStyle";
 import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from "../lib/boardGeometry";
 import PhotoCarousel from "../components/PhotoCarousel";
@@ -131,23 +134,49 @@ const SPARK_LAYERS = [
  * last Publish.
  */
 export default function DisplayPage({ usePublished = true }) {
-  const [candidates, setCandidates] =
-    useState([]);
+  const [rawCandidates, setRawCandidates] = useState([]);
 
   const [loading, setLoading] =
     useState(true);
 
-  const [lightMode, setLightMode] = useState(false);
-
   /*
-   * The dashboard's small live preview (an <iframe src="/visual?preview=1">)
-   * always wants the board's normal dark branding, regardless of whatever
-   * light/dark preference the admin has set for their own panel — that
-   * preference lives in the same localStorage key this page reads below,
-   * so without this guard toggling the admin's panel theme would also
-   * flip the actual public board. The real standalone page (opened
-   * without ?preview=1) is unaffected and keeps following that setting.
+   * The board's own settings (which candidates show), set on the admin
+   * Settings page and stored in Firestore, so every screen running /visual -
+   * and the dashboard's small embedded preview - follows them live. The
+   * admin panel's own light/dark preference is separate and never reaches here.
    */
+  const [boardSettings, setBoardSettings] = useState(DEFAULT_BOARD_SETTINGS);
+
+  useEffect(() => subscribeBoardSettings(setBoardSettings), []);
+
+  /* Export PNG (?export=1): the editor loads this page off-screen and asks it
+     for a picture of itself - the capture code only loads in that case. */
+  const [isExport] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("export") === "1"
+  );
+  const loadingRef = useRef(true);
+  loadingRef.current = loading; // the export waits for the candidates
+  useEffect(() => {
+    if (!isExport) return undefined;
+    // the editor hands over its current layout (as JSON - objects from another
+    // window fail instanceof checks), so even an unsaved change is in the picture
+    window.__boardExport = async (layoutJson) => {
+      if (layoutJson) setLayout(normalizeLayout(JSON.parse(layoutJson)));
+      const started = Date.now();
+      while (loadingRef.current && Date.now() - started < 15000) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const { captureThisPage } = await import("../lib/exportBoard");
+      return captureThisPage();
+    };
+    return () => {
+      delete window.__boardExport;
+    };
+  }, [isExport]);
+
+  /* The dashboard's small live preview (an <iframe src="/visual?preview=1">),
+     which keeps its own fixed shape - see the phone-portrait check below. */
   const [isPreviewEmbed] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -183,15 +212,7 @@ export default function DisplayPage({ usePublished = true }) {
        * candidate never leaves an empty slot behind.
        */
 
-      setCandidates(
-        rows
-          .filter((candidate) => isShownOnBoard(candidate))
-          .sort(
-            (a, b) =>
-              (Number(a.sort_order) || 0) -
-              (Number(b.sort_order) || 0)
-          )
-      );
+      setRawCandidates(rows);
 
       setLoading(false);
     });
@@ -219,6 +240,13 @@ export default function DisplayPage({ usePublished = true }) {
     const timer = window.setInterval(() => setAnnouncementsNow(Date.now()), 30000);
     return () => window.clearInterval(timer);
   }, []);
+
+  /* Filtered here rather than on arrival, so the "hide past candidates"
+     setting and the hide time passing (the 30s tick above) both re-apply it. */
+  const candidates = useMemo(
+    () => boardCandidates(rawCandidates, boardSettings, nowKey(new Date(announcementsNow))),
+    [rawCandidates, boardSettings, announcementsNow]
+  );
 
   const announcements = useMemo(
     () =>
@@ -263,8 +291,9 @@ export default function DisplayPage({ usePublished = true }) {
   const [layout, setLayout] = useState(DEFAULT_LAYOUT);
 
   useEffect(() => {
+    if (isExport) return undefined;
     return usePublished ? subscribeBoardLayout(setLayout) : subscribeDraftLayout(setLayout);
-  }, [usePublished]);
+  }, [usePublished, isExport]);
 
   /*
    * The board holds a 16:9 frame so that what the editor's canvas shows is
@@ -308,34 +337,6 @@ export default function DisplayPage({ usePublished = true }) {
     return () => document.removeEventListener("fullscreenchange", sync);
   }, []);
 
-  useEffect(() => {
-    if (isPreviewEmbed) return;
-
-    const loadTheme = () => {
-      const storedSettings = window.localStorage.getItem("interview-board-settings");
-
-      if (!storedSettings) {
-        setLightMode(false);
-        return;
-      }
-
-      try {
-        setLightMode(JSON.parse(storedSettings).lightMode === true);
-      } catch {
-        setLightMode(false);
-      }
-    };
-
-    loadTheme();
-    window.addEventListener("storage", loadTheme);
-    window.addEventListener("interview-board-settings-updated", loadTheme);
-
-    return () => {
-      window.removeEventListener("storage", loadTheme);
-      window.removeEventListener("interview-board-settings-updated", loadTheme);
-    };
-  }, [isPreviewEmbed]);
-
   /* Nothing else on the board means anything until the first candidate
      snapshot lands, so the loading state is its own screen - just the
      mark, spinning - rather than a skeleton of a board that isn't
@@ -343,9 +344,7 @@ export default function DisplayPage({ usePublished = true }) {
   if (loading) {
     return (
       <main
-        className={`grid h-dvh place-items-center ${
-          lightMode ? "bg-[#f4efed]" : "bg-[#0b0102]"
-        }`}
+        className="grid h-dvh place-items-center bg-[#0b0102]"
       >
         <img
           src="/visual/HILLC-Petals.png"
@@ -367,24 +366,25 @@ export default function DisplayPage({ usePublished = true }) {
   function renderCandidatesLayer() {
     const box = layout.candidates;
     if (!isVisible(box)) return null;
+    if (boardSettings.hideEmptyCandidates && candidates.length === 0) return null;
 
     return (
       <div
         key="candidates"
-        className="absolute [container-type:size]"
-        style={{
+        className="absolute"
+        style={withOpacity({
           left: `${box.x}%`,
           top: `${box.y}%`,
           width: `${box.width}%`,
           height: `${box.height}%`,
           transform: "translate(-50%, -50%)",
-        }}
+        }, box)}
       >
         <CandidateBoard
           candidates={candidates}
           perRow={box.perRow ?? 2}
           secondsPerCard={box.secondsPerCard ?? 4}
-          lightMode={lightMode}
+          look={normalizeCardSettings(box)}
         />
       </div>
     );
@@ -401,13 +401,13 @@ export default function DisplayPage({ usePublished = true }) {
       <div
         key="announcements"
         className="absolute flex items-center justify-center"
-        style={{
+        style={withOpacity({
           left: `${box.x}%`,
           top: `${box.y}%`,
           width: `${box.width}%`,
           height: `${box.height}%`,
           transform: "translate(-50%, -50%)",
-        }}
+        }, box)}
       >
         <AnnouncementBanner
           key={announcements[currentAnnouncement]?.id}
@@ -434,7 +434,7 @@ export default function DisplayPage({ usePublished = true }) {
         key={divider.id}
         aria-hidden="true"
         className="absolute"
-        style={{
+        style={withOpacity({
           left: `${divider.x}%`,
           top: `${divider.y}%`,
           width: vertical ? `${divider.thickness}px` : `${divider.length}%`,
@@ -444,7 +444,7 @@ export default function DisplayPage({ usePublished = true }) {
             vertical ? "bottom" : "right"
           }, transparent, rgba(201,160,60,0.55) 18%, rgba(201,160,60,0.75) 50%, rgba(201,160,60,0.55) 82%, transparent)`,
           boxShadow: "0 0 10px rgba(201,160,60,0.28)",
-        }}
+        }, divider)}
       />
     );
   }
@@ -458,7 +458,7 @@ export default function DisplayPage({ usePublished = true }) {
       const shape = layout.shapes.find((item) => item.id === entry.id);
       if (!shape || !isVisible(shape)) return null;
       return (
-        <div key={shape.id} className="absolute" style={resolveShapeStyle(shape)}>
+        <div key={shape.id} className="absolute" style={withOpacity(resolveShapeStyle(shape), shape)}>
           {isZigzag(shape) ? (
             <ZigzagRule
               color={shape.stroke.color}
@@ -492,8 +492,9 @@ export default function DisplayPage({ usePublished = true }) {
           style={{
             ...scaledPositionStyle(layout.logo, LOGO_BASE_WIDTH),
             ...resolveAnimationCss(layout.logo.animation),
+            ...withOpacity({ filter: "drop-shadow(0 4px 14px rgba(0,0,0,.55))" }, layout.logo),
           }}
-          className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.55)]"
+          className="absolute h-auto"
         />
       );
     }
@@ -509,8 +510,11 @@ export default function DisplayPage({ usePublished = true }) {
           style={{
             ...scaledPositionStyle(image, PHOTO_BASE_WIDTH),
             ...resolveAnimationCss(image.animation),
+            ...mediaStrokeCss(image.stroke, image.scale),
+            boxSizing: "border-box",
+            ...withOpacity({ filter: "drop-shadow(0 4px 14px rgba(0,0,0,.45))" }, image),
           }}
-          className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
+          className="absolute h-auto"
         />
       );
     }
@@ -525,8 +529,11 @@ export default function DisplayPage({ usePublished = true }) {
           style={{
             ...scaledPositionStyle(video, PHOTO_BASE_WIDTH),
             ...resolveAnimationCss(video.animation),
+            ...mediaStrokeCss(video.stroke, video.scale),
+            boxSizing: "border-box",
+            ...withOpacity({ filter: "drop-shadow(0 4px 14px rgba(0,0,0,.45))" }, video),
           }}
-          className="absolute h-auto drop-shadow-[0_4px_14px_rgba(0,0,0,.45)]"
+          className="absolute h-auto"
           autoPlay
           loop
           muted
@@ -543,7 +550,7 @@ export default function DisplayPage({ usePublished = true }) {
           key={text.id}
           style={{
             ...positionStyle(text),
-            ...resolveTextStyle(text),
+            ...withOpacity(resolveTextStyle(text), text),
             ...resolveAnimationCss(text.animation),
           }}
           className="absolute"
@@ -565,7 +572,7 @@ export default function DisplayPage({ usePublished = true }) {
         h-dvh
         place-items-center
         overflow-hidden
-        ${lightMode ? "bg-[#f4efed]" : "bg-[#0b0102]"}
+        bg-[#0b0102]
       `}
     >
 
@@ -578,7 +585,7 @@ export default function DisplayPage({ usePublished = true }) {
           h-full
           w-full
           object-cover
-          ${lightMode ? "opacity-35" : "opacity-75"}
+          opacity-75
         `}
         src="/visual/bg.mp4"
         autoPlay
@@ -595,7 +602,7 @@ export default function DisplayPage({ usePublished = true }) {
           absolute
           inset-0
           z-[1]
-          ${lightMode ? "bg-[#fffaf7]/70" : "bg-black/25"}
+          bg-black/25
         `}
       />
 
@@ -606,7 +613,7 @@ export default function DisplayPage({ usePublished = true }) {
         preview - it renders through the exact same code as the real
         board, so nothing else on screen marks it as not-yet-published.
       */}
-      {!usePublished && (
+      {!usePublished && !isExport && (
         <div
           className="pointer-events-none absolute inset-x-0 top-0 z-[60] flex justify-center"
           aria-hidden="true"

@@ -1,0 +1,13 @@
+[
+  {
+    "origin": [
+      "https://hyacinth-event-announcements.web.app",
+      "https://hyacinth-event-announcements.firebaseapp.com",
+      "http://localhost:5173"
+    ],
+    "method": [
+      "GET"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

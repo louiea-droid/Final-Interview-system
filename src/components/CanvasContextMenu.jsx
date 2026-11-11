@@ -74,8 +74,6 @@ export default function CanvasContextMenu({
       ref={ref}
       className="vb-order-menu vb-context-menu"
       style={position}
-      /* the dismiss listener runs in capture, so keep it off this menu */
-      onPointerDown={(event) => event.stopPropagation()}
       role="menu"
     >
       {onElement ? (

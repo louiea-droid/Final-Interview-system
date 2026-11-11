@@ -1,59 +1,53 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, KeyRound, LogOut, MonitorCog, Save } from 'lucide-react';
+import { KeyRound, LogOut, MonitorCog } from 'lucide-react';
 
 import { currentUser, signOut } from '../lib/firebase/auth';
+import { DEFAULT_BOARD_SETTINGS, saveBoardSettings, subscribeBoardSettings } from '../lib/boardSettings';
+import { useToast } from '../components/ToastProvider';
+import TimeField from '../components/TimeField';
 
-const defaultSettings = {
-  lightMode: false,
-};
+const BOARD_OPTIONS = [
+  {
+    key: 'hideEmptyCandidates',
+    title: 'Hide the candidate box when nobody is listed',
+    hint: 'Instead of showing "No final interview applicants currently listed."',
+  },
+  {
+    key: 'hidePastCandidates',
+    title: 'Hide candidates after their interview date',
+    hint: 'Philippine time. Candidates with no interview date always stay.',
+  },
+];
 
 /*
- * The board's own light/dark toggle (also reachable from the sun/moon icon
- * in the sidebar - this is just the documented, discoverable home for the
- * same setting) is the only thing here that actually changes anything.
- * Everything this page used to offer beyond it - a board title, auto-rotate,
- * compact cards, a whole admin profile form with an avatar upload - wrote to
- * localStorage and showed "Saved", but nothing in the app ever read any of
- * it back. The board's title is already editable, for real, as the
- * "heading" text element in the Visual Board editor; duplicating it here
- * would just be a second, competing source of truth for the same text.
+ * Board settings are stored online, so every screen running /visual follows
+ * them the moment a switch moves - there's nothing to Save. The admin
+ * panel's light/dark theme is the sun/moon switch in the sidebar.
+ *
+ * The board's title and card speed aren't here on purpose: they're edited
+ * for real in the Visual Board editor, and a second place to change them
+ * would just compete with it.
  */
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const [settings, setSettings] = useState(defaultSettings);
-  const [saved, setSaved] = useState(false);
+  const showToast = useToast();
+  const [boardSettings, setBoardSettings] = useState(DEFAULT_BOARD_SETTINGS);
   const [signingOut, setSigningOut] = useState(false);
   const user = currentUser();
+
+  useEffect(() => subscribeBoardSettings(setBoardSettings), []);
+
+  function updateBoardSetting(key, value) {
+    saveBoardSettings({ ...boardSettings, [key]: value }).catch(() => {
+      showToast.error('Could not save that board setting - check that you are signed in as an admin.');
+    });
+  }
 
   async function handleSignOut() {
     setSigningOut(true);
     await signOut();
     navigate('/admin/login', { replace: true });
-  }
-
-  useEffect(() => {
-    const storedSettings = window.localStorage.getItem('interview-board-settings');
-
-    if (storedSettings) {
-      try {
-        setSettings({ ...defaultSettings, ...JSON.parse(storedSettings) });
-      } catch {
-        window.localStorage.removeItem('interview-board-settings');
-      }
-    }
-  }, []);
-
-  function updateSetting(key, value) {
-    setSettings((current) => ({ ...current, [key]: value }));
-    setSaved(false);
-  }
-
-  function saveSettings(event) {
-    event.preventDefault();
-    window.localStorage.setItem('interview-board-settings', JSON.stringify(settings));
-    window.dispatchEvent(new Event('interview-board-settings-updated'));
-    setSaved(true);
   }
 
   return (
@@ -64,43 +58,54 @@ export default function SettingsPage() {
         </div>
       </header>
 
-      <form onSubmit={saveSettings}>
-        <section className="panel form-panel">
-          <div className="panel-header">
-            <div className="panel-title-area">
-              <div className="panel-title-icon">
-                <MonitorCog size={14} />
-              </div>
-              <div>
-                <h2 className="panel-title">Board Settings</h2>
-                <p className="panel-subtitle">Control what candidates see on the visual board.</p>
-              </div>
+      <section className="panel form-panel">
+        <div className="panel-header">
+          <div className="panel-title-area">
+            <div className="panel-title-icon">
+              <MonitorCog size={14} />
+            </div>
+            <div>
+              <h2 className="panel-title">Live Board</h2>
+              <p className="panel-subtitle">
+                Saved online - every screen showing the board follows these straight away.
+              </p>
             </div>
           </div>
-
-          <div className="form-container settings-options">
-            <label className="settings-option">
-              <span>
-                <strong>Light mode</strong>
-                <small>Switch the visual board and admin panel to a light theme.</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.lightMode}
-                onChange={(event) => updateSetting('lightMode', event.target.checked)}
-              />
-            </label>
-          </div>
-        </section>
-
-        <div className="settings-actions">
-          <button type="submit" className="primary-button">
-            {saved ? <Check size={13} /> : <Save size={13} />}
-            {saved ? 'Saved' : 'Save Settings'}
-          </button>
-          {saved && <span className="settings-saved">Settings saved</span>}
         </div>
-      </form>
+
+        <div className="form-container settings-options">
+          {BOARD_OPTIONS.map(({ key, title, hint }) => (
+            <label key={key} className="settings-option settings-option-check" htmlFor={`board-setting-${key}`}>
+              <input
+                id={`board-setting-${key}`}
+                type="checkbox"
+                className="settings-checkbox"
+                checked={boardSettings[key]}
+                onChange={(event) => updateBoardSetting(key, event.target.checked)}
+              />
+              <span>
+                <strong>{title}</strong>
+                <small>{hint}</small>
+                {key === 'hidePastCandidates' && boardSettings.hidePastCandidates && (
+                  /* clicks on this row's own text shouldn't flip the switch it sits in */
+                  <span
+                    className="settings-option-time"
+                    onClick={(event) => event.target === event.currentTarget && event.preventDefault()}
+                  >
+                    Leaves the board at
+                    <TimeField
+                      label="Time on the interview day"
+                      value={boardSettings.hidePastTime}
+                      onChange={(time) => updateBoardSetting('hidePastTime', time)}
+                    />
+                    on their interview day
+                  </span>
+                )}
+              </span>
+            </label>
+          ))}
+        </div>
+      </section>
 
       <section className="panel form-panel">
         <div className="panel-header">
@@ -120,8 +125,8 @@ export default function SettingsPage() {
             <span>
               <strong>Signed in as {user?.email ?? 'Admin'}</strong>
               <small>
-                This sign-in is a convenience, not a security boundary - the credentials it
-                checks against ship in the app itself.
+                Only admin accounts listed in the database security rules can make changes;
+                anyone else can view the board but not edit it.
               </small>
             </span>
             <button

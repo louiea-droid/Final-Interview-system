@@ -26,7 +26,8 @@ import {
   onSnapshot,
   setDoc,
 } from 'firebase/firestore';
-import { boardTemplatesCollection, boardLayoutDoc, boardLayoutDraftDoc } from './firebase/collections';
+import { boardHistoryCollection, boardTemplatesCollection, boardLayoutDoc, boardLayoutDraftDoc } from './firebase/collections';
+import { idsToPrune, newestFirst } from './boardHistoryPrune';
 
 import {
   DEFAULT_CLOSING_STYLE,
@@ -36,8 +37,11 @@ import {
   clampTextSize,
   normalizeTextStyle,
 } from './textStyle';
-import { normalizeShapes } from './shapeStyle';
+import { MEDIA_STROKE, normalizeShapes, normalizeStroke } from './shapeStyle';
+import { normalizeOpacity } from './opacity';
+import { CARD_DEFAULTS, normalizeCardSettings } from './candidateCard';
 import { DEFAULT_ANIMATION, normalizeAnimation } from './animationStyle';
+import { cleanLayerName } from './layerNames';
 
 /*
  * Bumped when stored geometry stops meaning what it used to. Positions were
@@ -80,6 +84,7 @@ export const DEFAULT_CANDIDATES = {
      so raising or lowering this auto-adjusts card size to fit that many
      across, rather than changing how many candidates show per row. */
   perRow: 2,
+  ...CARD_DEFAULTS,
 };
 
 export const DEFAULT_ANNOUNCEMENTS = {
@@ -177,9 +182,11 @@ function normalizeText(text, base = DEFAULT_EXTRA_TEXT_STYLE, baseSize = DEFAULT
     /* Each non-empty line becomes its own bulleted item instead of one
        wrapped block of running text - for a list like "Our Brands". */
     bulletList: text.bulletList === true,
+    opacity: normalizeOpacity(text.opacity),
     style: normalizeTextStyle(text.style, base),
     animation: normalizeAnimation(text.animation),
     ...(text.groupId ? { groupId: text.groupId } : {}),
+    ...(cleanLayerName(text.name) ? { name: cleanLayerName(text.name) } : {}),
   };
 }
 
@@ -244,9 +251,11 @@ function normalizeDividers(parsed) {
       length: clamp(item.length ?? item.height ?? DEFAULT_DIVIDER.length, 2, 100),
       thickness: clamp(item.thickness ?? DEFAULT_DIVIDER.thickness, 1, 24),
       orientation: item.orientation === 'horizontal' ? 'horizontal' : 'vertical',
+      opacity: normalizeOpacity(item.opacity),
       visible: item.visible !== false,
       locked: item.locked === true,
       ...(item.groupId ? { groupId: item.groupId } : {}),
+      ...(cleanLayerName(item.name) ? { name: cleanLayerName(item.name) } : {}),
     }));
 }
 
@@ -257,6 +266,7 @@ function normalizeBox(box, defaults) {
   return {
     visible: source.visible !== false,
     locked: source.locked === true,
+    opacity: normalizeOpacity(source.opacity),
     x: clamp(source.x ?? defaults.x, 0, 100),
     y: clamp(source.y ?? defaults.y, 0, 100),
     ...(defaults.width === undefined
@@ -279,20 +289,26 @@ function normalizeBox(box, defaults) {
       : {
           perRow: Math.round(clamp(source.perRow ?? defaults.perRow, 1, 6)),
         }),
+    /* the candidate board's card look (sizes, name bar) - see candidateCard.js */
+    ...(defaults.perRow === undefined ? {} : normalizeCardSettings(source)),
   };
 }
 
-/* A dropped-in photo. Positions and sizing are left as loosely-checked as
-   they always were here - only `animation` is validated, since it's new. */
-function normalizeImages(images) {
-  if (!Array.isArray(images)) return [];
+/* A dropped-in photo or video. Positions and sizing are left as loosely
+   checked as they always were here - only the newer fields are validated. */
+function normalizeMedia(items) {
+  if (!Array.isArray(items)) return [];
 
-  return images
-    .filter((image) => image && typeof image === 'object' && image.id)
-    .map((image) => ({ ...image, animation: normalizeAnimation(image.animation) }));
+  return items
+    .filter((item) => item && typeof item === 'object' && item.id)
+    .map((item) => ({
+      ...item,
+      stroke: normalizeStroke(item.stroke, MEDIA_STROKE),
+      animation: normalizeAnimation(item.animation),
+    }));
 }
 
-function normalizeLayout(parsed) {
+export function normalizeLayout(parsed) {
   const texts = [];
 
   /*
@@ -347,8 +363,8 @@ function normalizeLayout(parsed) {
     announcements: normalizeBox(parsed.announcements, DEFAULT_ANNOUNCEMENTS),
     dividers: normalizeDividers(parsed),
     texts: hasTextData ? storedTexts : DEFAULT_LAYOUT.texts,
-    images: normalizeImages(parsed.images),
-    videos: Array.isArray(parsed.videos) ? parsed.videos : [],
+    images: normalizeMedia(parsed.images),
+    videos: normalizeMedia(parsed.videos),
     shapes: normalizeShapes(parsed.shapes),
   };
 
@@ -527,4 +543,37 @@ export function deleteTemplate(id) {
   deleteDoc(doc(boardTemplatesCollection, id)).catch((error) => {
     console.warn('Could not delete the template:', error);
   });
+}
+
+/*
+ * Version history: every Publish keeps a copy of what went live, and only
+ * the newest HISTORY_LIMIT are kept (boardHistoryPrune.js). Restoring puts a
+ * version into the draft, never straight onto the live board.
+ */
+
+/** Records a publish. Throws if the record can't be written. */
+export async function recordPublish(layout) {
+  await addDoc(boardHistoryCollection, { publishedAt: new Date().toISOString(), layout: sanitizeForFirestore(layout) });
+}
+
+/*
+ * Deletes the versions beyond the newest HISTORY_LIMIT. Takes the entries the
+ * page already holds from subscribeBoardHistory, so nothing is downloaded again.
+ */
+export function pruneBoardHistory(entries) {
+  return Promise.all(idsToPrune(entries).map((id) => deleteDoc(doc(boardHistoryCollection, id))));
+}
+
+/** Calls `listener` with the published versions, newest first. Returns an unsubscribe function. */
+export function subscribeBoardHistory(listener) {
+  return onSnapshot(
+    boardHistoryCollection,
+    (snapshot) => listener(newestFirst(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })))),
+    (error) => console.warn('Could not load the board history:', error)
+  );
+}
+
+/** A history entry's layout, normalized like any stored layout; null if it is from an older schema. */
+export function historyLayout(entry) {
+  return normalizeStoredLayout(entry.layout);
 }

@@ -7,7 +7,7 @@
  * only generate classes it can see literally written in source.
  */
 
-import { BOARD_GOLD_FILL, fillTextCss, normalizeFill, solidFill } from './fill';
+import { BOARD_GOLD_FILL, fillTextCss, normalizeFill, normalizeHex, solidFill } from './fill.js';
 
 export const FONT_OPTIONS = [
   { value: 'poppins', label: 'Poppins', stack: "'Poppins', 'Inter', system-ui, sans-serif" },
@@ -138,6 +138,14 @@ export function normalizeTextStyle(style, base) {
   merged.fill = normalizeFill(merged.fill);
   delete merged.color;
 
+  merged.italic = merged.italic === true;
+  merged.underline = merged.underline === true;
+  const outlineWidth = merged.outline?.width;
+  merged.outline = {
+    width: Number.isFinite(outlineWidth) ? Math.min(8, Math.max(0, outlineWidth)) : 0,
+    color: normalizeHex(merged.outline?.color) ?? '#000000',
+  };
+
   return merged;
 }
 
@@ -188,6 +196,20 @@ export function resolveTextStyle(text) {
      */
     margin: 0,
     filter: SHADOW_FILTERS[style.shadow] ?? 'none',
+    ...(style.italic ? { fontStyle: 'italic' } : {}),
+    /* A gradient paints through transparent glyphs, so the underline takes
+       its first colour - it would otherwise be invisible too. */
+    ...(style.underline
+      ? {
+          textDecoration: 'underline',
+          ...(style.fill?.type === 'gradient' ? { textDecorationColor: style.fill.stops?.[0]?.color } : {}),
+        }
+      : {}),
+    /* Outline width is px on a 1920x1080 board, drawn in cqh (px / 10.8) so
+       it keeps its weight at any board size, the editor's canvas included. */
+    ...(style.outline?.width > 0
+      ? { WebkitTextStroke: `${+(style.outline.width / 10.8).toFixed(4)}cqh ${style.outline.color}` }
+      : {}),
     ...fillTextCss(style.fill),
   };
 }

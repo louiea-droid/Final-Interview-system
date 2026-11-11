@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlignCenter,
   AlignLeft,
@@ -8,18 +9,16 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsDown,
+  ChevronsLeft,
+  ChevronsRight,
+  ChevronRight,
   ChevronsUp,
   Copy,
   Circle,
-  Crown,
   ExternalLink,
   Eye,
   EyeOff,
-  Focus,
-  FolderOpen,
   Frame,
-  Grid3x3,
-  GripVertical,
   Group,
   Image as ImageIcon,
   ImagePlus,
@@ -31,28 +30,29 @@ import {
   SeparatorVertical,
   Lock,
   LockOpen,
-  Magnet,
-  Maximize,
   Minimize,
   Minus,
+  MoreHorizontal,
+  History,
+  ImageDown,
   Plus,
   Redo2,
   RotateCcw,
-  Save,
-  Scan,
   Shapes,
+  Sticker,
   Square,
   Trash2,
   Triangle,
   Type,
   Undo2,
+  Underline,
   Ungroup,
   UploadCloud,
   UsersRound,
   Zap,
   Video,
   X,
-  ZoomIn,
+  Italic,
 } from 'lucide-react';
 
 import {
@@ -62,22 +62,33 @@ import {
   isVisible,
   loadBoardLayout,
   loadDraftLayout,
+  historyLayout,
   publishBoardLayout,
+  pruneBoardHistory,
+  recordPublish,
   saveTemplate,
+  subscribeBoardHistory,
   subscribeTemplates,
 } from '../lib/boardLayout';
-import { useBoardLayoutEditor, findElement } from '../lib/useBoardLayoutEditor';
+import { useBoardLayoutEditor, findElement, listRecentPhotos } from '../lib/useBoardLayoutEditor';
+import { splitUploads, spreadAt } from '../lib/recentPhotos';
+import { layerThumb } from '../lib/layerThumbs';
+import { renamedLayer } from '../lib/layerNames';
+import { layerTree } from '../lib/layerTree';
 import {
   ALIGN_OPTIONS,
   CASE_OPTIONS,
   FONT_OPTIONS,
+  FONT_STACKS,
   MAX_TEXT_SIZE,
   MIN_TEXT_SIZE,
   SHADOW_OPTIONS,
   WEIGHT_OPTIONS,
   resolveTextStyle,
 } from '../lib/textStyle';
-import { SHAPE_KINDS, isCarousel, isFrame, isZigzag, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
+import { SHAPE_KINDS, isCarousel, isFrame, isZigzag, mediaStrokeCss, resolveShapeStyle, shapeLabel } from '../lib/shapeStyle';
+import { normalizeOpacity, withOpacity } from '../lib/opacity';
+import { CARD_DEFAULTS, normalizeCardSettings } from '../lib/candidateCard';
 import { LOGO_BASE_WIDTH, PHOTO_BASE_WIDTH, positionStyle, scaledPositionStyle } from '../lib/boardGeometry';
 import { ANIMATION_DIRECTIONS, ANIMATION_TYPES, CAROUSEL_ANIMATION, resolveAnimationCss } from '../lib/animationStyle';
 import FillEditor from '../components/FillEditor';
@@ -86,11 +97,13 @@ import PhotoAdjuster from '../components/PhotoAdjuster';
 import VideoAdjuster from '../components/VideoAdjuster';
 import TextContent from '../components/TextContent';
 import NumberField from '../components/NumberField';
+import BorderControls from '../components/BorderControls';
 import CandidateBoard from '../components/CandidateBoard';
 import AnnouncementBanner from '../components/AnnouncementBanner';
 import ZigzagRule from '../components/ZigzagRule';
 import { subscribeAnnouncements, subscribeCandidates } from '../lib/firebaseBackend';
-import { isShownOnBoard } from '../lib/candidateVisibility';
+import { boardCandidates, nowKey } from '../lib/candidateVisibility';
+import { DEFAULT_BOARD_SETTINGS, subscribeBoardSettings } from '../lib/boardSettings';
 import { isShownOnBoard as isAnnouncementShownOnBoard } from '../lib/announcementVisibility';
 import {
   DEFAULT_ANNOUNCEMENT_STYLE,
@@ -98,8 +111,22 @@ import {
   subscribeAnnouncementStyle,
 } from '../lib/announcementStyle';
 import { useToast } from '../components/ToastProvider';
-import AlignBar from '../components/AlignBar';
 import CanvasContextMenu from '../components/CanvasContextMenu';
+import IconPanel from '../components/IconPanel';
+import { GuideLines, Rulers } from '../components/RulerGuides';
+import { addGuide, loadGuides, moveGuide, removeGuide, saveGuides } from '../lib/guides';
+import FloatingSelectionBar from '../components/FloatingSelectionBar';
+import { unionBounds } from '../lib/boardTransform';
+import { shapeLayerName, textLayerName } from '../lib/layerNames';
+import { pickImageFiles } from '../lib/imageFiles';
+import { exportFileName } from '../lib/exportName';
+import BarMenu from '../components/BarMenu';
+import PropertySection from '../components/PropertySection';
+import { isSectionOpen } from '../lib/propertySections';
+import { EDITOR_SHORTCUTS } from '../lib/editorShortcuts';
+import { clickTab, loadFolded, saveFolded } from '../lib/panelFold';
+import { TEXT_PRESETS } from '../lib/textPresets';
+import { fillTextCss } from '../lib/fill';
 import SmartGuides from '../components/SmartGuides';
 import CanvasTextEditor from '../components/CanvasTextEditor';
 import SelectionHandles, { ALL_HANDLES, CORNER_HANDLES, TEXT_HANDLES } from '../components/SelectionHandles';
@@ -120,13 +147,11 @@ const SHAPE_ICONS = {
 const RAIL_TABS = [
   { id: 'elements', label: 'Elements', icon: Shapes },
   { id: 'text', label: 'Text', icon: Type },
-  { id: 'brand', label: 'Brand', icon: Crown },
   { id: 'uploads', label: 'Uploads', icon: UploadCloud },
+  { id: 'icons', label: 'Icons', icon: Sticker },
   { id: 'layers', label: 'Layers', icon: Layers },
 ];
 
-/* Which rail tab owns a given kind of element, so selecting one on the
-   canvas brings its panel forward too. */
 /* The elements that are positioned boxes rather than points. */
 const BOX_KINDS = {
   candidates: {
@@ -139,20 +164,20 @@ const BOX_KINDS = {
   },
 };
 
-const PANEL_BY_KIND = {
-  logo: 'brand',
-  candidates: 'brand',
-  text: 'text',
-  image: 'uploads',
-  video: 'uploads',
-  shape: 'elements',
-};
-
 /* The canvas zoom slider's range, as a percentage of "fit" - 100% already
    fills the stage exactly (see .vb-canvas in globals.css), so anything
    above that needs the stage's own scrollbar to see the rest of it. */
+/* Kinds a Layers row can delete - the logo and the two boxes are one of a
+   kind, so they are hidden instead (Layers can show them again). */
+const DELETABLE_KINDS = new Set(['text', 'image', 'video', 'shape', 'divider']);
+
 const MIN_ZOOM = 25;
 const MAX_ZOOM = 150;
+const ZOOM_PRESETS = [100, 50, 75, 125, 150];
+
+/* How the canvas works, shown when nothing is selected. */
+const CANVAS_HINT =
+  'Click to select, drag to move, drag a handle to resize or rotate, double-click text to edit it. Changes save to your draft as you go - click Publish to put them on the live board.';
 
 function propertiesTitle(kind, shape) {
   switch (kind) {
@@ -179,14 +204,82 @@ function labelShapes(shapes) {
 
   return shapes.map((shape) => {
     counts[shape.kind] = (counts[shape.kind] ?? 0) + 1;
-    return `${shapeLabel(shape)} ${counts[shape.kind]}`;
+    return shapeLayerName(shapeLabel(shape), counts[shape.kind], shape.photos?.length ?? 0, isFrame(shape));
   });
 }
 
 const ARROW_STEPS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
+/* The candidate board panel's card number fields - ranges match candidateCard.js. */
+const CARD_LOOK_FIELDS = [
+  { key: 'cardWidth', label: 'Card width', min: 60, max: 100, unit: '%' },
+  { key: 'photoHeight', label: 'Card height', min: 50, max: 160, unit: '%' },
+  { key: 'nameSize', label: 'Name size', min: 10, max: 60, unit: '' },
+  { key: 'courseSize', label: 'Course size', min: 6, max: 32, unit: '' },
+];
+
+/* Whole-element opacity, 0-100% - every element and both boxes have it. */
+function OpacityField({ element, onChange }) {
+  const percent = Math.round(normalizeOpacity(element?.opacity) * 100);
+
+  return (
+    <div className="form-group">
+      <label className="form-label">Element opacity</label>
+      <div className="scale-field">
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={percent}
+          aria-label="Element opacity"
+          onChange={(event) => onChange(Number(event.target.value) / 100)}
+        />
+        <span className="scale-field-value">{percent}%</span>
+      </div>
+    </div>
+  );
+}
+
 function isTypingTarget(target) {
   return target instanceof HTMLElement && Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+}
+
+/* Space and Enter press a focused control (a toolbar or panel button, a
+   link) - the canvas only takes them when focus isn't on one. Canvas
+   elements are buttons too, so those still count as the canvas. */
+function isControlTarget(target) {
+  return (
+    target instanceof HTMLElement &&
+    Boolean(target.closest('button, a[href], [role="button"], [role="menuitem"], [role="menuitemcheckbox"], summary')) &&
+    !target.closest('[data-vb-kind]')
+  );
+}
+
+/* The picture at the start of a Layers row - see layerThumbs.js. */
+function LayerThumb({ thumb, Icon }) {
+  if (thumb.type === 'photo') {
+    return (
+      <span className="vb-layer-thumb">
+        <img src={thumb.url} alt="" loading="lazy" />
+      </span>
+    );
+  }
+  if (thumb.type === 'text') {
+    return (
+      <span className="vb-layer-thumb is-text" style={{ fontFamily: thumb.font, color: thumb.color }}>
+        Aa
+      </span>
+    );
+  }
+  if (thumb.type === 'colour') {
+    return <span className="vb-layer-thumb" style={{ background: thumb.colour }} />;
+  }
+  return (
+    <span className="vb-layer-thumb">
+      <Icon size={13} />
+    </span>
+  );
 }
 
 export default function AdminVisualBoard() {
@@ -194,12 +287,33 @@ export default function AdminVisualBoard() {
   const [selected, setSelected] = useState(null); // { kind, id? } | null
   const [multiSelected, setMultiSelected] = useState([]); // [{ kind, id }] - shift-click grouping
   const [activePanel, setActivePanel] = useState('elements');
+  const [panelFolded, setPanelFolded] = useState(() => loadFolded(window.localStorage));
+  /* Uploads tab: null until first opened, then 'loading' | 'error' | [urls] */
+  const [recentPhotos, setRecentPhotos] = useState(null);
+  const [uploadDropActive, setUploadDropActive] = useState(false);
+  const [renamingLayer, setRenamingLayer] = useState(null); // 'kind:id' of the Layers row being renamed
+  const [foldedGroups, setFoldedGroups] = useState(() => new Set()); // groupIds folded shut in Layers
   /* Which of the selected frame's carousel photos the Zoom/Move sliders
      below the grid are currently editing - reset whenever the selection
      changes so a stale index from a different frame can't linger. */
   const [editingPhotoIndex, setEditingPhotoIndex] = useState(null);
   const [editingTextId, setEditingTextId] = useState(null);
-  const [candidates, setCandidates] = useState([]);
+  /* a file is being dragged over the canvas */
+  const [canvasDropActive, setCanvasDropActive] = useState(false);
+  /* the last few published layouts, and whether the History list is open */
+  const [history, setHistory] = useState([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  /* ruler guide lines - kept in this browser, never on the live board */
+  const [guides, setGuides] = useState(() => loadGuides());
+  const [guideDraft, setGuideDraft] = useState(null); // { axis, at, overRuler? } while dragging one out
+  const [showRulers, setShowRulers] = useState(true);
+  const [showGuides, setShowGuides] = useState(true);
+  const [snapToGuides, setSnapToGuides] = useState(true);
+  const [guidesLocked, setGuidesLocked] = useState(false);
+  /* Sections the admin opened or closed, by name - kept as they move between elements. */
+  const [sectionOverrides, setSectionOverrides] = useState({});
+
   /* What the live announcement strip is currently showing, so the canvas
      can show the same - and can tell when the live board would hide it. */
   const [announcements, setAnnouncements] = useState([]);
@@ -265,7 +379,11 @@ export default function AdminVisualBoard() {
     snapEnabled,
     gridSnap: showGrid,
     multiSelected,
+    guideLines: showGuides ? guides : null,
+    snapToGuides,
   });
+
+  useEffect(() => saveGuides(guides), [guides]);
 
   // The draft loads once, when the editor opens - there is normally only
   // one admin editing at a time, so it doesn't need to be a live subscription.
@@ -292,11 +410,14 @@ export default function AdminVisualBoard() {
     if (cleanedLegacyPhotosRef.current || layout === DEFAULT_LAYOUT) return;
     cleanedLegacyPhotosRef.current = true;
 
-    editor.cleanUpLegacyPhotos().then((didMigrate) => {
-      if (didMigrate) {
-        showToast.success('Cleaned up some old photos to speed up publishing.');
-      }
-    });
+    editor
+      .cleanUpLegacyPhotos()
+      .then((didMigrate) => {
+        if (didMigrate) {
+          showToast.success('Cleaned up some old photos to speed up publishing.');
+        }
+      })
+      .catch((error) => console.warn('Could not move old photos into storage:', error));
   }, [layout]);
 
   useEffect(() => {
@@ -313,17 +434,17 @@ export default function AdminVisualBoard() {
     return subscribeTemplates(setTemplates);
   }, []);
 
-  /* The same filter and order the live board applies, so the canvas
-     shows the same cards in the same places. */
-  useEffect(() => {
-    return subscribeCandidates((rows) => {
-      setCandidates(
-        rows
-          .filter((candidate) => isShownOnBoard(candidate))
-          .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0))
-      );
-    });
-  }, []);
+  /* The same filter and order the live board applies (the board settings'
+     "hide past candidates" included), so the canvas shows the same cards
+     in the same places. */
+  const [rawCandidates, setRawCandidates] = useState([]);
+  const [boardSettings, setBoardSettings] = useState(DEFAULT_BOARD_SETTINGS);
+  useEffect(() => subscribeCandidates(setRawCandidates), []);
+  useEffect(() => subscribeBoardSettings(setBoardSettings), []);
+  const candidates = useMemo(
+    () => boardCandidates(rawCandidates, boardSettings, nowKey()),
+    [rawCandidates, boardSettings]
+  );
 
   useEffect(() => {
     return subscribeAnnouncements((rows) => {
@@ -403,7 +524,13 @@ export default function AdminVisualBoard() {
         return;
       }
 
-      if (!isMeta && event.key === 'Enter' && selected?.kind === 'text') {
+      if (
+        !isMeta &&
+        event.key === 'Enter' &&
+        selected?.kind === 'text' &&
+        !isControlTarget(event.target) &&
+        !findElement(layout, 'text', selected.id)?.locked
+      ) {
         event.preventDefault();
         setEditingTextId(selected.id);
         return;
@@ -465,6 +592,20 @@ export default function AdminVisualBoard() {
     return () => window.removeEventListener('keydown', handleKeydown);
   }, [editor, selected, multiSelected, clipboard, layout]);
 
+  /* With Layers open, the selected element's row scrolls into view. */
+  useEffect(() => {
+    if (activePanel !== 'layers' || !selected) return;
+    const key = `${selected.kind}:${selected.id ?? ''}`;
+    const row = document.querySelector(`[data-layer-key="${CSS.escape(key)}"]`);
+    const list = row?.closest('.vb-panel');
+    if (!row || !list) return;
+    const r = row.getBoundingClientRect();
+    const l = list.getBoundingClientRect();
+    const top = l.top + (list.querySelector('.vb-panel-head')?.offsetHeight ?? 0);
+    if (r.top < top) list.scrollTop -= top - r.top;
+    else if (r.bottom > l.bottom) list.scrollTop += r.bottom - l.bottom;
+  }, [selected, activePanel]);
+
   /* Ctrl/Cmd + scroll zooms the canvas instead of the page. */
   useEffect(() => {
     const stage = stageRef.current;
@@ -483,22 +624,27 @@ export default function AdminVisualBoard() {
   /* Holding Space turns a drag on the canvas into panning the stage. */
   useEffect(() => {
     function onKeyDown(event) {
-      if (event.code !== 'Space' || isTypingTarget(event.target)) return;
+      if (event.code !== 'Space' || isTypingTarget(event.target) || isControlTarget(event.target)) return;
       event.preventDefault();
       if (!event.repeat) setSpaceHeld(true);
     }
 
+    /* Always lets go, whatever has focus - a keyup missed here would leave
+       panning stuck on. */
     function onKeyUp(event) {
-      if (event.code !== 'Space' || isTypingTarget(event.target)) return;
-      event.preventDefault();
-      setSpaceHeld(false);
+      if (event.code === 'Space') setSpaceHeld(false);
     }
+
+    /* Alt-Tab away while holding Space swallows the keyup. */
+    const release = () => setSpaceHeld(false);
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', release);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', release);
     };
   }, []);
 
@@ -597,7 +743,6 @@ export default function AdminVisualBoard() {
     setEditingTextId(null);
     setMultiSelected([]);
     setEditingPhotoIndex(null);
-    if (PANEL_BY_KIND[kind]) setActivePanel(PANEL_BY_KIND[kind]);
   }
 
   function isSelected(kind, id) {
@@ -622,6 +767,28 @@ export default function AdminVisualBoard() {
    * instance) would leave box select with nowhere to actually start a drag
    * from.
    */
+  /* Adds or removes one element from the multi-selection, folding the current single selection in first. */
+  function toggleMulti(kind, id) {
+    if (editingTextId) document.activeElement?.blur?.();
+    setEditingTextId(null);
+    setMultiSelected((current) => {
+      const base = current.length > 0 ? current : selected ? [{ kind: selected.kind, id: selected.id ?? null }] : [];
+      const exists = base.some((item) => item.kind === kind && (item.id ?? null) === (id ?? null));
+      return exists
+        ? base.filter((item) => !(item.kind === kind && (item.id ?? null) === (id ?? null)))
+        : [...base, { kind, id: id ?? null }];
+    });
+    setSelected(null);
+  }
+
+  /* A Layers group row: every member at once. */
+  function selectGroup(entries) {
+    if (editingTextId) document.activeElement?.blur?.();
+    setEditingTextId(null);
+    setSelected(null);
+    setMultiSelected(entries.map(({ kind, id }) => ({ kind, id: id ?? null })));
+  }
+
   function handlePointerDown(kind, id) {
     return (event) => {
       if (boxSelectMode) {
@@ -632,14 +799,7 @@ export default function AdminVisualBoard() {
       if (event.shiftKey) {
         event.preventDefault();
         event.stopPropagation();
-        setMultiSelected((current) => {
-          const base = current.length > 0 ? current : selected ? [{ kind: selected.kind, id: selected.id ?? null }] : [];
-          const exists = base.some((item) => item.kind === kind && (item.id ?? null) === (id ?? null));
-          return exists
-            ? base.filter((item) => !(item.kind === kind && (item.id ?? null) === (id ?? null)))
-            : [...base, { kind, id: id ?? null }];
-        });
-        setSelected(null);
+        toggleMulti(kind, id);
         return;
       }
 
@@ -762,18 +922,19 @@ export default function AdminVisualBoard() {
       if (event.key === 'Escape') close();
     };
     /* A press inside the menu is choosing an item, not dismissing it. */
+    /* ...and scrolling a long menu is reading it. */
     const closeOutside = (event) => {
       if (!event.target.closest?.('.vb-context-menu')) close();
     };
 
     // capture, so the menu closes even if the target stops propagation
     window.addEventListener('pointerdown', closeOutside, true);
-    window.addEventListener('scroll', close, true);
+    window.addEventListener('scroll', closeOutside, true);
     window.addEventListener('keydown', onKey);
 
     return () => {
       window.removeEventListener('pointerdown', closeOutside, true);
-      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('scroll', closeOutside, true);
       window.removeEventListener('keydown', onKey);
     };
   }, [contextMenu]);
@@ -829,6 +990,84 @@ export default function AdminVisualBoard() {
     showToast.success('Template saved.');
   }
 
+  useEffect(() => subscribeBoardHistory(setHistory), []);
+  useEffect(() => {
+    // a failed prune just leaves an extra version until the next publish tries again
+    pruneBoardHistory(history).catch((error) => console.warn('Could not prune the board history:', error));
+  }, [history]);
+  useEffect(() => saveFolded(panelFolded, window.localStorage), [panelFolded]);
+
+  function loadRecentPhotos() {
+    setRecentPhotos((current) => (Array.isArray(current) ? current : 'loading'));
+    listRecentPhotos()
+      .then(setRecentPhotos)
+      .catch(() => setRecentPhotos('error'));
+  }
+
+  const recentPhotosShown = useRef(false);
+  recentPhotosShown.current = activePanel === 'uploads' && !panelFolded;
+
+  useEffect(() => {
+    if (activePanel === 'uploads' && !panelFolded && recentPhotos === null) loadRecentPhotos();
+  }, [activePanel, panelFolded, recentPhotos]);
+
+  /* Photos and videos dropped on (or chosen in) the Uploads tab, added one at a time. */
+  async function uploadFiles(fileList) {
+    const { photos, videos, others } = splitUploads(fileList);
+    if (others.length) showToast.error('Only photos (PNG, JPG, WEBP) or videos (MP4, WEBM, OGG) can be added.');
+    for (const [index, file] of photos.entries()) await addPhotoAndSelect(file, photos.length > 1 ? spreadAt(index) : undefined);
+    for (const file of videos) await addVideoAndSelect(file);
+  }
+
+  useEffect(() => {
+    const guard = (event) => {
+      if (event.dataTransfer?.types?.includes('Files')) event.preventDefault();
+    };
+    window.addEventListener('dragover', guard);
+    window.addEventListener('drop', guard);
+    return () => {
+      window.removeEventListener('dragover', guard);
+      window.removeEventListener('drop', guard);
+    };
+  }, []);
+
+  /* Export PNG: the draft as the live board draws it, at 1920x1080. */
+  async function exportPng() {
+    setExporting(true);
+    try {
+      const { exportBoardPng } = await import('../lib/exportBoard');
+      const { dataUrl, missing } = await exportBoardPng(layout);
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = exportFileName(new Date());
+      link.click();
+      if (missing > 0) {
+        showToast.error("Some photos or videos couldn't be included - run the one-time storage setup (see cors.json).");
+      } else {
+        showToast.success('Board saved as a picture.');
+      }
+    } catch (error) {
+      console.warn('Could not export the board:', error);
+      showToast.error(`Could not export the board (${error?.message ?? error}).`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  /* A published version goes into the draft - check it, then Publish. One undo step. */
+  function restoreVersion(entry) {
+    const restored = historyLayout(entry);
+    if (!restored) {
+      showToast.error('That version is from an older editor and cannot be restored.');
+      return;
+    }
+    editor.replaceLayout(restored);
+    setSelected(null);
+    setMultiSelected([]);
+    setHistoryOpen(false);
+    showToast.success(`Restored the board from ${new Date(entry.publishedAt).toLocaleString()}. Publish to put it live.`);
+  }
+
   function handleApplyTemplate(id) {
     const nextLayout = applyTemplate(templates, id);
     if (!nextLayout) {
@@ -847,11 +1086,6 @@ export default function AdminVisualBoard() {
     deleteTemplate(id);
   }
 
-  /* Deselects first if the removed element was the one being edited. */
-  function deselectIfSelected(kind, id) {
-    setSelected((current) => (current?.kind === kind && current.id === id ? null : current));
-  }
-
   async function publish() {
     setPublishing(true);
 
@@ -860,6 +1094,10 @@ export default function AdminVisualBoard() {
       setPublishedSnapshot(JSON.stringify(layout));
       setIsDirty(false);
       showToast.success('Published to the live board.');
+      recordPublish(layout).catch((error) => {
+        console.warn('Could not keep this version in History:', error);
+        showToast.error('Published, but this version could not be kept in History.');
+      });
     } catch (error) {
       console.warn('Could not publish the board layout:', error);
       showToast.error('Could not publish - the board may be too large (try a smaller photo).');
@@ -868,9 +1106,49 @@ export default function AdminVisualBoard() {
     }
   }
 
-  async function addPhotoAndSelect(file) {
-    const id = await editor.handleAddPhoto(file);
-    if (id) select('image', id);
+  async function addPhotoAndSelect(file, at) {
+    const id = await editor.handleAddPhoto(file, at);
+    if (id) {
+      select('image', id);
+      refreshRecentPhotos();
+    }
+  }
+
+  /* Any upload path (Uploads tab, Add Photo, a canvas drop) brings the new photo into Recent. */
+  function refreshRecentPhotos() {
+    if (recentPhotosShown.current) loadRecentPhotos();
+    else setRecentPhotos(null); // reloads when the Uploads tab next shows
+  }
+
+  /*
+   * Photos dropped straight onto the board land where they were dropped -
+   * several a little apart - and the last one is selected, as if each had
+   * come through Add Photo.
+   */
+  async function dropPhotosOnCanvas(event) {
+    event.preventDefault();
+    setCanvasDropActive(false);
+    const files = pickImageFiles(event.dataTransfer.files);
+    if (!files.length) {
+      if (event.dataTransfer.files?.length) showToast.error('Only PNG, JPG or WEBP photos can be dropped.');
+      return;
+    }
+    const skipped = event.dataTransfer.files.length - files.length;
+    if (skipped) showToast.error(`${skipped} file${skipped === 1 ? ' was' : 's were'} skipped: only PNG, JPG or WEBP photos can be dropped.`);
+
+    const rect = middleColumnRef.current.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    let lastId = null;
+    for (const [index, file] of files.entries()) {
+      // one at a time, so they stack in drop order
+      const id = await editor.handleAddPhoto(file, { x: x + index * 3, y: y + index * 3 });
+      if (id) lastId = id;
+    }
+    if (lastId) {
+      select('image', lastId);
+      refreshRecentPhotos();
+    }
   }
 
   async function addVideoAndSelect(file) {
@@ -878,8 +1156,8 @@ export default function AdminVisualBoard() {
     if (id) select('video', id);
   }
 
-  function addTextAndSelect() {
-    select('text', editor.addText());
+  function addTextAndSelect(preset) {
+    select('text', editor.addText(preset));
   }
 
   function addDividerAndSelect(orientation) {
@@ -888,26 +1166,6 @@ export default function AdminVisualBoard() {
 
   function addShapeAndSelect(kind) {
     select('shape', editor.addShape(kind));
-  }
-
-  function removePhoto(id) {
-    editor.removePhoto(id);
-    deselectIfSelected('image', id);
-  }
-
-  function removeVideo(id) {
-    editor.removeVideo(id);
-    deselectIfSelected('video', id);
-  }
-
-  function removeText(id) {
-    editor.removeText(id);
-    deselectIfSelected('text', id);
-  }
-
-  function removeShape(id) {
-    editor.removeShape(id);
-    deselectIfSelected('shape', id);
   }
 
   /* The current selection as a list - multi first, else the single one. */
@@ -927,7 +1185,12 @@ export default function AdminVisualBoard() {
   }
 
   function removeSelection() {
-    const selection = currentSelection();
+    removeEntries(currentSelection());
+  }
+
+  /* Deletes (or, for the one-of-a-kind boxes and logo, hides) these
+     elements - the Delete key, the menus and each Layers row all land here. */
+  function removeEntries(selection) {
     if (!selection.length) return;
 
     const { removed, hidden, locked } = editor.removeMany(selection);
@@ -942,8 +1205,11 @@ export default function AdminVisualBoard() {
       );
     }
 
-    setSelected(null);
-    setMultiSelected([]);
+    const current = currentSelection();
+    if (selection.some(({ kind, id }) => current.some((c) => c.kind === kind && (c.id ?? null) === (id ?? null)))) {
+      setSelected(null);
+      setMultiSelected([]);
+    }
   }
 
   function duplicateSelection() {
@@ -1009,13 +1275,6 @@ export default function AdminVisualBoard() {
     setZoom((current) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current + step)));
   }
 
-  /* A readable name for a selection, for messages. */
-  function describe(target) {
-    if (BOX_KINDS[target.kind]) return BOX_KINDS[target.kind].label;
-    if (target.kind === 'logo') return 'Logo';
-    return target.kind.charAt(0).toUpperCase() + target.kind.slice(1);
-  }
-
   /*
    * A divider's CSS. The grab area is padded out to a usable thickness even
    * when the rule itself is a hairline, so a 1px line is still easy to hit.
@@ -1033,6 +1292,12 @@ export default function AdminVisualBoard() {
       /* the rule inside is drawn at the divider's real thickness */
       '--vb-divider-thickness': `${divider.thickness}px`,
     };
+  }
+
+  /* A photo or video's picture: its border and opacity, kept off the button
+     so the selection handles are never bordered or faded. */
+  function mediaStyle(media) {
+    return withOpacity({ ...mediaStrokeCss(media.stroke, media.scale), boxSizing: 'border-box' }, media);
   }
 
   /* A positioned box's CSS - centred on its position, sized in percentages. */
@@ -1064,6 +1329,20 @@ export default function AdminVisualBoard() {
   /* The layers panel's label, icon, and underlying data object for one
      layerOrder entry - null if it names something that no longer exists. */
   function layerInfo(entry) {
+    const info = autoLayerInfo(entry);
+    if (info && DELETABLE_KINDS.has(entry.kind) && info.element?.name) return { ...info, label: info.element.name };
+    return info;
+  }
+
+  function renameLayer(entry, value) {
+    setRenamingLayer(null);
+    const element = findElement(layout, entry.kind, entry.id);
+    if (!element) return;
+    const result = renamedLayer(value, { name: element.name, autoLabel: autoLayerInfo(entry)?.label });
+    if (result.change) editor.updateElement(entry.kind, entry.id, { name: result.name });
+  }
+
+  function autoLayerInfo(entry) {
     if (entry.kind === 'logo') {
       return { label: 'Logo', Icon: ImageIcon, element: layout.logo };
     }
@@ -1089,7 +1368,7 @@ export default function AdminVisualBoard() {
     if (entry.kind === 'text') {
       const index = layout.texts.findIndex((item) => item.id === entry.id);
       if (index < 0) return null;
-      return { label: `Text ${index + 1}`, Icon: Type, element: layout.texts[index] };
+      return { label: textLayerName(layout.texts[index].text, index), Icon: Type, element: layout.texts[index] };
     }
 
     if (entry.kind === 'image') {
@@ -1139,9 +1418,9 @@ export default function AdminVisualBoard() {
           onPointerDown={handlePointerDown('divider', divider.id)}
           onContextMenu={handleContextMenu('divider', divider.id)}
         >
-          <span className="vb-divider-line" aria-hidden="true" />
+          <span className="vb-divider-line" aria-hidden="true" style={withOpacity({}, divider)} />
 
-          {selectedOnCanvas && (
+          {selectedOnCanvas && !divider.locked && (
             <SelectionHandles
               handles={divider.orientation === 'horizontal' ? ['w', 'e'] : ['n', 's']}
               onResize={(h) => editor.beginDividerResize(divider.id, h.x || h.y)}
@@ -1168,14 +1447,18 @@ export default function AdminVisualBoard() {
           onPointerDown={handlePointerDown('candidates', null)}
           onContextMenu={handleContextMenu('candidates', null)}
         >
-          {/* the live board's own candidate cards, so the box shows what it will hold */}
-          <CandidateBoard
-            candidates={candidates}
-            perRow={box.perRow ?? 2}
-            secondsPerCard={box.secondsPerCard ?? 4}
-          />
+          {/* the live board's own candidate cards, so the box shows what it will hold;
+              faded on this inner wrapper so the resize handles stay solid */}
+          <div className="vb-box-content" style={withOpacity({}, box)}>
+            <CandidateBoard
+              candidates={candidates}
+              perRow={box.perRow ?? 2}
+              secondsPerCard={box.secondsPerCard ?? 4}
+              look={normalizeCardSettings(box)}
+            />
+          </div>
 
-          {selectedOnCanvas && (
+          {selectedOnCanvas && !box.locked && (
             <SelectionHandles handles={ALL_HANDLES} onResize={(h) => editor.beginHandleResize('candidates', null, h)} />
           )}
         </div>
@@ -1209,15 +1492,17 @@ export default function AdminVisualBoard() {
               : 'Hidden on the live board until an announcement is posted'
           }
         >
-          <AnnouncementBanner
-            message={liveAnnouncement ? liveAnnouncement.message : 'Announcements'}
-            style={resolveAnnouncementStyle(announcementStyle)}
-            showIcon={announcementStyle.showIcon}
-            icon={announcementStyle.icon}
-            background={announcementStyle.background}
-          />
+          <div className="vb-box-content" style={withOpacity({}, box)}>
+            <AnnouncementBanner
+              message={liveAnnouncement ? liveAnnouncement.message : 'Announcements'}
+              style={resolveAnnouncementStyle(announcementStyle)}
+              showIcon={announcementStyle.showIcon}
+              icon={announcementStyle.icon}
+              background={announcementStyle.background}
+            />
+          </div>
 
-          {selectedOnCanvas && (
+          {selectedOnCanvas && !box.locked && (
             <SelectionHandles handles={ALL_HANDLES} onResize={(h) => editor.beginHandleResize('announcements', null, h)} />
           )}
         </div>
@@ -1242,9 +1527,14 @@ export default function AdminVisualBoard() {
           onPointerDown={handlePointerDown('logo')}
           onContextMenu={handleContextMenu('logo', null)}
         >
-          <img src={layout.logo.url || '/visual/logo.png'} alt="" className="vb-logo-img" />
+          <img
+            src={layout.logo.url || '/visual/logo.png'}
+            alt=""
+            className="vb-logo-img"
+            style={withOpacity({}, layout.logo)}
+          />
 
-          {isSelected('logo') && (
+          {isSelected('logo') && !layout.logo.locked && (
             <SelectionHandles
               handles={CORNER_HANDLES}
               rotation={layout.logo.rotation ?? 0}
@@ -1291,11 +1581,11 @@ export default function AdminVisualBoard() {
             if (!text.locked) setEditingTextId(text.id);
           }}
         >
-          <span style={resolveTextStyle(text)}>
+          <span style={withOpacity(resolveTextStyle(text), text)}>
             <TextContent text={text} />
           </span>
 
-          {isSelected('text', text.id) && (
+          {isSelected('text', text.id) && !text.locked && (
             <SelectionHandles
               handles={TEXT_HANDLES}
               rotation={text.rotation ?? 0}
@@ -1327,9 +1617,9 @@ export default function AdminVisualBoard() {
           onPointerDown={handlePointerDown('image', image.id)}
           onContextMenu={handleContextMenu('image', image.id)}
         >
-          <img src={image.url} alt="" className="vb-photo-img" />
+          <img src={image.url} alt="" className="vb-photo-img" style={mediaStyle(image)} />
 
-          {isSelected('image', image.id) && (
+          {isSelected('image', image.id) && !image.locked && (
             <SelectionHandles
               handles={CORNER_HANDLES}
               rotation={image.rotation ?? 0}
@@ -1353,15 +1643,18 @@ export default function AdminVisualBoard() {
           className={`vb-element vb-element-media ${isSelected('video', video.id) ? 'selected' : ''} ${
             isMultiSelected('video', video.id) ? 'multi-selected' : ''
           }`}
-          style={scaledPositionStyle(video, PHOTO_BASE_WIDTH)}
+          style={{
+            ...scaledPositionStyle(video, PHOTO_BASE_WIDTH),
+            ...resolveAnimationCss(video.animation),
+          }}
           data-vb-kind="video"
           data-vb-id={video.id}
           onPointerDown={handlePointerDown('video', video.id)}
           onContextMenu={handleContextMenu('video', video.id)}
         >
-          <video src={video.url} className="vb-photo-img" muted loop autoPlay playsInline />
+          <video src={video.url} className="vb-photo-img" style={mediaStyle(video)} muted loop autoPlay playsInline />
 
-          {isSelected('video', video.id) && (
+          {isSelected('video', video.id) && !video.locked && (
             <SelectionHandles
               handles={CORNER_HANDLES}
               rotation={video.rotation ?? 0}
@@ -1405,7 +1698,7 @@ export default function AdminVisualBoard() {
           onPointerDown={handlePointerDown('shape', shape.id)}
           onContextMenu={handleContextMenu('shape', shape.id)}
         >
-          <div className="vb-shape-fill" style={shapeFillStyle}>
+          <div className="vb-shape-fill" style={withOpacity(shapeFillStyle, shape)}>
             {isEmptyFrame && <Frame size={16} className="vb-frame-hint" />}
 
             {isZigzag(shape) ? (
@@ -1429,7 +1722,7 @@ export default function AdminVisualBoard() {
             )}
           </div>
 
-          {selectedOnCanvas && (
+          {selectedOnCanvas && !shape.locked && (
             <SelectionHandles
               handles={ALL_HANDLES}
               rotation={shape.rotation}
@@ -1473,60 +1766,45 @@ export default function AdminVisualBoard() {
 
   const isTextSelected = selected?.kind === 'text';
   const shapeLabels = labelShapes(layout.shapes);
+  const overlayIn = (node) => (isFullscreen && layoutRef.current ? createPortal(node, layoutRef.current) : node);
+
+  /* Props for a folding section of the selected element (or the board, with nothing selected). */
+  function sectionProps(name) {
+    const kind = selected?.kind ?? 'board';
+    const open = isSectionOpen(name, kind, sectionOverrides);
+    return { name, open, onToggle: () => setSectionOverrides((current) => ({ ...current, [name]: !open })) };
+  }
+
   const selectionNow = currentSelection();
+
+  /* The selection's on-screen rect, for the floating bar (null when none of it is drawn). */
+  function measureSelection() {
+    const surface = middleColumnRef.current;
+    const parts = currentSelection()
+      .map(({ kind, id }) => editor.measure(kind, id))
+      .filter(Boolean);
+    if (!surface || !parts.length) return null;
+
+    const bounds = unionBounds(parts);
+    const rect = surface.getBoundingClientRect();
+    return {
+      left: rect.left + (bounds.left / 100) * rect.width,
+      right: rect.left + (bounds.right / 100) * rect.width,
+      top: rect.top + (bounds.top / 100) * rect.height,
+      bottom: rect.top + (bounds.bottom / 100) * rect.height,
+    };
+  }
+
+  const showFloatingBar =
+    selectionNow.length > 0 && !editor.interacting && !boxSelectRect && !editingTextId && !focusMode && !contextMenu;
   const selectionLocked =
     selectionNow.length > 0 &&
     selectionNow.every(({ kind, id }) => findElement(layout, kind, id)?.locked);
 
   return (
     <>
-      <header className="dashboard-header">
-        <div>
-        
-        </div>
-      </header>
-
       <section className="panel table-panel">
-        <div className="panel-header">
-          <div className="panel-title-area">
-            <div className="panel-title-icon">
-              <LayoutTemplate size={12} strokeWidth={2.2} />
-            </div>
-            <div>
-              <h2 className="panel-title">Visual Board</h2>
-              <p className={`panel-subtitle ${isDirty ? 'vb-unpublished' : ''}`}>
-                {isDirty ? 'Unpublished changes' : 'Up to date with the live board'}
-              </p>
-            </div>
-          </div>
-
-          <div className="panel-actions">
-            <button type="button" className="secondary-button" onClick={editor.resetLayout}>
-              <RotateCcw size={12} />
-              Reset
-            </button>
-            <a
-              href="/admin/visual-board/preview"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="secondary-button"
-              title="See your unpublished changes as they'll look once Published"
-            >
-              Preview
-              <ExternalLink size={11} />
-            </a>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={publish}
-              disabled={!isDirty || publishing}
-            >
-              {publishing ? 'Publishing…' : 'Publish'}
-            </button>
-          </div>
-        </div>
-
-        {/* ================= TOOLBAR ================= */}
+        {/* ================= EDITOR BAR ================= */}
 
         <div className="vb-toolbar">
           <div className="vb-toolbar-group">
@@ -1550,113 +1828,135 @@ export default function AdminVisualBoard() {
             >
               <Redo2 size={15} />
             </button>
-          </div>
-
-          <span className="vb-toolbar-divider" aria-hidden="true" />
-
-          <button
-            type="button"
-            className={`vb-toolbar-button ${zoom === 100 ? 'active' : ''}`}
-            onClick={() => setZoom(100)}
-            title="Reset zoom to fit the stage"
-          >
-            <Scan size={15} />
-            <span>Fit</span>
-          </button>
-
-          <label className="vb-toolbar-zoom" title="Canvas size">
-            <ZoomIn size={14} />
-            <input
-              type="range"
-              min={MIN_ZOOM}
-              max={MAX_ZOOM}
-              step="5"
-              value={zoom}
-              onChange={(event) => setZoom(Number(event.target.value))}
-              aria-label="Canvas size"
-            />
-            <span className="vb-toolbar-zoom-value">{zoom}%</span>
-          </label>
-
-          <span className="vb-toolbar-divider" aria-hidden="true" />
-
-          <div className="vb-toolbar-group">
-            <button
-              type="button"
-              className={`vb-toolbar-button ${showGrid ? 'active' : ''}`}
-              onClick={() => setShowGrid((current) => !current)}
-              aria-pressed={showGrid}
-              title="Toggle grid"
-            >
-              <Grid3x3 size={15} />
-              <span>Grid</span>
-            </button>
-            <button
-              type="button"
-              className={`vb-toolbar-button ${snapEnabled ? 'active' : ''}`}
-              onClick={() => setSnapEnabled((current) => !current)}
-              aria-pressed={snapEnabled}
-              title="Snap to other elements, the board edges and centre (hold Ctrl to drag freely)"
-            >
-              <Magnet size={15} />
-              <span>Snap</span>
-            </button>
             <button
               type="button"
               className={`vb-toolbar-button ${boxSelectMode ? 'active' : ''}`}
               onClick={() => setBoxSelectMode((current) => !current)}
               aria-pressed={boxSelectMode}
+              aria-label="Box select"
               title="Box select - drag a rectangle across the canvas to select everything it touches"
             >
               <BoxSelect size={15} />
-              <span>Box Select</span>
             </button>
           </div>
 
+          <span className="vb-toolbar-divider" aria-hidden="true" />
+
+          <BarMenu
+            label={`${zoom}%`}
+            title="Zoom"
+            portal={overlayIn}
+            items={[
+              { type: 'action', label: 'Zoom in', onSelect: () => zoomBy(10), disabled: zoom >= MAX_ZOOM },
+              { type: 'action', label: 'Zoom out', onSelect: () => zoomBy(-10), disabled: zoom <= MIN_ZOOM },
+              { type: 'separator' },
+              ...ZOOM_PRESETS.map((value) => ({
+                type: 'action',
+                label: value === 100 ? 'Fit (100%)' : `${value}%`,
+                onSelect: () => setZoom(value),
+              })),
+            ]}
+          />
+
+          <BarMenu
+            label="View"
+            title="View"
+            portal={overlayIn}
+            items={[
+              { type: 'group', label: 'Show' },
+              { type: 'check', label: 'Grid (snap to it)', checked: showGrid, onToggle: () => setShowGrid((current) => !current) },
+              { type: 'check', label: 'Rulers', checked: showRulers, onToggle: () => setShowRulers((current) => !current) },
+              { type: 'check', label: 'Guide lines', checked: showGuides, onToggle: () => setShowGuides((current) => !current) },
+              { type: 'separator' },
+              { type: 'group', label: 'Snapping' },
+              {
+                type: 'check',
+                label: 'Snap to elements',
+                hint: 'hold Ctrl to skip',
+                checked: snapEnabled,
+                onToggle: () => setSnapEnabled((current) => !current),
+              },
+              { type: 'check', label: 'Snap to guide lines', checked: snapToGuides, onToggle: () => setSnapToGuides((current) => !current) },
+              { type: 'separator' },
+              { type: 'group', label: 'Guide lines' },
+              { type: 'check', label: 'Lock guide lines', checked: guidesLocked, onToggle: () => setGuidesLocked((current) => !current) },
+              {
+                type: 'action',
+                label: 'Clear all guide lines',
+                disabled: !guides.x.length && !guides.y.length,
+                onSelect: () => setGuides({ x: [], y: [] }),
+              },
+              { type: 'separator' },
+              { type: 'group', label: 'Screen' },
+              { type: 'check', label: 'Focus mode', checked: focusMode, onToggle: toggleFocusMode },
+              { type: 'check', label: 'Fullscreen', checked: isFullscreen, onToggle: toggleFullscreen },
+            ]}
+          />
+
           <span className="vb-toolbar-spacer" />
 
-          <button
-            type="button"
-            className="vb-toolbar-button"
-            onClick={() => setTemplateModal('save')}
-            title="Save the current board as a template"
-          >
-            <Save size={15} />
-            <span>Save Template</span>
-          </button>
-          <button
-            type="button"
-            className="vb-toolbar-button"
-            onClick={() => setTemplateModal('apply')}
-            title="Apply a saved template"
-          >
-            <FolderOpen size={15} />
-            <span>Apply</span>
-          </button>
+          <BarMenu
+            label="Templates"
+            title="Templates"
+            portal={overlayIn}
+            items={[
+              { type: 'action', label: 'Save as template…', onSelect: () => setTemplateModal('save') },
+              { type: 'action', label: 'Apply a template…', onSelect: () => setTemplateModal('apply') },
+            ]}
+          />
+
+          <BarMenu
+            icon={MoreHorizontal}
+            title="More"
+            portal={overlayIn}
+            items={[{ type: 'action', label: 'Reset board to default', onSelect: editor.resetLayout }]}
+          />
 
           <span className="vb-toolbar-divider" aria-hidden="true" />
 
           <button
             type="button"
             className="vb-toolbar-button"
-            onClick={toggleFullscreen}
-            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            onClick={exportPng}
+            disabled={exporting}
+            title="Save the draft as a 1920x1080 picture"
           >
-            {isFullscreen ? <Minimize size={15} /> : <Maximize size={15} />}
-            <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+            <ImageDown size={14} />
+            <span>{exporting ? 'Exporting…' : 'Export PNG'}</span>
           </button>
           <button
             type="button"
-            className={`vb-toolbar-button ${focusMode ? 'active' : ''}`}
-            onClick={toggleFocusMode}
-            title="Fullscreen with every editing control hidden - just the board"
+            className="vb-toolbar-button"
+            onClick={() => setHistoryOpen(true)}
+            title="Earlier published versions of the board"
           >
-            <Focus size={15} />
-            <span>Focus</span>
+            <History size={14} />
+            <span>History</span>
+          </button>
+          <a
+            href="/admin/visual-board/preview"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="vb-toolbar-button"
+            title="See your unpublished changes as they'll look once Published"
+          >
+            <span>Preview</span>
+            <ExternalLink size={11} />
+          </a>
+          <button
+            type="button"
+            className="primary-button vb-publish-button"
+            onClick={publish}
+            disabled={!isDirty || publishing}
+            title={isDirty ? 'Publish (unpublished changes)' : 'Up to date with the live board'}
+            aria-label={isDirty ? 'Publish (unpublished changes)' : 'Up to date with the live board'}
+          >
+            {isDirty && <span className="vb-publish-dot" aria-hidden="true" />}
+            {publishing ? 'Publishing…' : 'Publish'}
           </button>
         </div>
 
-        <div className={`vb-layout ${focusMode ? 'vb-focus-mode' : ''}`} ref={layoutRef}>
+        <div className={`vb-layout ${focusMode ? 'vb-focus-mode' : ''} ${panelFolded ? 'panel-folded' : ''}`} ref={layoutRef}>
           {focusMode && (
             <button
               type="button"
@@ -1680,41 +1980,53 @@ export default function AdminVisualBoard() {
                     key={tab.id}
                     type="button"
                     className={`vb-rail-button ${activePanel === tab.id ? 'active' : ''}`}
-                    onClick={() => setActivePanel(tab.id)}
+                    aria-pressed={activePanel === tab.id && !panelFolded}
+                    onClick={() => {
+                      const next = clickTab({ active: activePanel, folded: panelFolded }, tab.id);
+                      setActivePanel(next.active);
+                      setPanelFolded(next.folded);
+                    }}
                   >
                     <Icon size={18} strokeWidth={1.8} />
                     <span>{tab.label}</span>
                   </button>
                 );
               })}
+              {panelFolded && (
+                <button
+                  type="button"
+                  className="vb-rail-button vb-rail-open"
+                  onClick={() => setPanelFolded(false)}
+                  aria-label="Open panel"
+                  title="Open panel"
+                >
+                  <ChevronsRight size={16} />
+                </button>
+              )}
             </div>
 
+            {!panelFolded && (
             <div className="vb-panel">
+              <div className="vb-panel-head">
+                <h3>{RAIL_TABS.find((tab) => tab.id === activePanel)?.label}</h3>
+                {activePanel === 'layers' && (
+                  <span className="vb-panel-count">{layout.layerOrder.filter((entry) => layerInfo(entry)).length}</span>
+                )}
+                <button
+                  type="button"
+                  className="vb-panel-fold"
+                  onClick={() => setPanelFolded(true)}
+                  aria-label="Fold panel"
+                  title="Fold panel"
+                >
+                  <ChevronsLeft size={15} />
+                </button>
+              </div>
               {activePanel === 'elements' && (
                 <>
-                  <p className="vb-panel-label">Add a divider</p>
+                  <p className="vb-panel-label">Shapes</p>
                   <div className="vb-shape-grid">
-                    <button
-                      type="button"
-                      className="vb-shape-grid-button"
-                      onClick={() => addDividerAndSelect('vertical')}
-                    >
-                      <SeparatorVertical size={16} />
-                      <span>Vertical</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="vb-shape-grid-button"
-                      onClick={() => addDividerAndSelect('horizontal')}
-                    >
-                      <SeparatorHorizontal size={16} />
-                      <span>Horizontal</span>
-                    </button>
-                  </div>
-
-                  <p className="vb-panel-label">Add a shape</p>
-                  <div className="vb-shape-grid">
-                    {SHAPE_KINDS.map((option) => {
+                    {SHAPE_KINDS.filter((option) => option.value !== 'line').map((option) => {
                       const Icon = SHAPE_ICONS[option.value] ?? Square;
                       return (
                         <button
@@ -1730,256 +2042,152 @@ export default function AdminVisualBoard() {
                     })}
                   </div>
 
-                  {layout.shapes.length > 0 && (
-                    <>
-                      <p className="vb-panel-label">On the board</p>
-                      {layout.shapes.map((shape, index) => {
-                        const Icon = SHAPE_ICONS[shape.kind] ?? Square;
-
-                        return (
-                          <div
-                            key={shape.id}
-                            className={`vb-element-row-wrap ${isSelected('shape', shape.id) ? 'active' : ''}`}
-                          >
-                            <button
-                              type="button"
-                              className={`vb-element-row ${isVisible(shape) ? '' : 'is-hidden'}`}
-                              onClick={() => select('shape', shape.id)}
-                            >
-                              <Icon size={14} />
-                              {shapeLabels[index]}
-                            </button>
-                            <button
-                              type="button"
-                              className="vb-layer-icon-button"
-                              onClick={() => editor.setLocked('shape', shape.id, !shape.locked)}
-                              aria-label={`${shape.locked ? 'Unlock' : 'Lock'} ${shapeLabels[index]}`}
-                            >
-                              {shape.locked ? <Lock size={13} /> : <LockOpen size={13} />}
-                            </button>
-                            <button
-                              type="button"
-                              className="vb-element-remove"
-                              onClick={() => removeShape(shape.id)}
-                              aria-label={`Remove ${shapeLabels[index]}`}
-                            >
-                              <X size={12} />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </>
-                  )}
+                  <p className="vb-panel-label">Lines</p>
+                  <div className="vb-shape-grid">
+                    <button
+                      type="button"
+                      className="vb-shape-grid-button"
+                      onClick={() => addShapeAndSelect('line')}
+                    >
+                      <Minus size={16} />
+                      <span>Line</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="vb-shape-grid-button"
+                      onClick={() => addDividerAndSelect('vertical')}
+                    >
+                      <SeparatorVertical size={16} />
+                      <span>Divider ↕</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="vb-shape-grid-button"
+                      onClick={() => addDividerAndSelect('horizontal')}
+                    >
+                      <SeparatorHorizontal size={16} />
+                      <span>Divider ↔</span>
+                    </button>
+                  </div>
                 </>
               )}
 
               {activePanel === 'text' && (
                 <>
-                  <button type="button" className="vb-panel-add" onClick={addTextAndSelect}>
-                    <Plus size={14} />
-                    Add Text
-                  </button>
-
-                  {layout.texts.length > 0 && (
-                    <>
-                      <p className="vb-panel-label">On the board</p>
-                      {layout.texts.map((text, index) => (
-                        <div
-                          key={text.id}
-                          className={`vb-element-row-wrap ${isSelected('text', text.id) ? 'active' : ''}`}
-                        >
-                          <button
-                            type="button"
-                            className={`vb-element-row ${isVisible(text) ? '' : 'is-hidden'}`}
-                            onClick={() => select('text', text.id)}
-                          >
-                            <Type size={14} />
-                            Text {index + 1}
-                          </button>
-                          <button
-                            type="button"
-                            className="vb-layer-icon-button"
-                            onClick={() => editor.setLocked('text', text.id, !text.locked)}
-                            aria-label={`${text.locked ? 'Unlock' : 'Lock'} Text ${index + 1}`}
-                          >
-                            {text.locked ? <Lock size={13} /> : <LockOpen size={13} />}
-                          </button>
-                          <button
-                            type="button"
-                            className="vb-element-remove"
-                            onClick={() => removeText(text.id)}
-                            aria-label={`Remove Text ${index + 1}`}
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </>
-              )}
-
-              {activePanel === 'brand' && (
-                <>
-                  <p className="vb-panel-label">Board identity</p>
-
-                  <div className={`vb-element-row-wrap ${isSelected('logo') ? 'active' : ''}`}>
+                  {TEXT_PRESETS.map((preset) => (
                     <button
+                      key={preset.id}
                       type="button"
-                      className={`vb-element-row ${isVisible(layout.logo) ? '' : 'is-hidden'}`}
-                      onClick={() => select('logo')}
+                      className={`vb-text-preset is-${preset.id}`}
+                      onClick={() => addTextAndSelect(preset)}
+                      aria-label={`Add ${preset.label.toLowerCase()}`}
                     >
-                      <ImageIcon size={14} />
-                      Logo
+                      <span
+                        style={{
+                          fontFamily: FONT_STACKS[preset.style.fontFamily],
+                          fontWeight: preset.style.weight,
+                          textTransform: preset.style.textCase === 'uppercase' ? 'uppercase' : 'none',
+                          ...fillTextCss(preset.style.fill),
+                        }}
+                      >
+                        {preset.bulletList
+                          ? preset.text.split('\n').map((line) => <span key={line} className="vb-text-preset-line">• {line}</span>)
+                          : preset.text}
+                      </span>
                     </button>
-                    <button
-                      type="button"
-                      className="vb-layer-icon-button"
-                      onClick={() => editor.setLocked('logo', null, !layout.logo.locked)}
-                      aria-label={`${layout.logo.locked ? 'Unlock' : 'Lock'} Logo`}
-                    >
-                      {layout.logo.locked ? <Lock size={13} /> : <LockOpen size={13} />}
-                    </button>
-                  </div>
-
-                  <div className={`vb-element-row-wrap ${isSelected('candidates') ? 'active' : ''}`}>
-                    <button
-                      type="button"
-                      className="vb-element-row"
-                      onClick={() => select('candidates')}
-                    >
-                      <UsersRound size={14} />
-                      Candidate Board
-                    </button>
-                    <button
-                      type="button"
-                      className="vb-layer-icon-button"
-                      onClick={() => editor.setLocked('candidates', null, !layout.candidates.locked)}
-                      aria-label={`${layout.candidates.locked ? 'Unlock' : 'Lock'} Candidate Board`}
-                    >
-                      {layout.candidates.locked ? <Lock size={13} /> : <LockOpen size={13} />}
-                    </button>
-                  </div>
+                  ))}
+                  <p className="vb-panel-hint">Click a style to add it to the board.</p>
                 </>
               )}
 
               {activePanel === 'uploads' && (
                 <>
-                  <label htmlFor="vb-add-photo" className="vb-panel-add">
-                    <Plus size={14} />
-                    Add Photo
-                  </label>
                   <input
-                    id="vb-add-photo"
+                    id="vb-add-upload"
                     type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    style={{ display: 'none' }}
+                    multiple
+                    accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/ogg"
+                    className="vb-upload-input"
+                    aria-label="Choose photos or videos to add"
                     onChange={(event) => {
-                      void addPhotoAndSelect(event.target.files?.[0] ?? null);
+                      const files = [...(event.target.files ?? [])];
                       event.target.value = '';
+                      void uploadFiles(files);
                     }}
                   />
-
-                  {layout.images.length > 0 && (
-                    <>
-                      <p className="vb-panel-label">Uploaded photos</p>
-                      {layout.images.map((image, index) => (
-                        <div
-                          key={image.id}
-                          className={`vb-element-row-wrap ${isSelected('image', image.id) ? 'active' : ''}`}
-                        >
-                          <button
-                            type="button"
-                            className={`vb-element-row ${isVisible(image) ? '' : 'is-hidden'}`}
-                            onClick={() => select('image', image.id)}
-                          >
-                            <ImagePlus size={14} />
-                            Photo {index + 1}
-                          </button>
-                          <button
-                            type="button"
-                            className="vb-layer-icon-button"
-                            onClick={() => editor.setLocked('image', image.id, !image.locked)}
-                            aria-label={`${image.locked ? 'Unlock' : 'Lock'} Photo ${index + 1}`}
-                          >
-                            {image.locked ? <Lock size={13} /> : <LockOpen size={13} />}
-                          </button>
-                          <button
-                            type="button"
-                            className="vb-element-remove"
-                            onClick={() => removePhoto(image.id)}
-                            aria-label={`Remove Photo ${index + 1}`}
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ))}
-                    </>
-                  )}
-
-                  <label htmlFor="vb-add-video" className="vb-panel-add">
-                    <Plus size={14} />
-                    Add Video
-                  </label>
-                  <input
-                    id="vb-add-video"
-                    type="file"
-                    accept="video/mp4,video/webm,video/ogg"
-                    style={{ display: 'none' }}
-                    onChange={(event) => {
-                      void addVideoAndSelect(event.target.files?.[0] ?? null);
-                      event.target.value = '';
+                  <label
+                    htmlFor="vb-add-upload"
+                    className={`vb-upload-drop ${uploadDropActive ? 'is-over' : ''}`}
+                    onDragOver={(event) => {
+                      if (!event.dataTransfer.types.includes('Files')) return;
+                      event.preventDefault();
+                      setUploadDropActive(true);
                     }}
-                  />
+                    onDragLeave={(event) => {
+                      // crossing onto the icon or text inside still counts as over the zone
+                      if (!event.currentTarget.contains(event.relatedTarget)) setUploadDropActive(false);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setUploadDropActive(false);
+                      if (event.dataTransfer.files?.length) void uploadFiles(event.dataTransfer.files);
+                    }}
+                  >
+                    <UploadCloud size={20} />
+                    <span>Drop photos or videos here</span>
+                    <strong>or choose files</strong>
+                  </label>
 
-                  {layout.videos.length > 0 && (
+                  <p className="vb-panel-label">Recent photos</p>
+                  {recentPhotos === 'loading' || recentPhotos === null ? (
+                    <p className="vb-panel-hint">Loading…</p>
+                  ) : recentPhotos === 'error' ? (
+                    <p className="vb-panel-hint">
+                      Recent photos couldn't be loaded.{' '}
+                      <button type="button" className="vb-retry-link" onClick={loadRecentPhotos}>
+                        Retry
+                      </button>
+                    </p>
+                  ) : recentPhotos.length === 0 ? (
+                    <p className="vb-panel-hint">Photos you upload show up here.</p>
+                  ) : (
                     <>
-                      <p className="vb-panel-label">Uploaded videos</p>
-                      {layout.videos.map((video, index) => (
-                        <div
-                          key={video.id}
-                          className={`vb-element-row-wrap ${isSelected('video', video.id) ? 'active' : ''}`}
-                        >
+                      <div className="vb-recent-grid">
+                        {recentPhotos.map((url) => (
                           <button
+                            key={url}
                             type="button"
-                            className={`vb-element-row ${isVisible(video) ? '' : 'is-hidden'}`}
-                            onClick={() => select('video', video.id)}
+                            className="vb-recent-photo"
+                            onClick={() => select('image', editor.addImageFromUrl(url))}
+                            aria-label="Add this photo to the board"
+                            title="Add to the board"
                           >
-                            <Video size={14} />
-                            Video {index + 1}
+                            <img src={url} alt="" loading="lazy" />
                           </button>
-                          <button
-                            type="button"
-                            className="vb-layer-icon-button"
-                            onClick={() => editor.setLocked('video', video.id, !video.locked)}
-                            aria-label={`${video.locked ? 'Unlock' : 'Lock'} Video ${index + 1}`}
-                          >
-                            {video.locked ? <Lock size={13} /> : <LockOpen size={13} />}
-                          </button>
-                          <button
-                            type="button"
-                            className="vb-element-remove"
-                            onClick={() => removeVideo(video.id)}
-                            aria-label={`Remove Video ${index + 1}`}
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                      <p className="vb-panel-hint">Click a photo to put it on the board again, with no new upload.</p>
                     </>
                   )}
                 </>
               )}
 
+              {activePanel === 'icons' && (
+                <IconPanel onInsert={(url) => select('image', editor.addImageFromUrl(url))} />
+              )}
+
               {activePanel === 'layers' && (
                 <>
                   <p className="vb-panel-label">Front to back</p>
-                  {[...layout.layerOrder].reverse().map((entry, displayIndex, list) => {
+                  {(() => {
+                  const list = [...layout.layerOrder].reverse();
+                  const renderRow = (entry, nested = false) => {
+                    const displayIndex = list.indexOf(entry);
                     const info = layerInfo(entry);
                     if (!info) return null;
 
                     const key = `${entry.kind}:${entry.id ?? ''}`;
-                    const canLockOrHide = true;
                     const visible = info.element ? isVisible(info.element) : true;
                     const locked = info.element?.locked ?? false;
                     const Icon = info.Icon;
@@ -1989,10 +2197,13 @@ export default function AdminVisualBoard() {
                     return (
                       <div
                         key={key}
-                        className={`vb-layer-row ${isSelected(entry.kind, entry.id) ? 'active' : ''} ${
+                        data-layer-key={key}
+                        className={`vb-layer-row ${
+                          isSelected(entry.kind, entry.id) || isMultiSelected(entry.kind, entry.id) ? 'active' : ''
+                        } ${nested ? 'is-nested' : ''} ${
                           isDragging ? 'dragging' : ''
-                        } ${layerDropTarget === key && !isDragging ? 'drop-target' : ''}`}
-                        draggable
+                        } ${layerDropTarget === key && !isDragging ? 'drop-target' : ''} ${visible ? '' : 'is-hidden'}`}
+                        draggable={renamingLayer !== key}
                         onDragStart={(event) => {
                           event.dataTransfer.effectAllowed = 'move';
                           setDraggingLayer({ kind: entry.kind, id: entry.id });
@@ -2017,14 +2228,57 @@ export default function AdminVisualBoard() {
                           setLayerDropTarget(null);
                         }}
                       >
-                        <span className="vb-layer-grip" aria-hidden="true">
-                          <GripVertical size={13} />
-                        </span>
+                        {renamingLayer === key ? (
+                          <div className="vb-layer-name is-renaming">
+                            <LayerThumb thumb={layerThumb(entry.kind, info.element)} Icon={Icon} />
+                            <input
+                              className="vb-layer-rename"
+                              defaultValue={info.element?.name ?? info.label}
+                              aria-label={`Rename ${info.label}`}
+                              maxLength={40}
+                              autoFocus
+                              onFocus={(event) => event.target.select()}
+                              onKeyDown={(event) => {
+                                event.stopPropagation(); // typing never fires the editor's shortcuts
+                                if (event.key === 'Enter') event.currentTarget.blur();
+                                if (event.key === 'Escape') {
+                                  event.currentTarget.dataset.cancel = '1';
+                                  event.currentTarget.blur();
+                                }
+                              }}
+                              onBlur={(event) => {
+                                if (event.target.dataset.cancel) setRenamingLayer(null);
+                                else renameLayer(entry, event.target.value);
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="vb-layer-name"
+                            title={DELETABLE_KINDS.has(entry.kind) ? `${info.label} - double-click or F2 to rename` : info.label}
+                            onClick={(event) => {
+                              if (event.shiftKey || event.ctrlKey || event.metaKey) toggleMulti(entry.kind, entry.id);
+                              else select(entry.kind, entry.id);
+                            }}
+                            onDoubleClick={() => {
+                              if (DELETABLE_KINDS.has(entry.kind)) setRenamingLayer(key);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== 'F2' || !DELETABLE_KINDS.has(entry.kind)) return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setRenamingLayer(key);
+                            }}
+                          >
+                            <LayerThumb thumb={layerThumb(entry.kind, info.element)} Icon={Icon} />
+                            <span>{info.label}</span>
+                          </button>
+                        )}
 
                         <button
                           type="button"
-                          className="vb-layer-icon-button"
-                          disabled={!canLockOrHide}
+                          className={`vb-layer-icon-button vb-layer-toggle ${visible ? '' : 'is-set'}`}
                           onClick={() => editor.toggleVisible(entry.kind, entry.id)}
                           aria-label={visible ? `Hide ${info.label}` : `Show ${info.label}`}
                         >
@@ -2033,24 +2287,15 @@ export default function AdminVisualBoard() {
 
                         <button
                           type="button"
-                          className="vb-layer-icon-button"
-                          disabled={!canLockOrHide}
+                          className={`vb-layer-icon-button vb-layer-toggle ${locked ? 'is-set' : ''}`}
                           onClick={() => editor.setLocked(entry.kind, entry.id, !locked)}
                           aria-label={locked ? `Unlock ${info.label}` : `Lock ${info.label}`}
                         >
                           {locked ? <Lock size={13} /> : <LockOpen size={13} />}
                         </button>
 
-                        <button
-                          type="button"
-                          className="vb-layer-name"
-                          title={info.label}
-                          onClick={() => select(entry.kind, entry.id)}
-                        >
-                          <Icon size={13} />
-                          <span>{info.label}</span>
-                        </button>
 
+                        <div className="vb-layer-actions">
                         <div className="vb-layer-move">
                           <button
                             type="button"
@@ -2093,19 +2338,91 @@ export default function AdminVisualBoard() {
                             <ChevronsDown size={13} />
                           </button>
                         </div>
+
+                        {DELETABLE_KINDS.has(entry.kind) && (
+                          <button
+                            type="button"
+                            className="vb-layer-icon-button vb-layer-delete"
+                            onClick={() => removeEntries([{ kind: entry.kind, id: entry.id }])}
+                            aria-label={`Delete ${info.label}`}
+                            title="Delete"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                        </div>
                       </div>
                     );
-                  })}
+                  };
+
+                  const groupOf = (entry) => findElement(layout, entry.kind, entry.id)?.groupId ?? null;
+                  return layerTree(list, groupOf).map((node) => {
+                    if (node.type === 'item') return renderRow(node.entry);
+                    const open = !foldedGroups.has(node.groupId);
+                    const allSelected = node.entries.every((entry) => isMultiSelected(entry.kind, entry.id));
+                    // folded shut, a selected member would otherwise show nowhere in the list
+                    const hiddenSelection =
+                      !open &&
+                      node.entries.some((entry) => isSelected(entry.kind, entry.id) || isMultiSelected(entry.kind, entry.id));
+                    return (
+                      <div key={`group:${node.groupId}`} className="vb-layer-group">
+                        <div className={`vb-layer-group-row ${allSelected || hiddenSelection ? 'active' : ''}`}>
+                          <button
+                            type="button"
+                            className="vb-layer-icon-button"
+                            aria-expanded={open}
+                            aria-label={open ? 'Fold group' : 'Open group'}
+                            onClick={() =>
+                              setFoldedGroups((current) => {
+                                const next = new Set(current);
+                                if (open) next.add(node.groupId);
+                                else next.delete(node.groupId);
+                                return next;
+                              })
+                            }
+                          >
+                            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                          </button>
+                          <button
+                            type="button"
+                            className="vb-layer-name"
+                            title="Select the whole group"
+                            onClick={() => selectGroup(node.entries)}
+                          >
+                            <span className="vb-layer-thumb">
+                              <Group size={13} />
+                            </span>
+                            <span>Group · {node.entries.length} items</span>
+                          </button>
+                        </div>
+                        {open && node.entries.map((entry) => renderRow(entry, true))}
+                      </div>
+                    );
+                  });
+                  })()}
                 </>
               )}
             </div>
+            )}
           </div>
 
           {/* ================= CANVAS ================= */}
 
           <div className="vb-canvas-col">
+            {showRulers && (
+              <Rulers
+                stageRef={stageRef}
+                canvasRef={canvasRef}
+                zoom={zoom}
+                onDraft={(draft) => {
+                  setGuideDraft(draft);
+                  if (draft) setShowGuides(true);
+                }}
+                onDrop={(axis, at) => setGuides((current) => addGuide(current, axis, at))}
+              />
+            )}
             <div
-              className={`vb-canvas-stage ${spaceHeld ? 'is-panning' : ''}`}
+              className={`vb-canvas-stage ${spaceHeld ? 'is-panning' : ''} ${showRulers ? 'has-rulers' : ''}`}
               ref={stageRef}
               onPointerDownCapture={panStage}
             >
@@ -2140,6 +2457,20 @@ export default function AdminVisualBoard() {
                 <div
                   className={`vb-canvas-surface ${boxSelectMode ? 'vb-box-select-mode' : ''}`}
                   ref={middleColumnRef}
+                  data-drop-active={canvasDropActive || undefined}
+                  onDragOver={(event) => {
+                    if (!event.dataTransfer.types?.includes('Files')) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'copy';
+                    setCanvasDropActive(true);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) setCanvasDropActive(false);
+                  }}
+                  onDrop={(event) => {
+                    if (!event.dataTransfer.types?.includes('Files')) return;
+                    void dropPhotosOnCanvas(event);
+                  }}
                   onContextMenu={(event) => {
                     if (event.target !== event.currentTarget) return;
                     event.preventDefault();
@@ -2161,6 +2492,20 @@ export default function AdminVisualBoard() {
 
                   <SmartGuides guides={editor.guides} />
 
+                  {showGuides && (
+                    <GuideLines
+                      guides={guides}
+                      draft={guideDraft}
+                      locked={guidesLocked}
+                      highlighted={{
+                        x: editor.guides.lines.filter((line) => line.axis === 'x').map((line) => line.at),
+                        y: editor.guides.lines.filter((line) => line.axis === 'y').map((line) => line.at),
+                      }}
+                      onMove={(axis, index, at) => setGuides((current) => moveGuide(current, axis, index, at))}
+                      onRemove={(axis, index) => setGuides((current) => removeGuide(current, axis, index))}
+                    />
+                  )}
+
                   {boxSelectRect && (
                     <div
                       className="vb-box-select-rect"
@@ -2176,28 +2521,14 @@ export default function AdminVisualBoard() {
               </div>
             </div>
 
-            <p className="vb-canvas-hint">
-              Click to select, drag to move, drag a handle to resize or rotate, double-click text to
-              edit it. Changes save to your draft as you go - click Publish to put them on the live
-              board.
-            </p>
           </div>
 
           {/* ================= PROPERTIES ================= */}
 
           <div className="vb-properties">
-            {selected && multiSelected.length < 2 && (
-              <AlignBar onAlign={alignSelection} toBoard />
-            )}
-
             {multiSelected.length >= 2 ? (
               <>
                 <h3 className="vb-properties-title">{multiSelected.length} Elements Selected</h3>
-                <AlignBar
-                  onAlign={alignSelection}
-                  onDistribute={distributeSelection}
-                  canDistribute={multiSelected.length >= 3}
-                />
                 <div className="vb-multi-actions">
                   <button type="button" className="primary-button" onClick={handleGroup}>
                     <Group size={13} />
@@ -2233,12 +2564,33 @@ export default function AdminVisualBoard() {
                 </div>
               </>
             ) : !selected ? (
-              <div className="vb-properties-empty">
-                <LayoutTemplate size={22} />
-                <p>
-                  Select an element on the canvas or from the list on the left. Shift-click to
-                  select more than one and group them.
+              <div className="vb-board-panel">
+                <h3 className="vb-properties-title">Board</h3>
+                <p className="vb-properties-hint">
+                  {CANVAS_HINT} Shift-click to select more than one and group them.
                 </p>
+
+                <div className="vb-board-links">
+                  <button type="button" className="secondary-button" onClick={() => select('candidates')}>
+                    <UsersRound size={13} />
+                    Candidate Board settings
+                  </button>
+                  <button type="button" className="secondary-button" onClick={() => select('announcements')}>
+                    <Megaphone size={13} />
+                    Announcement strip settings
+                  </button>
+                </div>
+
+                <PropertySection {...sectionProps('Keyboard shortcuts')}>
+                  <dl className="vb-shortcuts">
+                    {EDITOR_SHORTCUTS.map(({ keys, action }) => (
+                      <div key={keys}>
+                        <dt>{keys}</dt>
+                        <dd>{action}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </PropertySection>
               </div>
             ) : BOX_KINDS[selected.kind] ? (
               (() => {
@@ -2253,162 +2605,215 @@ export default function AdminVisualBoard() {
                       {BOX_KINDS[selected.kind].hint}
                     </p>
 
-                    <div className="vb-field-row">
-                      <label htmlFor="vb-box-x">
-                        X %
-                        <input
-                          id="vb-box-x"
-                          className="form-input"
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.5"
-                          value={Number(box.x.toFixed(1))}
-                          onChange={(event) =>
-                            editor.updateElement(selected.kind, null, {
-                              x: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                      <label htmlFor="vb-box-y">
-                        Y %
-                        <input
-                          id="vb-box-y"
-                          className="form-input"
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.5"
-                          value={Number(box.y.toFixed(1))}
-                          onChange={(event) =>
-                            editor.updateElement(selected.kind, null, {
-                              y: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                    </div>
-
-                    <div className="vb-field-row">
-                      {box.width !== undefined && (
-                        <label htmlFor="vb-box-w">
-                          W %
-                          <input
-                            id="vb-box-w"
-                            className="form-input"
-                            type="number"
-                            min="1"
-                            max="100"
-                            step="0.5"
-                            value={Number(box.width.toFixed(1))}
-                            onChange={(event) =>
-                              editor.updateElement(selected.kind, null, {
-                                width: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                      )}
-
-                      {box.height !== undefined && (
-                        <label htmlFor="vb-box-h">
-                          H %
-                          <input
-                            id="vb-box-h"
-                            className="form-input"
-                            type="number"
-                            min="8"
-                            max="100"
-                            step="0.5"
-                            value={Number(box.height.toFixed(1))}
-                            onChange={(event) =>
-                              editor.updateElement(selected.kind, null, {
-                                height: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                      )}
-                    </div>
-
-                    {box.secondsPerCard !== undefined && (
+                    <PropertySection {...sectionProps('Position & size')}>
                       <div className="vb-field-row">
-                        <label htmlFor="vb-carousel-speed">
-                          Carousel seconds per card
+                        <label htmlFor="vb-box-x">
+                          X %
                           <input
-                            id="vb-carousel-speed"
+                            id="vb-box-x"
                             className="form-input"
                             type="number"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            value={Number(box.x.toFixed(1))}
+                            onChange={(event) =>
+                              editor.updateElement(selected.kind, null, {
+                                x: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                        <label htmlFor="vb-box-y">
+                          Y %
+                          <input
+                            id="vb-box-y"
+                            className="form-input"
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            value={Number(box.y.toFixed(1))}
+                            onChange={(event) =>
+                              editor.updateElement(selected.kind, null, {
+                                y: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <div className="vb-field-row">
+                        {box.width !== undefined && (
+                          <label htmlFor="vb-box-w">
+                            W %
+                            <input
+                              id="vb-box-w"
+                              className="form-input"
+                              type="number"
+                              min="1"
+                              max="100"
+                              step="0.5"
+                              value={Number(box.width.toFixed(1))}
+                              onChange={(event) =>
+                                editor.updateElement(selected.kind, null, {
+                                  width: Number(event.target.value),
+                                })
+                              }
+                            />
+                          </label>
+                        )}
+
+                        {box.height !== undefined && (
+                          <label htmlFor="vb-box-h">
+                            H %
+                            <input
+                              id="vb-box-h"
+                              className="form-input"
+                              type="number"
+                              min="8"
+                              max="100"
+                              step="0.5"
+                              value={Number(box.height.toFixed(1))}
+                              onChange={(event) =>
+                                editor.updateElement(selected.kind, null, {
+                                  height: Number(event.target.value),
+                                })
+                              }
+                            />
+                          </label>
+                        )}
+                      </div>
+                    </PropertySection>
+
+                    {(box.secondsPerCard !== undefined || box.perRow !== undefined) && (
+                      <PropertySection {...sectionProps('Carousel')}>
+                        {box.secondsPerCard !== undefined && (
+                          <div className="vb-field-row">
+                            <label htmlFor="vb-carousel-speed">
+                              Carousel seconds per card
+                              <input
+                                id="vb-carousel-speed"
+                                className="form-input"
+                                type="number"
+                                min="0.5"
+                                max="30"
+                                step="0.5"
+                                value={box.secondsPerCard}
+                                onChange={(event) =>
+                                  editor.updateElement(selected.kind, null, {
+                                    secondsPerCard: Number(event.target.value),
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                        )}
+
+                        {box.secondsPerCard !== undefined && (
+                          <input
+                            className="vb-range"
+                            type="range"
                             min="0.5"
-                            max="30"
+                            max="12"
                             step="0.5"
                             value={box.secondsPerCard}
+                            aria-label="Carousel speed"
                             onChange={(event) =>
                               editor.updateElement(selected.kind, null, {
                                 secondsPerCard: Number(event.target.value),
                               })
                             }
                           />
-                        </label>
-                      </div>
-                    )}
+                        )}
 
-                    {box.secondsPerCard !== undefined && (
-                      <input
-                        className="vb-range"
-                        type="range"
-                        min="0.5"
-                        max="12"
-                        step="0.5"
-                        value={box.secondsPerCard}
-                        aria-label="Carousel speed"
-                        onChange={(event) =>
-                          editor.updateElement(selected.kind, null, {
-                            secondsPerCard: Number(event.target.value),
-                          })
-                        }
-                      />
-                    )}
+                        {box.perRow !== undefined && (
+                          <div className="vb-field-row">
+                            <label htmlFor="vb-per-row">
+                              Candidates per row
+                              <input
+                                id="vb-per-row"
+                                className="form-input"
+                                type="number"
+                                min="1"
+                                max="6"
+                                step="1"
+                                value={box.perRow}
+                                onChange={(event) =>
+                                  editor.updateElement(selected.kind, null, {
+                                    perRow: Number(event.target.value),
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                        )}
 
-                    {box.perRow !== undefined && (
-                      <div className="vb-field-row">
-                        <label htmlFor="vb-per-row">
-                          Candidates per row
+                        {box.perRow !== undefined && (
                           <input
-                            id="vb-per-row"
-                            className="form-input"
-                            type="number"
+                            className="vb-range"
+                            type="range"
                             min="1"
                             max="6"
                             step="1"
                             value={box.perRow}
+                            aria-label="Candidates per row"
                             onChange={(event) =>
                               editor.updateElement(selected.kind, null, {
                                 perRow: Number(event.target.value),
                               })
                             }
                           />
-                        </label>
-                      </div>
+                        )}
+                      </PropertySection>
                     )}
 
-                    {box.perRow !== undefined && (
-                      <input
-                        className="vb-range"
-                        type="range"
-                        min="1"
-                        max="6"
-                        step="1"
-                        value={box.perRow}
-                        aria-label="Candidates per row"
-                        onChange={(event) =>
-                          editor.updateElement(selected.kind, null, {
-                            perRow: Number(event.target.value),
-                          })
-                        }
-                      />
+                    {selected.kind === 'candidates' && (
+                      <PropertySection {...sectionProps('Candidate cards')}>
+                        {selected.kind === 'candidates' && (() => {
+                          const look = normalizeCardSettings(box);
+                          return (
+                            <div className="form-group vb-card-look">
+                              <label className="form-label">Candidate cards</label>
+                              {CARD_LOOK_FIELDS.map(({ key, label, min, max, unit }) => (
+                                <label key={key} className="vb-card-look-row">
+                                  <span>{label}</span>
+                                  <NumberField
+                                    className="form-input"
+                                    min={min}
+                                    max={max}
+                                    step="1"
+                                    decimals={0}
+                                    value={look[key]}
+                                    onCommit={(next) =>
+                                      editor.updateElement('candidates', null, {
+                                        [key]: Math.min(max, Math.max(min, Math.round(next))),
+                                      })
+                                    }
+                                  />
+                                  <span className="vb-card-look-unit">{unit}</span>
+                                </label>
+                              ))}
+
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => editor.updateElement('candidates', null, CARD_DEFAULTS)}
+                              >
+                                Reset card look
+                              </button>
+                            </div>
+                          );
+                        })()}
+                      </PropertySection>
                     )}
+
+                    <PropertySection {...sectionProps('Border & effects')}>
+                      <OpacityField
+                        element={box}
+                        onChange={(opacity) => editor.updateElement(selected.kind, null, { opacity })}
+                      />
+                    </PropertySection>
 
                     <div className="vb-element-actions">
                       <button
@@ -2573,9 +2978,9 @@ export default function AdminVisualBoard() {
                 )}
 
                 {isTextSelected && (
-                  <>
+                  <PropertySection {...sectionProps('Font')}>
                     <div className="form-group">
-                      <label className="form-label" htmlFor="vb-font">
+                      <label className="form-label vb-sr-only" htmlFor="vb-font">
                         Font
                       </label>
                       <select
@@ -2638,6 +3043,97 @@ export default function AdminVisualBoard() {
                       </label>
                     </div>
 
+                    {selected.kind === 'text' && (
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="vb-text-size">
+                          Size
+                        </label>
+                        {/*
+                          The slider spans the whole range a text's size may
+                          take, so every size a corner-drag can reach can also
+                          be nudged here. The box beside it types an exact
+                          value, since one slider covering that whole range
+                          moves in fairly coarse steps.
+                        */}
+                        <div className="scale-field">
+                          <input
+                            type="range"
+                            min={MIN_TEXT_SIZE}
+                            max={MAX_TEXT_SIZE}
+                            step="0.1"
+                            value={selectedElement.fontSize}
+                            aria-label="Size"
+                            onChange={(event) =>
+                              editor.setFontSize(selected.id, Number(event.target.value))
+                            }
+                          />
+                          <NumberField
+                            id="vb-text-size"
+                            className="scale-field-input"
+                            min={MIN_TEXT_SIZE}
+                            max={MAX_TEXT_SIZE}
+                            step="0.1"
+                            value={selectedElement.fontSize}
+                            onCommit={(next) => editor.setFontSize(selected.id, next)}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="form-group">
+                      <label className="form-label">Alignment</label>
+                      <div className="vb-text-style-row">
+                      <div className="vb-segment">
+                        {ALIGN_OPTIONS.map((option) => {
+                          const Icon = ALIGN_ICONS[option.value];
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={`vb-segment-button ${
+                                selectedElement.style.align === option.value ? 'active' : ''
+                              }`}
+                              title={option.label}
+                              aria-label={option.label}
+                              onClick={() =>
+                                editor.setTextStyle(selected.kind, selected.id, {
+                                  align: option.value,
+                                })
+                              }
+                            >
+                              <Icon size={14} />
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="vb-segment">
+                        {[
+                          { key: 'italic', label: 'Italic', Icon: Italic },
+                          { key: 'underline', label: 'Underline', Icon: Underline },
+                        ].map(({ key, label, Icon }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            className={`vb-segment-button ${selectedElement.style[key] ? 'active' : ''}`}
+                            title={label}
+                            aria-label={label}
+                            aria-pressed={selectedElement.style[key] === true}
+                            onClick={() =>
+                              editor.setTextStyle(selected.kind, selected.id, { [key]: !selectedElement.style[key] })
+                            }
+                          >
+                            <Icon size={14} />
+                          </button>
+                        ))}
+                      </div>
+                      </div>
+                    </div>
+                  </PropertySection>
+                )}
+
+                {isTextSelected && (
+                  <PropertySection {...sectionProps('Spacing')}>
                     <div className="form-group">
                       <label className="form-label">Letter spacing</label>
                       <div className="scale-field">
@@ -2680,249 +3176,121 @@ export default function AdminVisualBoard() {
                       </div>
                     </div>
 
-                    <div className="form-group">
-                      <label className="form-label">Alignment</label>
-                      <div className="vb-segment">
-                        {ALIGN_OPTIONS.map((option) => {
-                          const Icon = ALIGN_ICONS[option.value];
-                          return (
-                            <button
-                              key={option.value}
-                              type="button"
-                              className={`vb-segment-button ${
-                                selectedElement.style.align === option.value ? 'active' : ''
-                              }`}
-                              title={option.label}
-                              aria-label={option.label}
-                              onClick={() =>
-                                editor.setTextStyle(selected.kind, selected.id, {
-                                  align: option.value,
-                                })
-                              }
-                            >
-                              <Icon size={14} />
-                            </button>
-                          );
-                        })}
+                    {selected.kind === 'text' && selectedElement && (
+                      <div className="vb-field-row">
+                        <label htmlFor="vb-text-box-width">
+                          Box width %
+                          <input
+                            id="vb-text-box-width"
+                            className="form-input"
+                            type="number"
+                            min="5"
+                            max="100"
+                            step="1"
+                            value={Number((selectedElement.boxWidth ?? 92).toFixed(0))}
+                            onChange={(event) =>
+                              editor.updateElement('text', selected.id, {
+                                boxWidth: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
                       </div>
-                    </div>
-                  </>
+                    )}
+                  </PropertySection>
                 )}
 
                 {(isTextSelected || selected.kind === 'shape') && (
-                  <div className="form-group">
-                    <label className="form-label">Fill</label>
-                    <FillEditor
-                      fill={
-                        selected.kind === 'shape'
-                          ? selectedShape.fill
-                          : selectedElement.style.fill
-                      }
-                      allowImage={selected.kind === 'shape'}
-                      uploadId="vb-fill-photo"
-                      onUploadImage={(file) => editor.handleFramePhoto(selected.id, file)}
-                      allowVideo={selected.kind === 'shape'}
-                      videoUploadId="vb-fill-video"
-                      onUploadVideo={(file) => editor.handleFrameVideo(selected.id, file)}
-                      onChange={(fill) => editor.setFill(selected.kind, selected.id, fill)}
-                    />
-                  </div>
-                )}
-
-                {selected.kind === 'shape' &&
-                  (selectedShape.fill.type === 'image' || selectedShape.fill.type === 'video') &&
-                  selectedShape.fill.url && (
-                  <div className="form-group">
-                    <div className="vb-photo-position-header">
-                      <label className="form-label">
-                        {selectedShape.fill.type === 'video' ? 'Video position' : 'Photo position'}
-                      </label>
-                      <button
-                        type="button"
-                        className="vb-photo-position-reset"
-                        onClick={() =>
-                          editor.adjustImageFill(selected.id, { offsetX: 0, offsetY: 0, zoom: 1 })
-                        }
-                      >
-                        <RotateCcw size={11} />
-                        Reset
-                      </button>
-                    </div>
-
-                    <label className="form-label" htmlFor="vb-photo-zoom">
-                      Zoom
-                    </label>
-                    <div className="scale-field">
-                      <input
-                        id="vb-photo-zoom"
-                        type="range"
-                        min="1"
-                        max="4"
-                        step="0.05"
-                        value={selectedShape.fill.zoom}
-                        onChange={(event) =>
-                          editor.adjustImageFill(selected.id, { zoom: Number(event.target.value) })
-                        }
-                      />
-                      <span className="scale-field-value">
-                        {selectedShape.fill.zoom.toFixed(2)}x
-                      </span>
-                    </div>
-
-                    <div className="vb-field-row">
-                      <label htmlFor="vb-photo-x">
-                        Move X
-                        <input
-                          id="vb-photo-x"
-                          className="form-input"
-                          type="range"
-                          min="-50"
-                          max="50"
-                          step="1"
-                          value={selectedShape.fill.offsetX}
-                          onChange={(event) =>
-                            editor.adjustImageFill(selected.id, {
-                              offsetX: Number(event.target.value),
-                            })
+                  <PropertySection {...sectionProps('Fill')}>
+                    {(isTextSelected || selected.kind === 'shape') && (
+                      <div className="form-group">
+                        <FillEditor
+                          fill={
+                            selected.kind === 'shape'
+                              ? selectedShape.fill
+                              : selectedElement.style.fill
                           }
+                          allowImage={selected.kind === 'shape'}
+                          uploadId="vb-fill-photo"
+                          onUploadImage={(file) => editor.handleFramePhoto(selected.id, file)}
+                          allowVideo={selected.kind === 'shape'}
+                          videoUploadId="vb-fill-video"
+                          onUploadVideo={(file) => editor.handleFrameVideo(selected.id, file)}
+                          onChange={(fill) => editor.setFill(selected.kind, selected.id, fill)}
                         />
-                      </label>
-                      <label htmlFor="vb-photo-y">
-                        Move Y
-                        <input
-                          id="vb-photo-y"
-                          className="form-input"
-                          type="range"
-                          min="-50"
-                          max="50"
-                          step="1"
-                          value={selectedShape.fill.offsetY}
-                          onChange={(event) =>
-                            editor.adjustImageFill(selected.id, {
-                              offsetY: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                    </div>
-                  </div>
-                )}
+                      </div>
+                    )}
 
-                {selected.kind === 'shape' && isFrame(selectedShape) && (
-                  <div className="form-group">
-                    <label className="form-label">Carousel photos</label>
-                    <p className="vb-properties-hint">
-                      Add two or more to unlock the Carousel animation below - it slides between
-                      them instead of showing the single photo above. Click a photo to crop and
-                      position it on its own.
-                    </p>
-
-                    <div className="vb-carousel-photos">
-                      {selectedShape.photos.map((photo, index) => (
-                        <div
-                          key={index}
-                          className={`vb-carousel-photo ${editingPhotoIndex === index ? 'active' : ''}`}
-                        >
+                    {selected.kind === 'shape' &&
+                      (selectedShape.fill.type === 'image' || selectedShape.fill.type === 'video') &&
+                      selectedShape.fill.url && (
+                      <div className="form-group">
+                        <div className="vb-photo-position-header">
+                          <label className="form-label">
+                            {selectedShape.fill.type === 'video' ? 'Video position' : 'Photo position'}
+                          </label>
                           <button
                             type="button"
-                            className="vb-carousel-photo-select"
-                            aria-label={`Edit photo ${index + 1}`}
-                            aria-pressed={editingPhotoIndex === index}
+                            className="vb-photo-position-reset"
                             onClick={() =>
-                              setEditingPhotoIndex((current) => (current === index ? null : index))
+                              editor.adjustImageFill(selected.id, { offsetX: 0, offsetY: 0, zoom: 1 })
                             }
                           >
-                            <img src={photo.url} alt="" />
-                          </button>
-                          <button
-                            type="button"
-                            className="vb-carousel-photo-remove"
-                            aria-label={`Remove photo ${index + 1}`}
-                            onClick={() => {
-                              editor.removeFramePhoto(selected.id, index);
-                              setEditingPhotoIndex((current) =>
-                                current === null || current < index
-                                  ? current
-                                  : current === index
-                                    ? null
-                                    : current - 1
-                              );
-                            }}
-                          >
-                            <X size={11} />
+                            <RotateCcw size={11} />
+                            Reset
                           </button>
                         </div>
-                      ))}
 
-                      <label htmlFor="vb-carousel-photo-add" className="vb-carousel-photo-add">
-                        <input
-                          id="vb-carousel-photo-add"
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp"
-                          multiple
-                          onChange={(event) => {
-                            void editor.addFramePhotos(selected.id, event.target.files);
-                            event.target.value = '';
-                          }}
-                        />
-                        <Plus size={16} />
-                      </label>
-                    </div>
-
-                    {editingPhotoIndex !== null && selectedShape.photos[editingPhotoIndex] && (
-                      <div className="vb-carousel-photo-editor">
-                        <label className="form-label" htmlFor="vb-carousel-photo-zoom">
+                        <label className="form-label" htmlFor="vb-photo-zoom">
                           Zoom
                         </label>
                         <div className="scale-field">
                           <input
-                            id="vb-carousel-photo-zoom"
+                            id="vb-photo-zoom"
                             type="range"
                             min="1"
                             max="4"
                             step="0.05"
-                            value={selectedShape.photos[editingPhotoIndex].zoom}
+                            value={selectedShape.fill.zoom}
                             onChange={(event) =>
-                              editor.adjustFramePhoto(selected.id, editingPhotoIndex, {
-                                zoom: Number(event.target.value),
-                              })
+                              editor.adjustImageFill(selected.id, { zoom: Number(event.target.value) })
                             }
                           />
                           <span className="scale-field-value">
-                            {selectedShape.photos[editingPhotoIndex].zoom.toFixed(2)}x
+                            {selectedShape.fill.zoom.toFixed(2)}x
                           </span>
                         </div>
 
                         <div className="vb-field-row">
-                          <label htmlFor="vb-carousel-photo-x">
+                          <label htmlFor="vb-photo-x">
                             Move X
                             <input
-                              id="vb-carousel-photo-x"
+                              id="vb-photo-x"
                               className="form-input"
                               type="range"
                               min="-50"
                               max="50"
                               step="1"
-                              value={selectedShape.photos[editingPhotoIndex].offsetX}
+                              value={selectedShape.fill.offsetX}
                               onChange={(event) =>
-                                editor.adjustFramePhoto(selected.id, editingPhotoIndex, {
+                                editor.adjustImageFill(selected.id, {
                                   offsetX: Number(event.target.value),
                                 })
                               }
                             />
                           </label>
-                          <label htmlFor="vb-carousel-photo-y">
+                          <label htmlFor="vb-photo-y">
                             Move Y
                             <input
-                              id="vb-carousel-photo-y"
+                              id="vb-photo-y"
                               className="form-input"
                               type="range"
                               min="-50"
                               max="50"
                               step="1"
-                              value={selectedShape.photos[editingPhotoIndex].offsetY}
+                              value={selectedShape.fill.offsetY}
                               onChange={(event) =>
-                                editor.adjustFramePhoto(selected.id, editingPhotoIndex, {
+                                editor.adjustImageFill(selected.id, {
                                   offsetY: Number(event.target.value),
                                 })
                               }
@@ -2931,418 +3299,505 @@ export default function AdminVisualBoard() {
                         </div>
                       </div>
                     )}
-                  </div>
+
+                    {selected.kind === 'shape' && isFrame(selectedShape) && (
+                      <div className="form-group">
+                        <label className="form-label">Carousel photos</label>
+                        <p className="vb-properties-hint">
+                          Add two or more to unlock the Carousel animation below - it slides between
+                          them instead of showing the single photo above. Click a photo to crop and
+                          position it on its own.
+                        </p>
+
+                        <div className="vb-carousel-photos">
+                          {selectedShape.photos.map((photo, index) => (
+                            <div
+                              key={index}
+                              className={`vb-carousel-photo ${editingPhotoIndex === index ? 'active' : ''}`}
+                            >
+                              <button
+                                type="button"
+                                className="vb-carousel-photo-select"
+                                aria-label={`Edit photo ${index + 1}`}
+                                aria-pressed={editingPhotoIndex === index}
+                                onClick={() =>
+                                  setEditingPhotoIndex((current) => (current === index ? null : index))
+                                }
+                              >
+                                <img src={photo.url} alt="" />
+                              </button>
+                              <button
+                                type="button"
+                                className="vb-carousel-photo-remove"
+                                aria-label={`Remove photo ${index + 1}`}
+                                onClick={() => {
+                                  editor.removeFramePhoto(selected.id, index);
+                                  setEditingPhotoIndex((current) =>
+                                    current === null || current < index
+                                      ? current
+                                      : current === index
+                                        ? null
+                                        : current - 1
+                                  );
+                                }}
+                              >
+                                <X size={11} />
+                              </button>
+                            </div>
+                          ))}
+
+                          <label htmlFor="vb-carousel-photo-add" className="vb-carousel-photo-add">
+                            <input
+                              id="vb-carousel-photo-add"
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp"
+                              multiple
+                              onChange={(event) => {
+                                void editor.addFramePhotos(selected.id, event.target.files);
+                                event.target.value = '';
+                              }}
+                            />
+                            <Plus size={16} />
+                          </label>
+                        </div>
+
+                        {editingPhotoIndex !== null && selectedShape.photos[editingPhotoIndex] && (
+                          <div className="vb-carousel-photo-editor">
+                            <label className="form-label" htmlFor="vb-carousel-photo-zoom">
+                              Zoom
+                            </label>
+                            <div className="scale-field">
+                              <input
+                                id="vb-carousel-photo-zoom"
+                                type="range"
+                                min="1"
+                                max="4"
+                                step="0.05"
+                                value={selectedShape.photos[editingPhotoIndex].zoom}
+                                onChange={(event) =>
+                                  editor.adjustFramePhoto(selected.id, editingPhotoIndex, {
+                                    zoom: Number(event.target.value),
+                                  })
+                                }
+                              />
+                              <span className="scale-field-value">
+                                {selectedShape.photos[editingPhotoIndex].zoom.toFixed(2)}x
+                              </span>
+                            </div>
+
+                            <div className="vb-field-row">
+                              <label htmlFor="vb-carousel-photo-x">
+                                Move X
+                                <input
+                                  id="vb-carousel-photo-x"
+                                  className="form-input"
+                                  type="range"
+                                  min="-50"
+                                  max="50"
+                                  step="1"
+                                  value={selectedShape.photos[editingPhotoIndex].offsetX}
+                                  onChange={(event) =>
+                                    editor.adjustFramePhoto(selected.id, editingPhotoIndex, {
+                                      offsetX: Number(event.target.value),
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label htmlFor="vb-carousel-photo-y">
+                                Move Y
+                                <input
+                                  id="vb-carousel-photo-y"
+                                  className="form-input"
+                                  type="range"
+                                  min="-50"
+                                  max="50"
+                                  step="1"
+                                  value={selectedShape.photos[editingPhotoIndex].offsetY}
+                                  onChange={(event) =>
+                                    editor.adjustFramePhoto(selected.id, editingPhotoIndex, {
+                                      offsetY: Number(event.target.value),
+                                    })
+                                  }
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </PropertySection>
                 )}
 
-                {(selected.kind === 'text' ||
-                  selected.kind === 'logo' ||
-                  selected.kind === 'image' ||
-                  selected.kind === 'shape') && (
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="vb-animation-type">
-                      Animation
-                    </label>
-                    <div className="vb-field-row">
+                <PropertySection {...sectionProps('Border & effects')}>
+                  {isTextSelected && (
+                    <>
+                      <BorderControls
+                        label="Outline"
+                        showStyle={false}
+                        max={8}
+                        step={0.5}
+                        stroke={{ width: 0, color: '#000000', ...selectedElement.style.outline }}
+                        onChange={(patch) =>
+                          editor.setTextStyle(selected.kind, selected.id, {
+                            outline: { width: 0, color: '#000000', ...selectedElement.style.outline, ...patch },
+                          })
+                        }
+                      />
+                    </>
+                  )}
+
+                  {selected.kind === 'shape' && (
+                    <>
+                      {/* a zigzag's stroke is its drawn line, so it has no line style */}
+                      <BorderControls
+                        stroke={selectedShape.stroke}
+                        label={isZigzag(selectedShape) ? 'Line' : 'Border'}
+                        showStyle={!isZigzag(selectedShape)}
+                        onChange={(patch) => editor.setStroke('shape', selected.id, patch)}
+                      />
+                    </>
+                  )}
+
+                  {(selected.kind === 'image' || selected.kind === 'video') && (
+                    <BorderControls
+                      stroke={selectedElement.stroke}
+                      onChange={(patch) => editor.setStroke(selected.kind, selected.id, patch)}
+                    />
+                  )}
+
+                  {isTextSelected && (
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="vb-shadow">
+                        Shadow
+                      </label>
                       <select
-                        id="vb-animation-type"
+                        id="vb-shadow"
                         className="form-select"
-                        value={selectedElement.animation.type}
+                        value={selectedElement.style.shadow}
                         onChange={(event) =>
-                          editor.setAnimation(selected.kind, selected.id, { type: event.target.value })
+                          editor.setTextStyle(selected.kind, selected.id, {
+                            shadow: event.target.value,
+                          })
                         }
                       >
-                        {ANIMATION_TYPES.map((option) => (
+                        {SHADOW_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
                         ))}
-                        {selected.kind === 'shape' &&
-                          isFrame(selectedShape) &&
-                          selectedShape.photos.length > 1 && (
-                            <option value={CAROUSEL_ANIMATION.value}>{CAROUSEL_ANIMATION.label}</option>
-                          )}
                       </select>
-
-                      {(selectedElement.animation.type === 'slide' ||
-                        selectedElement.animation.type === 'carousel') && (
-                        <select
-                          className="form-select"
-                          aria-label="Animation direction"
-                          value={selectedElement.animation.direction}
-                          onChange={(event) =>
-                            editor.setAnimation(selected.kind, selected.id, {
-                              direction: event.target.value,
-                            })
-                          }
-                        >
-                          {ANIMATION_DIRECTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
                     </div>
+                  )}
 
-                    {selectedElement.animation.type !== 'none' && (
+                  <OpacityField
+                    element={selectedElement}
+                    onChange={(opacity) => editor.updateElement(selected.kind, selected.id, { opacity })}
+                  />
+                </PropertySection>
+
+                {['text', 'logo', 'image', 'shape'].includes(selected.kind) && (
+                  <PropertySection {...sectionProps('Animation')}>
+                    {(selected.kind === 'text' ||
+                      selected.kind === 'logo' ||
+                      selected.kind === 'image' ||
+                      selected.kind === 'shape') && (
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="vb-animation-type">
+                          Animation
+                        </label>
+                        <div className="vb-field-row">
+                          <select
+                            id="vb-animation-type"
+                            className="form-select"
+                            value={selectedElement.animation.type}
+                            onChange={(event) =>
+                              editor.setAnimation(selected.kind, selected.id, { type: event.target.value })
+                            }
+                          >
+                            {ANIMATION_TYPES.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                            {selected.kind === 'shape' &&
+                              isFrame(selectedShape) &&
+                              selectedShape.photos.length > 1 && (
+                                <option value={CAROUSEL_ANIMATION.value}>{CAROUSEL_ANIMATION.label}</option>
+                              )}
+                          </select>
+
+                          {(selectedElement.animation.type === 'slide' ||
+                            selectedElement.animation.type === 'carousel') && (
+                            <select
+                              className="form-select"
+                              aria-label="Animation direction"
+                              value={selectedElement.animation.direction}
+                              onChange={(event) =>
+                                editor.setAnimation(selected.kind, selected.id, {
+                                  direction: event.target.value,
+                                })
+                              }
+                            >
+                              {ANIMATION_DIRECTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+
+                        {selectedElement.animation.type !== 'none' && (
+                          <div className="scale-field">
+                            <input
+                              type="range"
+                              min="1"
+                              max="30"
+                              step="1"
+                              value={selectedElement.animation.speed}
+                              aria-label={
+                                selectedElement.animation.type === 'carousel'
+                                  ? 'Seconds per photo'
+                                  : 'Animation speed'
+                              }
+                              onChange={(event) =>
+                                editor.setAnimation(selected.kind, selected.id, {
+                                  speed: Number(event.target.value),
+                                })
+                              }
+                            />
+                            <span className="scale-field-value">{selectedElement.animation.speed}s</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </PropertySection>
+                )}
+
+                <PropertySection {...sectionProps('Position & size')}>
+                  {selected.kind === 'shape' && (
+                    <>
+                      <div className="vb-field-row">
+                        <label htmlFor="vb-width">
+                          W %
+                          <input
+                            id="vb-width"
+                            className="form-input"
+                            type="number"
+                            min="0.4"
+                            max="200"
+                            step="0.5"
+                            value={Number(selectedShape.width.toFixed(1))}
+                            onChange={(event) =>
+                              editor.updateShape(selected.id, { width: Number(event.target.value) })
+                            }
+                          />
+                        </label>
+                        <label htmlFor="vb-height">
+                          H %
+                          <input
+                            id="vb-height"
+                            className="form-input"
+                            type="number"
+                            min="0.4"
+                            max="200"
+                            step="0.5"
+                            value={Number(selectedShape.height.toFixed(1))}
+                            onChange={(event) =>
+                              editor.updateShape(selected.id, { height: Number(event.target.value) })
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <div className="vb-field-row">
+                        <label htmlFor="vb-radius">
+                          Corner
+                          <input
+                            id="vb-radius"
+                            className="form-input"
+                            type="number"
+                            min="0"
+                            max="999"
+                            value={Math.round(selectedShape.radius)}
+                            onChange={(event) =>
+                              editor.updateShape(selected.id, { radius: Number(event.target.value) })
+                            }
+                          />
+                        </label>
+                        <label htmlFor="vb-rotation">
+                          Rotate
+                          <input
+                            id="vb-rotation"
+                            className="form-input"
+                            type="number"
+                            min="-180"
+                            max="180"
+                            value={Math.round(selectedShape.rotation)}
+                            onChange={(event) =>
+                              editor.updateShape(selected.id, {
+                                rotation: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  {selected.kind === 'divider' && selectedElement && (
+                    <>
+                      <div className="vb-field-row">
+                        <label htmlFor="vb-divider-dir">
+                          Direction
+                          <select
+                            id="vb-divider-dir"
+                            className="form-select"
+                            value={selectedElement.orientation}
+                            onChange={(event) =>
+                              editor.updateDivider(selected.id, {
+                                orientation: event.target.value,
+                              })
+                            }
+                          >
+                            <option value="vertical">Vertical</option>
+                            <option value="horizontal">Horizontal</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="vb-field-row">
+                        <label htmlFor="vb-divider-len">
+                          Length %
+                          <input
+                            id="vb-divider-len"
+                            className="form-input"
+                            type="number"
+                            min="2"
+                            max="100"
+                            step="1"
+                            value={Number(selectedElement.length.toFixed(1))}
+                            onChange={(event) =>
+                              editor.updateDivider(selected.id, {
+                                length: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                        <label htmlFor="vb-divider-thick">
+                          Thickness
+                          <input
+                            id="vb-divider-thick"
+                            className="form-input"
+                            type="number"
+                            min="1"
+                            max="24"
+                            step="1"
+                            value={selectedElement.thickness}
+                            onChange={(event) =>
+                              editor.updateDivider(selected.id, {
+                                thickness: Number(event.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  {(selected.kind === 'logo' || selected.kind === 'image' || selected.kind === 'video') && (
+                    <div className="form-group">
+                      <label className="form-label">Size</label>
                       <div className="scale-field">
                         <input
                           type="range"
-                          min="1"
-                          max="30"
-                          step="1"
-                          value={selectedElement.animation.speed}
-                          aria-label={
-                            selectedElement.animation.type === 'carousel'
-                              ? 'Seconds per photo'
-                              : 'Animation speed'
-                          }
+                          min="0.3"
+                          max="2.5"
+                          step="0.05"
+                          value={selectedElement.scale}
                           onChange={(event) =>
-                            editor.setAnimation(selected.kind, selected.id, {
-                              speed: Number(event.target.value),
-                            })
+                            editor.setScale(selected.kind, selected.id, Number(event.target.value))
                           }
                         />
-                        <span className="scale-field-value">{selectedElement.animation.speed}s</span>
+                        <span className="scale-field-value">
+                          {Math.round(selectedElement.scale * 100)}%
+                        </span>
                       </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )}
 
-                {isTextSelected && (
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="vb-shadow">
-                      Shadow
-                    </label>
-                    <select
-                      id="vb-shadow"
-                      className="form-select"
-                      value={selectedElement.style.shadow}
-                      onChange={(event) =>
-                        editor.setTextStyle(selected.kind, selected.id, {
-                          shadow: event.target.value,
-                        })
-                      }
-                    >
-                      {SHADOW_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                  {selected.kind === 'text' && selected.id === 'heading' ? (
+                    <p className="vb-properties-hint">
+                      This is the board's headline, so it's fixed at the top of the candidate
+                      column instead of being freely positioned.
+                    </p>
+                  ) : (
+                    <div className="form-group">
+                      <label className="form-label">Position</label>
+                      <div className="vb-field-row">
+                        <label htmlFor="vb-pos-x">
+                          X
+                          <input
+                            id="vb-pos-x"
+                            className="form-input"
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={Math.round(selectedElement.x)}
+                            onChange={(event) =>
+                              editor.setPosition(
+                                selected.kind,
+                                selected.id,
+                                Number(event.target.value),
+                                selectedElement.y
+                              )
+                            }
+                          />
+                        </label>
+                        <label htmlFor="vb-pos-y">
+                          Y
+                          <input
+                            id="vb-pos-y"
+                            className="form-input"
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={Math.round(selectedElement.y)}
+                            onChange={(event) =>
+                              editor.setPosition(
+                                selected.kind,
+                                selected.id,
+                                selectedElement.x,
+                                Number(event.target.value)
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
 
-                {selected.kind === 'text' && selectedElement && (
-                  <div className="vb-field-row">
-                    <label htmlFor="vb-text-box-width">
-                      Box width %
+                  {['text', 'logo', 'image', 'video'].includes(selected.kind) && (
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="vb-element-rotation">
+                        Rotate
+                      </label>
                       <input
-                        id="vb-text-box-width"
+                        id="vb-element-rotation"
                         className="form-input"
                         type="number"
-                        min="5"
-                        max="100"
-                        step="1"
-                        value={Number((selectedElement.boxWidth ?? 92).toFixed(0))}
+                        min="-180"
+                        max="180"
+                        value={Math.round(selectedElement.rotation ?? 0)}
                         onChange={(event) =>
-                          editor.updateElement('text', selected.id, {
-                            boxWidth: Number(event.target.value),
+                          editor.updateElement(selected.kind, selected.id, {
+                            rotation: Math.max(-180, Math.min(180, Number(event.target.value) || 0)),
                           })
                         }
                       />
-                    </label>
-                  </div>
-                )}
-
-                {selected.kind === 'divider' && selectedElement && (
-                  <>
-                    <div className="vb-field-row">
-                      <label htmlFor="vb-divider-dir">
-                        Direction
-                        <select
-                          id="vb-divider-dir"
-                          className="form-select"
-                          value={selectedElement.orientation}
-                          onChange={(event) =>
-                            editor.updateDivider(selected.id, {
-                              orientation: event.target.value,
-                            })
-                          }
-                        >
-                          <option value="vertical">Vertical</option>
-                          <option value="horizontal">Horizontal</option>
-                        </select>
-                      </label>
                     </div>
-
-                    <div className="vb-field-row">
-                      <label htmlFor="vb-divider-len">
-                        Length %
-                        <input
-                          id="vb-divider-len"
-                          className="form-input"
-                          type="number"
-                          min="2"
-                          max="100"
-                          step="1"
-                          value={Number(selectedElement.length.toFixed(1))}
-                          onChange={(event) =>
-                            editor.updateDivider(selected.id, {
-                              length: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                      <label htmlFor="vb-divider-thick">
-                        Thickness
-                        <input
-                          id="vb-divider-thick"
-                          className="form-input"
-                          type="number"
-                          min="1"
-                          max="24"
-                          step="1"
-                          value={selectedElement.thickness}
-                          onChange={(event) =>
-                            editor.updateDivider(selected.id, {
-                              thickness: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                    </div>
-                  </>
-                )}
-
-                {selected.kind === 'shape' && (
-                  <>
-                    <div className="vb-field-row">
-                      <label htmlFor="vb-width">
-                        W %
-                        <input
-                          id="vb-width"
-                          className="form-input"
-                          type="number"
-                          min="0.4"
-                          max="200"
-                          step="0.5"
-                          value={Number(selectedShape.width.toFixed(1))}
-                          onChange={(event) =>
-                            editor.updateShape(selected.id, { width: Number(event.target.value) })
-                          }
-                        />
-                      </label>
-                      <label htmlFor="vb-height">
-                        H %
-                        <input
-                          id="vb-height"
-                          className="form-input"
-                          type="number"
-                          min="0.4"
-                          max="200"
-                          step="0.5"
-                          value={Number(selectedShape.height.toFixed(1))}
-                          onChange={(event) =>
-                            editor.updateShape(selected.id, { height: Number(event.target.value) })
-                          }
-                        />
-                      </label>
-                    </div>
-
-                    <div className="vb-field-row">
-                      <label htmlFor="vb-radius">
-                        Corner
-                        <input
-                          id="vb-radius"
-                          className="form-input"
-                          type="number"
-                          min="0"
-                          max="999"
-                          value={Math.round(selectedShape.radius)}
-                          onChange={(event) =>
-                            editor.updateShape(selected.id, { radius: Number(event.target.value) })
-                          }
-                        />
-                      </label>
-                      <label htmlFor="vb-rotation">
-                        Rotate
-                        <input
-                          id="vb-rotation"
-                          className="form-input"
-                          type="number"
-                          min="-180"
-                          max="180"
-                          value={Math.round(selectedShape.rotation)}
-                          onChange={(event) =>
-                            editor.updateShape(selected.id, {
-                              rotation: Number(event.target.value),
-                            })
-                          }
-                        />
-                      </label>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Border</label>
-                      <div className="vb-stroke-field">
-                        <input
-                          type="color"
-                          className="vb-color-input"
-                          value={selectedShape.stroke.color}
-                          aria-label="Border colour"
-                          onChange={(event) =>
-                            editor.setShapeStroke(selected.id, { color: event.target.value })
-                          }
-                        />
-                        <input
-                          type="range"
-                          min="0"
-                          max="16"
-                          step="1"
-                          value={selectedShape.stroke.width}
-                          aria-label="Border width"
-                          onChange={(event) =>
-                            editor.setShapeStroke(selected.id, {
-                              width: Number(event.target.value),
-                            })
-                          }
-                        />
-                        <span className="scale-field-value">{selectedShape.stroke.width}px</span>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {selected.kind === 'text' && (
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="vb-text-size">
-                      Size
-                    </label>
-                    {/*
-                      The slider spans the whole range a text's size may
-                      take, so every size a corner-drag can reach can also
-                      be nudged here. The box beside it types an exact
-                      value, since one slider covering that whole range
-                      moves in fairly coarse steps.
-                    */}
-                    <div className="scale-field">
-                      <input
-                        type="range"
-                        min={MIN_TEXT_SIZE}
-                        max={MAX_TEXT_SIZE}
-                        step="0.1"
-                        value={selectedElement.fontSize}
-                        aria-label="Size"
-                        onChange={(event) =>
-                          editor.setFontSize(selected.id, Number(event.target.value))
-                        }
-                      />
-                      <NumberField
-                        id="vb-text-size"
-                        className="scale-field-input"
-                        min={MIN_TEXT_SIZE}
-                        max={MAX_TEXT_SIZE}
-                        step="0.1"
-                        value={selectedElement.fontSize}
-                        onCommit={(next) => editor.setFontSize(selected.id, next)}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {(selected.kind === 'logo' || selected.kind === 'image' || selected.kind === 'video') && (
-                  <div className="form-group">
-                    <label className="form-label">Size</label>
-                    <div className="scale-field">
-                      <input
-                        type="range"
-                        min="0.3"
-                        max="2.5"
-                        step="0.05"
-                        value={selectedElement.scale}
-                        onChange={(event) =>
-                          editor.setScale(selected.kind, selected.id, Number(event.target.value))
-                        }
-                      />
-                      <span className="scale-field-value">
-                        {Math.round(selectedElement.scale * 100)}%
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {selected.kind === 'text' && selected.id === 'heading' ? (
-                  <p className="vb-properties-hint">
-                    This is the board's headline, so it's fixed at the top of the candidate
-                    column instead of being freely positioned.
-                  </p>
-                ) : (
-                  <div className="form-group">
-                    <label className="form-label">Position</label>
-                    <div className="vb-field-row">
-                      <label htmlFor="vb-pos-x">
-                        X
-                        <input
-                          id="vb-pos-x"
-                          className="form-input"
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={Math.round(selectedElement.x)}
-                          onChange={(event) =>
-                            editor.setPosition(
-                              selected.kind,
-                              selected.id,
-                              Number(event.target.value),
-                              selectedElement.y
-                            )
-                          }
-                        />
-                      </label>
-                      <label htmlFor="vb-pos-y">
-                        Y
-                        <input
-                          id="vb-pos-y"
-                          className="form-input"
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={Math.round(selectedElement.y)}
-                          onChange={(event) =>
-                            editor.setPosition(
-                              selected.kind,
-                              selected.id,
-                              selectedElement.x,
-                              Number(event.target.value)
-                            )
-                          }
-                        />
-                      </label>
-                    </div>
-                  </div>
-                )}
-
-                {['text', 'logo', 'image', 'video'].includes(selected.kind) && (
-                  <div className="form-group">
-                    <label className="form-label" htmlFor="vb-element-rotation">
-                      Rotate
-                    </label>
-                    <input
-                      id="vb-element-rotation"
-                      className="form-input"
-                      type="number"
-                      min="-180"
-                      max="180"
-                      value={Math.round(selectedElement.rotation ?? 0)}
-                      onChange={(event) =>
-                        editor.updateElement(selected.kind, selected.id, {
-                          rotation: Math.max(-180, Math.min(180, Number(event.target.value) || 0)),
-                        })
-                      }
-                    />
-                  </div>
-                )}
+                  )}
+                </PropertySection>
 
                 <div className="vb-element-actions">
                   {(selected.kind === 'image' ||
@@ -3415,6 +3870,46 @@ export default function AdminVisualBoard() {
         </div>
       )}
 
+      {historyOpen && (
+        <div className="confirmation-overlay" role="presentation">
+          <div className="candidate-edit-popup vb-template-popup" role="dialog" aria-labelledby="vb-history-title">
+            <div className="modal-heading-row">
+              <div>
+                <h2 id="vb-history-title">History</h2>
+                <p className="modal-subtitle">
+                  {history.length === 1 ? 'The last published version. Restore puts it' : 'Recent published versions. Restore puts one'}{' '}
+                  into your draft.
+                </p>
+              </div>
+              <button type="button" className="modal-close-button" onClick={() => setHistoryOpen(false)} aria-label="Close">
+                &times;
+              </button>
+            </div>
+
+            {history.length === 0 ? (
+              <p className="vb-properties-hint">No published versions yet. Each Publish keeps a copy here.</p>
+            ) : (
+              <div className="vb-template-list">
+                {history.map((entry, index) => (
+                  <div key={entry.id} className="vb-template-row">
+                    <TemplatePreview layout={historyLayout(entry)} />
+                    <div className="vb-template-row-info">
+                      <strong>{new Date(entry.publishedAt).toLocaleString()}</strong>
+                      <span>{index === 0 ? 'Latest publish' : `${index} publish${index === 1 ? '' : 'es'} ago`}</span>
+                    </div>
+                    <div className="vb-template-row-actions">
+                      <button type="button" className="secondary-button" onClick={() => restoreVersion(entry)}>
+                        Restore
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {templateModal === 'apply' && (
         <div className="confirmation-overlay" role="presentation">
           <div
@@ -3472,27 +3967,51 @@ export default function AdminVisualBoard() {
         </div>
       )}
 
-      {editor.rotating && (
-        <div className="vb-rotate-tooltip" style={{ left: editor.rotating.x + 14, top: editor.rotating.y + 14 }}>
-          {Math.round(editor.rotating.rotation)}°
-        </div>
-      )}
+      {/* Fullscreen shows only the fullscreen element, so the pointer overlays
+          go inside it then; otherwise they stay here, under the theme. */}
+      {overlayIn(
+        <>
+          {showFloatingBar && (
+            <FloatingSelectionBar
+              measureSelection={measureSelection}
+              stageRef={stageRef}
+              canvasRef={canvasRef}
+              locked={selectionLocked}
+              multi={multiSelected.length >= 2}
+              canDuplicate={DELETABLE_KINDS.has(selected?.kind)}
+              canDistribute={multiSelected.length >= 3}
+              onAlign={alignSelection}
+              onDistribute={distributeSelection}
+              onDuplicate={duplicateSelection}
+              onGroup={handleGroup}
+              onToggleLock={() => editor.setLockedMany(selectionNow, !selectionLocked)}
+              onMore={(x, y) => setContextMenu({ x, y, onElement: true })}
+            />
+          )}
 
-      {contextMenu && (
-        <CanvasContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          onElement={contextMenu.onElement}
-          locked={selectionLocked}
-          canPaste={clipboard.length > 0}
-          canGroup={multiSelected.length >= 2}
-          canUngroup={selectionNow.some(({ kind, id }) => findElement(layout, kind, id)?.groupId)}
-          onAction={runMenuAction}
-          onAlign={(edge) => {
-            setContextMenu(null);
-            alignSelection(edge);
-          }}
-        />
+          {editor.rotating && (
+            <div className="vb-rotate-tooltip" style={{ left: editor.rotating.x + 14, top: editor.rotating.y + 14 }}>
+              {Math.round(editor.rotating.rotation)}°
+            </div>
+          )}
+
+          {contextMenu && (
+            <CanvasContextMenu
+              x={contextMenu.x}
+              y={contextMenu.y}
+              onElement={contextMenu.onElement}
+              locked={selectionLocked}
+              canPaste={clipboard.length > 0}
+              canGroup={multiSelected.length >= 2}
+              canUngroup={selectionNow.some(({ kind, id }) => findElement(layout, kind, id)?.groupId)}
+              onAction={runMenuAction}
+              onAlign={(edge) => {
+                setContextMenu(null);
+                alignSelection(edge);
+              }}
+            />
+          )}
+        </>
       )}
     </>
   );

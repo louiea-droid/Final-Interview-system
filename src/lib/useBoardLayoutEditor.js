@@ -1,13 +1,16 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { getDownloadURL, getMetadata, listAll, ref, uploadBytes } from 'firebase/storage';
 
 import { DEFAULT_LAYOUT, isVisible, saveDraftLayout } from './boardLayout';
 import { MAX_TEXT_SIZE, MIN_TEXT_SIZE, clampTextSize } from './textStyle';
 import { DEFAULT_EXTRA_TEXT_STYLE, DEFAULT_TEXT_SIZES } from './textStyle';
-import { createShape } from './shapeStyle';
+import { MEDIA_STROKE, createShape } from './shapeStyle';
 import { imageFill, normalizeFill, videoFill } from './fill';
 import { storage } from './firebase/storage';
+import { newestFirst } from './recentPhotos';
 import { DEFAULT_ANIMATION, normalizeAnimation } from './animationStyle';
+import { clampGroupDelta } from './boardGeometry';
+import { isLegacyDataPhoto } from './imageFiles';
 import {
   BOARD_FRAME,
   alignDeltas,
@@ -39,6 +42,20 @@ const VIDEO_STORAGE_FOLDER = 'board-videos';
    photos) goes to this same Storage folder - only its download URL ever
    lands in the layout document. */
 const IMAGE_STORAGE_FOLDER = 'board-images';
+
+/**
+ * The newest photos ever uploaded to the board (download URLs), for the
+ * Uploads tab to put back without a new upload - including ones since
+ * taken off the board, since removing a photo never deletes its file.
+ */
+// ponytail: reads every file's metadata to sort; keep a recents doc instead if the folder reaches the hundreds
+export async function listRecentPhotos(limit = 12) {
+  const { items } = await listAll(ref(storage, IMAGE_STORAGE_FOLDER));
+  const withTimes = await Promise.all(
+    items.map((item) => getMetadata(item).then((meta) => ({ item, timeCreated: meta.timeCreated })))
+  );
+  return Promise.all(newestFirst(withTimes, limit).map(({ item }) => getDownloadURL(item)));
+}
 
 /*
  * Every upload gets its own random filename and is never overwritten, so it's
@@ -141,9 +158,8 @@ async function uploadImageToStorage(file) {
   return getDownloadURL(storageRef);
 }
 
-function isDataUrl(value) {
-  return typeof value === 'string' && value.startsWith('data:');
-}
+/* an old base64 photo to move into Storage - not an icon or sticker (see isLegacyDataPhoto) */
+const isDataUrl = isLegacyDataPhoto;
 
 /* Re-encodes an already-embedded base64 photo through the same pipeline a
    fresh upload takes, so a legacy photo ends up exactly like a new one. */
@@ -237,6 +253,9 @@ export function useBoardLayoutEditor(
     snapEnabled = false,
     gridSnap = false,
     multiSelected = [],
+    /* the ruler guide lines ({ x: [], y: [] } in board %) and whether moves snap to them */
+    guideLines = null,
+    snapToGuides = false,
   } = {}
 ) {
   const latestLayoutRef = useRef(layout);
@@ -263,6 +282,8 @@ export function useBoardLayoutEditor(
   const NO_GUIDES = { lines: [], gaps: [] };
   const [guides, setGuides] = useState(NO_GUIDES);
   const [rotating, setRotating] = useState(null);
+  /* True while a drag, resize or rotate is under way - the floating bar hides. */
+  const [interacting, setInteracting] = useState(false);
 
   function reportError(error) {
     if (onError) onError(error);
@@ -377,14 +398,6 @@ export function useBoardLayoutEditor(
     commitFrom((current) => patchElement(current, kind, id, patch));
   }
 
-  /* Turns a pointer position into board percentages. */
-  function pointToPercent(event, rect) {
-    return {
-      x: clampPercent(((event.clientX - rect.left) / rect.width) * 100),
-      y: clampPercent(((event.clientY - rect.top) / rect.height) * 100),
-    };
-  }
-
   function dragWith(onMove, onEnd) {
     const bounds = boundsRef.current;
     if (!bounds) return;
@@ -396,11 +409,16 @@ export function useBoardLayoutEditor(
     function up() {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      setInteracting(false);
       onEnd?.();
     }
 
+    setInteracting(true);
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    // a touch the OS takes over never sends pointerup
+    window.addEventListener('pointercancel', up);
   }
 
   function surfaceSize() {
@@ -625,16 +643,27 @@ export function useBoardLayoutEditor(
           let dx = pointer.x - origin.x;
           let dy = pointer.y - origin.y;
 
-          const snapping = snapEnabled && !(moveEvent.ctrlKey || moveEvent.metaKey) && movingStart;
+          const useGuides = snapToGuides && guideLines && (guideLines.x.length > 0 || guideLines.y.length > 0);
+          const snapping = (snapEnabled || useGuides) && !(moveEvent.ctrlKey || moveEvent.metaKey) && movingStart;
           if (snapping) {
             const moved = shiftBounds(movingStart, dx, dy);
-            const snap = snapMove(moved, others, { threshold: SNAP_THRESHOLD, grid: gridSnap ? 5 : 0 });
+            const snap = snapMove(moved, others, {
+              threshold: SNAP_THRESHOLD,
+              grid: gridSnap ? 5 : 0,
+              extra: useGuides ? guideLines : { x: [], y: [] },
+              guidesOnly: !snapEnabled,
+            });
             dx += snap.dx;
             dy += snap.dy;
-            setGuides({ lines: snap.guides, gaps: gapsAround(shiftBounds(moved, snap.dx, snap.dy), others) });
+            setGuides({
+              lines: snap.guides,
+              gaps: snapEnabled ? gapsAround(shiftBounds(moved, snap.dx, snap.dy), others) : [],
+            });
           } else {
             setGuides(NO_GUIDES);
           }
+
+          ({ dx, dy } = clampGroupDelta(start, dx, dy));
 
           commitFrom(
             (current) =>
@@ -832,64 +861,6 @@ export function useBoardLayoutEditor(
     return id;
   }
 
-  /*
-   * Copies an element and drops the copy slightly down and to the right of
-   * the original, on top of the paint order. Only the kinds that can exist
-   * more than once are copyable - the logo, the candidate board and the
-   * announcement strip are each one of a kind; dividers, text, images,
-   * videos, and shapes can all have any number of them.
-   */
-  function duplicateElement(kind, id) {
-    const list = LIST_BY_KIND[kind];
-    if (!list) return null;
-
-    const source = findElement(latestLayoutRef.current, kind, id);
-    if (!source) return null;
-
-    const copy = {
-      ...source,
-      id: crypto.randomUUID(),
-      x: clampPercent(source.x + 3),
-      y: clampPercent(source.y + 3),
-      locked: false,
-      /* a copy is its own element, not a member of the original's group */
-      groupId: undefined,
-    };
-
-    commitFrom((current) => ({
-      ...current,
-      [list]: [...current[list], copy],
-      layerOrder: [...current.layerOrder, { kind, id: copy.id }],
-    }));
-
-    return copy.id;
-  }
-
-  /*
-   * Takes an element off the board. The kinds that live in a list are
-   * deleted outright; the one-of-a-kind ones are hidden instead, since
-   * there would be no way to add them back - the layers panel still lists
-   * them, so they can be turned on again.
-   */
-  function removeElement(kind, id) {
-    const list = LIST_BY_KIND[kind];
-
-    if (!list) {
-      updateElement(kind, id, { visible: false });
-      return 'hidden';
-    }
-
-    commitFrom((current) => ({
-      ...current,
-      [list]: current[list].filter((item) => item.id !== id),
-      layerOrder: current.layerOrder.filter(
-        (entry) => !(entry.kind === kind && entry.id === id)
-      ),
-    }));
-
-    return 'removed';
-  }
-
   /* Logo and photo size - a multiplier of their base width. */
   function setScale(kind, id, scale) {
     updateElement(kind, id, { scale });
@@ -968,28 +939,37 @@ export function useBoardLayoutEditor(
     updateElement('logo', null, { url: null });
   }
 
-  async function handleAddPhoto(file) {
+  /* A picture element on top of the board - at `at` (board %), or the centre. */
+  function addImageElement(url, at) {
+    const id = crypto.randomUUID();
+    const x = at ? clampPercent(at.x) : 50;
+    const y = at ? clampPercent(at.y) : 50;
+    commitFrom((current) =>
+      appendLayer(
+        {
+          ...current,
+          images: [...current.images, { id, url, x, y, scale: 1, visible: true, animation: { ...DEFAULT_ANIMATION } }],
+        },
+        'image',
+        id
+      )
+    );
+    return id;
+  }
+
+  /* An icon or sticker, already a (small, data:) URL - nothing to upload. */
+  function addImageFromUrl(url) {
+    return addImageElement(url);
+  }
+
+  async function handleAddPhoto(file, at) {
     if (!file) return null;
 
     const clearProgress = reportProgress('Uploading photo...');
 
     try {
       const url = await uploadImageToStorage(file);
-      const id = crypto.randomUUID();
-
-      commitFrom((current) =>
-        appendLayer(
-          {
-            ...current,
-            images: [
-              ...current.images,
-              { id, url, x: 50, y: 50, scale: 1, visible: true, animation: { ...DEFAULT_ANIMATION } },
-            ],
-          },
-          'image',
-          id
-        )
-      );
+      const id = addImageElement(url, at);
       reportSuccess('Photo added to the board.');
 
       return id;
@@ -1071,7 +1051,8 @@ export function useBoardLayoutEditor(
     );
   }
 
-  function addText() {
+  /* A new text - the plain default, or one of the Text tab's presets (textPresets.js). */
+  function addText(preset) {
     const id = crypto.randomUUID();
 
     commitFrom((current) =>
@@ -1082,17 +1063,17 @@ export function useBoardLayoutEditor(
             ...current.texts,
             {
               id,
-              text: 'New text',
+              text: preset?.text ?? 'New text',
               x: 50,
               y: 50,
-              fontSize: DEFAULT_TEXT_SIZES.extra,
+              fontSize: preset?.fontSize ?? DEFAULT_TEXT_SIZES.extra,
               boxWidth: 92, // normalizeText's own default - set here too, so a
               // corner resize on a text that hasn't been saved yet (and so
               // hasn't been through that normalizer) has a real number to
               // scale rather than reading undefined.
               visible: true,
-              bulletList: false,
-              style: { ...DEFAULT_EXTRA_TEXT_STYLE },
+              bulletList: preset?.bulletList ?? false,
+              style: { ...(preset?.style ?? DEFAULT_EXTRA_TEXT_STYLE) },
               animation: { ...DEFAULT_ANIMATION },
             },
           ],
@@ -1131,11 +1112,13 @@ export function useBoardLayoutEditor(
     );
   }
 
-  function setShapeStroke(id, patch) {
+  /* Merges `patch` into the border of a shape, photo or video. Photos and
+     videos added before borders existed start from MEDIA_STROKE. */
+  function setStroke(kind, id, patch) {
     commitFrom((current) => {
-      const shape = findElement(current, 'shape', id);
-      if (!shape) return current;
-      return patchElement(current, 'shape', id, { stroke: { ...shape.stroke, ...patch } });
+      const element = findElement(current, kind, id);
+      if (!element) return current;
+      return patchElement(current, kind, id, { stroke: { ...MEDIA_STROKE, ...element.stroke, ...patch } });
     });
   }
 
@@ -1276,7 +1259,7 @@ export function useBoardLayoutEditor(
       shapes: [],
       layerOrder: DEFAULT_LAYOUT.layerOrder.map((entry) => ({ ...entry })),
     }));
-    reportSuccess('Layout reset to the default.');
+    reportSuccess('Layout reset to the default. Ctrl+Z to undo.');
   }
 
   /** Replaces the whole draft, e.g. when a saved template is applied. */
@@ -1351,15 +1334,15 @@ export function useBoardLayoutEditor(
     commitFrom((current) => {
       let next = current;
       units.forEach((unit, index) => {
-        const { dx, dy } = deltas[index];
+        const elements = unit.map((member) => findElement(next, member.kind, member.id));
+        const { dx, dy } = clampGroupDelta(elements, deltas[index].dx, deltas[index].dy);
         if (!dx && !dy) return;
-        for (const member of unit) {
-          const element = findElement(next, member.kind, member.id);
+        unit.forEach((member, i) => {
           next = patchElement(next, member.kind, member.id, {
-            x: clampBoard(element.x + dx),
-            y: clampBoard(element.y + dy),
+            x: clampBoard(elements[i].x + dx),
+            y: clampBoard(elements[i].y + dy),
           });
-        }
+        });
       });
       return next;
     });
@@ -1387,8 +1370,9 @@ export function useBoardLayoutEditor(
   }
 
   function nudgeSelection(selection, dx, dy) {
-    const units = selectionUnits(selection);
-    moveUnits(units, units.map(() => ({ dx, dy })));
+    /* the whole selection moves as one, so it keeps its shape at an edge */
+    const members = selectionUnits(selection).flat();
+    moveUnits([members], [{ dx, dy }]);
   }
 
   function removeMany(selection) {
@@ -1512,8 +1496,7 @@ export function useBoardLayoutEditor(
     beginHandleResize,
     beginRotate,
     rotating,
-    duplicateElement,
-    removeElement,
+    interacting,
     addDivider,
     beginDividerResize,
     updateDivider: (id, patch) => updateElement('divider', id, patch),
@@ -1529,6 +1512,7 @@ export function useBoardLayoutEditor(
     handleLogoUpload,
     resetLogo,
     handleAddPhoto,
+    addImageFromUrl,
     removePhoto,
     cleanUpLegacyPhotos,
     handleAddVideo,
@@ -1540,7 +1524,7 @@ export function useBoardLayoutEditor(
     updateShape: (id, patch) => updateElement('shape', id, patch),
     /* the candidate board and the announcement strip are patched directly */
     updateElement,
-    setShapeStroke,
+    setStroke,
     handleFramePhoto,
     handleFrameVideo,
     addFramePhotos,

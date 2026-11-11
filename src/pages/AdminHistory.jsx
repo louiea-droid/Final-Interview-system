@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { removeBackground } from '@imgly/background-removal';
 import {
   CalendarDays,
+  GripVertical,
   Pencil,
   Plus,
   Search,
@@ -12,12 +12,18 @@ import {
 // local stand-in for the backend; same query API, no network
 import { firebaseClient } from '../lib/firebaseBackend';
 import { isShownOnBoard } from '../lib/candidateVisibility';
+import { bySortOrder, reorderGroup } from '../lib/candidateOrder';
 import { getStatusPillClass } from '../lib/candidateStatus';
 import CandidateDetailsModal from '../components/CandidateDetailsModal';
 import CandidatePhoto from '../components/CandidatePhoto';
+import { pickImageFile } from '../lib/imageFiles';
+import { applyReviewResult, attachPhoto, canSave, changeCrop, changeEdits, needsReview, reviewCount } from '../lib/photoReview';
+import PhotoReviewDialog from '../components/PhotoReviewDialog';
+import { photoQueue } from '../lib/backgroundRemover';
 import TablePagination from '../components/TablePagination';
 import PhotoCropModal from '../components/PhotoCropModal';
 import DateField from '../components/DateField';
+import CapsFixInput from '../components/CapsFixInput';
 import { useToast } from '../components/ToastProvider';
 
 function createEmptyAddForm() {
@@ -51,10 +57,11 @@ export default function CandidatesPage() {
   const [viewingCandidate, setViewingCandidate] = useState(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [addForms, setAddForms] = useState([createEmptyAddForm()]);
-  const [addProcessingIds, setAddProcessingIds] = useState(new Set());
+  /* which form's photo review is open: 'add' | 'edit' | null */
+  const [reviewOpen, setReviewOpen] = useState(null);
+  /* the photo and tab the editor opens on, when opened from a card's preview */
+  const [reviewStart, setReviewStart] = useState(null);
   const [isAddingCandidates, setIsAddingCandidates] = useState(false);
-  const [addCropTarget, setAddCropTarget] = useState(null);
-  const [processingPhoto, setProcessingPhoto] = useState(false);
   const [cropTarget, setCropTarget] = useState
 (null);
 
@@ -101,8 +108,42 @@ export default function CandidatesPage() {
       const matchesSearch = !term || candidate.name.toLowerCase().includes(term);
 
       return matchesDate && matchesSearch;
-    });
+    }).sort(
+      (a, b) =>
+        compareDateKeys(getInterviewDateKey(a.interview_date), getInterviewDateKey(b.interview_date)) ||
+        bySortOrder(a, b)
+    );
   }, [candidates, selectedDate, searchTerm]);
+
+  /*
+   * Drag-to-reorder inside one date's group. The new order is the board's
+   * order (sort_order), so /visual follows it live. Dropping on another date
+   * does nothing - Edit is how a candidate changes date.
+   */
+  const [draggingId, setDraggingId] = useState(null);
+
+  async function moveCandidate(dateCandidates, draggedId, targetId) {
+    const { changes } = reorderGroup(dateCandidates, draggedId, targetId);
+    if (!changes.length) return;
+
+    const next = new Map(changes.map((change) => [change.id, change.sort_order]));
+    setCandidates((current) =>
+      current.map((candidate) =>
+        next.has(candidate.id) ? { ...candidate, sort_order: next.get(candidate.id) } : candidate
+      )
+    );
+
+    const results = await Promise.all(
+      changes.map(({ id, sort_order }) =>
+        firebaseClient.from('candidates').update({ sort_order }).eq('id', id)
+      )
+    );
+    const failed = results.find((result) => result.error);
+    if (failed) {
+      showToast.error(`Unable to save the new order: ${failed.error.message}`);
+      loadCandidates();
+    }
+  }
 
   const pageCandidates = useMemo(
     () => filteredCandidates.slice((page - 1) * pageSize, page * pageSize),
@@ -138,6 +179,9 @@ export default function CandidatesPage() {
     setPage(1);
   }, [searchTerm, selectedDate]);
 
+  // leaving Records drops its removals, so ~10 s jobs don't run on for forms that are gone
+  useEffect(() => () => photoQueue.cancelAll(), []);
+
   function startEditing(date, dateCandidates) {
     setEditingDate(date);
     setEditForms(
@@ -156,7 +200,7 @@ export default function CandidatesPage() {
 
   async function saveEdit(event) {
     event?.preventDefault();
-    if (!editingDate || !editForms.length || processingPhoto) return;
+    if (!editingDate || !editForms.length || !canSave(editForms)) return;
 
     setSavingEdit(true);
 
@@ -226,51 +270,30 @@ export default function CandidatesPage() {
     );
   }
 
-  async function handleEditPhotoChange(id, file) {
+  /* A replacement photo attaches straight away; it's reviewed before Save. */
+  function handleEditPhotoChange(id, file) {
     if (!file) return;
+    photoQueue.cancel(`edit:${id}`);
+    setEditForms((current) => current.map((candidate) => (candidate.id === id ? attachPhoto(candidate, file) : candidate)));
+  }
 
-    setProcessingPhoto(true);
-    showToast.loading('Removing photo background...');
+  function openEditReview(key, tab) {
+    setReviewStart(key ? { key, tab } : null);
+    setReviewOpen('edit');
+    runRemovals('edit', editForms, setEditForms, (candidate) => candidate.id);
+  }
 
-    try {
-      const backgroundRemoved = await removeBackground(file);
-      const processedFile = new File(
-        [backgroundRemoved],
-        `${file.name.replace(/\.[^.]+$/, '')}.png`,
-        { type: 'image/png' }
-      );
-
-      setEditForms((current) =>
-        current.map((candidate) =>
-          candidate.id === id
-            ? { ...candidate, photo_file: processedFile, photo_crop: null, no_photo: false }
-            : candidate
-        )
-      );
-    } catch {
-      setEditForms((current) =>
-        current.map((candidate) =>
-          candidate.id === id
-            ? { ...candidate, photo_file: file, photo_crop: null, no_photo: false }
-            : candidate
-        )
-      );
-      showToast.error('Background removal failed; using the original photo.');
-    } finally {
-      setProcessingPhoto(false);
-    }
+  /* Leaving the Edit form drops any removal still queued for it. */
+  function closeEditModal() {
+    for (const candidate of editForms) photoQueue.cancel(`edit:${candidate.id}`);
+    setReviewOpen((current) => (current === 'edit' ? null : current));
+    setEditingDate(null);
   }
 
   function openPhotoCrop(editForm) {
-    // Crop whichever photo is actually current for this candidate: a
-    // newly-selected file takes priority over the one already saved.
-    if (editForm.photo_file) {
-      setCropTarget({
-        candidateId: editForm.id,
-        imageSrc: URL.createObjectURL(editForm.photo_file),
-        initialCrop: editForm.photo_crop,
-        isObjectUrl: true,
-      });
+    // a newly chosen photo is cleaned, cropped and adjusted in the photo editor
+    if (editForm.photo_original) {
+      openEditReview(editForm.id, needsReview(editForm) ? 'cleanup' : 'crop');
       return;
     }
 
@@ -357,9 +380,10 @@ export default function CandidatesPage() {
   }
 
   function closeAddModal() {
+    for (const form of addForms) photoQueue.cancel(`add:${form.localId}`);
+    setReviewOpen((current) => (current === 'add' ? null : current));
     setAddModalOpen(false);
     setAddForms([createEmptyAddForm()]);
-    setAddCropTarget(null);
   }
 
   function addAnotherCandidate() {
@@ -367,6 +391,7 @@ export default function CandidatesPage() {
   }
 
   function removeAddCandidate(localId) {
+    if (addForms.length > 1) photoQueue.cancel(`add:${localId}`);
     setAddForms((current) =>
       current.length > 1 ? current.filter((form) => form.localId !== localId) : current
     );
@@ -383,6 +408,7 @@ export default function CandidatesPage() {
   }
 
   function setAddFormNoPhoto(localId, noPhoto) {
+    if (noPhoto) photoQueue.cancel(`add:${localId}`);
     setAddForms((current) =>
       current.map((form) =>
         form.localId === localId
@@ -391,72 +417,97 @@ export default function CandidatesPage() {
               no_photo: noPhoto,
               photo_file: noPhoto ? null : form.photo_file,
               photo_crop: noPhoto ? null : form.photo_crop,
+              // None drops the attached photo, and its pending review with it
+              ...(noPhoto ? { photo_original: null, photo_status: null, photo_cutout: null } : {}),
             }
           : form
       )
     );
   }
 
-  function openAddPhotoCrop(localId, imageSrc, initialCrop) {
-    setAddCropTarget({ localId, imageSrc, initialCrop });
-  }
-
-  function handleAddCroppedPhoto(crop) {
-    if (!addCropTarget) return;
-    const { localId } = addCropTarget;
-    setAddForms((current) =>
-      current.map((form) =>
-        form.localId === localId ? { ...form, photo_crop: crop, no_photo: false } : form
-      )
-    );
-  }
-
-  // Background removal runs independently per card (tracked by localId)
-  // instead of blocking the whole modal, so filling out — or submitting —
-  // the other candidates doesn't have to wait on one slow photo.
-  async function handleAddPhotoChange(localId, file) {
+  /* A chosen or dropped photo just attaches - its background is removed in the review. */
+  function handleAddPhotoChange(localId, file) {
     if (!file) return;
+    photoQueue.cancel(`add:${localId}`);
+    setAddForms((current) => current.map((form) => (form.localId === localId ? attachPhoto(form, file) : form)));
+  }
 
-    setAddProcessingIds((current) => new Set(current).add(localId));
-    showToast.loading('Removing photo background...');
+  /*
+   * Starts background removal, off the main thread and one at a time, for
+   * every photo that hasn't been processed yet. Results are written back by
+   * key, and only if the card still holds the same photo - so a candidate
+   * removed, or a photo replaced, mid-removal never gets a stale cut-out.
+   */
+  function runRemovals(kind, entries, setEntries, keyOf) {
+    for (const entry of entries) {
+      if (!entry.photo_original || entry.no_photo) continue;
+      if (entry.photo_status !== 'pending' && entry.photo_status !== 'failed') continue;
 
-    try {
-      const backgroundRemoved = await removeBackground(file);
-      const processedFile = new File(
-        [backgroundRemoved],
-        `${file.name.replace(/\.[^.]+$/, '')}.png`,
-        { type: 'image/png' }
-      );
+      const key = keyOf(entry);
+      const file = entry.photo_original;
+      const update = (patch) =>
+        setEntries((current) =>
+          current.map((item) => (keyOf(item) === key && item.photo_original === file ? { ...item, ...patch(item) } : item))
+        );
+      // only a photo still waiting on its removal changes status; one already finished
+      // (e.g. with Keep original) keeps it, and just gains the cut-out
+      const settle = (status) => (item) => (item.photo_status === 'processing' ? { photo_status: status } : {});
 
-      setAddForms((current) =>
-        current.map((form) =>
-          form.localId === localId
-            ? { ...form, photo_file: processedFile, photo_crop: null, no_photo: false }
-            : form
-        )
+      update(() => ({ photo_status: 'processing' }));
+      photoQueue.enqueue(`${kind}:${key}`, file).then(
+        (blob) => update((item) => ({ photo_cutout: blob, ...settle('ready')(item) })),
+        (error) => {
+          if (error?.name !== 'CancelledError') update(settle('failed'));
+        }
       );
-    } catch {
-      setAddForms((current) =>
-        current.map((form) =>
-          form.localId === localId
-            ? { ...form, photo_file: file, photo_crop: null, no_photo: false }
-            : form
-        )
-      );
-      showToast.error('Background removal failed; using the original photo.');
-    } finally {
-      setAddProcessingIds((current) => {
-        const next = new Set(current);
-        next.delete(localId);
-        return next;
-      });
     }
+  }
+
+  function openAddReview(key, tab) {
+    setReviewStart(key ? { key, tab } : null);
+    setReviewOpen('add');
+    runRemovals('add', addForms, setAddForms, (form) => form.localId);
+  }
+
+  /*
+   * The review dialog's wiring for one form: its photos, where edits are
+   * kept (on the form entries, so they survive closing the dialog), and
+   * how Done writes the finished photos back.
+   */
+  function reviewProps(kind, entries, setEntries, keyOf, labelOf) {
+    const items = entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.photo_original && !entry.no_photo)
+      .map(({ entry, index }) => ({ key: keyOf(entry), label: labelOf(entry, index), entry }));
+
+    return {
+      items,
+      onEditsChange: (key, edits) =>
+        setEntries((current) => current.map((entry) => (keyOf(entry) === key ? changeEdits(entry, edits) : entry))),
+      onCropChange: (key, crop) =>
+        setEntries((current) => current.map((entry) => (keyOf(entry) === key ? changeCrop(entry, crop) : entry))),
+      startKey: reviewStart?.key,
+      startTab: reviewStart?.tab,
+      onRetry: (key) => {
+        const entry = entries.find((item) => keyOf(item) === key);
+        if (entry) runRemovals(kind, [{ ...entry, photo_status: 'pending' }], setEntries, keyOf);
+      },
+      onDone: (results) => {
+        const byKey = new Map(results.map((result) => [result.key, result]));
+        // each result lands only on the photo, edits and crop it was made from
+        setEntries((current) =>
+          current.map((entry) => (byKey.has(keyOf(entry)) ? applyReviewResult(entry, byKey.get(keyOf(entry))) : entry))
+        );
+        setReviewOpen(null);
+      },
+      onClose: () => setReviewOpen(null),
+    };
   }
 
   async function addCandidates(event) {
     event.preventDefault();
 
-    if (addProcessingIds.size > 0 || isAddingCandidates) return;
+    if (!canSave(addForms) || isAddingCandidates) return;
 
     setIsAddingCandidates(true);
     const loadingToastId = showToast.loading(
@@ -655,7 +706,26 @@ export default function CandidatesPage() {
 
                 <div className="candidate-directory">
                   {dateCandidates.map((candidate) => (
-                    <article className="candidate-directory-row" key={candidate.id}>
+                    <article
+                      className={`candidate-directory-row${draggingId === candidate.id ? ' dragging-row' : ''}`}
+                      key={candidate.id}
+                      draggable
+                      onDragStart={() => setDraggingId(candidate.id)}
+                      onDragEnd={() => setDraggingId(null)}
+                      onDragOver={(event) => {
+                        // only a row of the same date is a drop target
+                        if (dateCandidates.some((item) => item.id === draggingId)) event.preventDefault();
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        if (draggingId) void moveCandidate(dateCandidates, draggingId, candidate.id);
+                        setDraggingId(null);
+                      }}
+                    >
+                      <span className="candidate-drag-handle" title="Drag to reorder" aria-hidden="true">
+                        <GripVertical size={14} />
+                      </span>
+
                       <button
                         type="button"
                         className="candidate-directory-avatar-button"
@@ -737,7 +807,10 @@ export default function CandidatesPage() {
 
       {editingDate && (
         <div className="confirmation-overlay" role="presentation">
+          {/* a photo dropped just beside a photo box would otherwise open in the tab and lose the form */}
           <form
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => event.preventDefault()}
             className="candidate-edit-popup group-edit-popup"
             onSubmit={saveEdit}
             aria-labelledby="records-edit-candidates-title"
@@ -750,7 +823,7 @@ export default function CandidatesPage() {
               <button
                 type="button"
                 className="modal-close-button"
-                onClick={() => setEditingDate(null)}
+                onClick={closeEditModal}
                 aria-label="Close edit candidates modal"
               >
                 &times;
@@ -774,53 +847,61 @@ export default function CandidatesPage() {
 
                   <div className="record-edit-photo">
                     <div className="record-edit-photo-preview">
-                      {candidates.find((candidate) => candidate.id === editForm.id)?.photo_url && !editForm.no_photo ? (
+                      {(editForm.photo_file || candidates.find((candidate) => candidate.id === editForm.id)?.photo_url) &&
+                      !editForm.no_photo ? (
                         <button
                           type="button"
                           className="record-edit-photo-preview-button"
                           onClick={() => openPhotoCrop(editForm)}
-                          aria-label="Preview and crop candidate photo"
+                          aria-label={editForm.photo_original ? 'Open the photo editor' : 'Preview and crop candidate photo'}
                         >
-                          <CandidatePhoto
-                            url={candidates.find((candidate) => candidate.id === editForm.id)?.photo_url ?? ''}
-                            crop={editForm.photo_file ? null : editForm.photo_crop}
-                            alt="Current candidate"
-                          />
+                          {editForm.photo_file ? (
+                            <LocalPhotoPreview file={editForm.photo_file} crop={needsReview(editForm) ? null : editForm.photo_crop} alt="New candidate photo" />
+                          ) : (
+                            <CandidatePhoto
+                              url={candidates.find((candidate) => candidate.id === editForm.id)?.photo_url ?? ''}
+                              crop={editForm.photo_crop}
+                              alt="Current candidate"
+                            />
+                          )}
                         </button>
                       ) : (
                         <UserRound size={28} />
                       )}
                     </div>
                     <div className="record-edit-photo-controls">
-                      <label className="form-label" htmlFor={`record-photo-${editForm.id}`}>
-                        Candidate photo
-                      </label>
-                      <input
-                        id={`record-photo-${editForm.id}`}
-                        className="record-edit-file-input"
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        disabled={editForm.no_photo || processingPhoto}
-                        onChange={(event) =>
-                          void handleEditPhotoChange(editForm.id, event.target.files?.[0] ?? null)
-                        }
+                      <div className="photo-label-row">
+                        <label className="form-label" htmlFor={`record-photo-${editForm.id}`}>
+                          Candidate photo
+                        </label>
+                        <ReviewChip entry={editForm} />
+                      </div>
+                      <PhotoDropBox
+                        inputId={`record-photo-${editForm.id}`}
+                        disabled={editForm.no_photo}
+                        fileName={editForm.photo_original?.name}
+                        onFile={(file) => handleEditPhotoChange(editForm.id, file)}
                       />
-                      {editForm.photo_file && (
-                        <small className="record-edit-file-name">New photo selected</small>
-                      )}
                       <label className="record-edit-remove-photo">
                         <input
                           type="checkbox"
                           checked={editForm.no_photo}
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            if (event.target.checked) photoQueue.cancel(`edit:${editForm.id}`);
                             setEditForms((current) =>
                               current.map((candidate) =>
                                 candidate.id === editForm.id
-                                  ? { ...candidate, no_photo: event.target.checked, photo_file: null, photo_crop: null }
+                                  ? {
+                                      ...candidate,
+                                      no_photo: event.target.checked,
+                                      photo_file: null,
+                                      photo_crop: null,
+                                      ...(event.target.checked ? { photo_original: null, photo_status: null, photo_cutout: null } : {}),
+                                    }
                                   : candidate
                               )
-                            )
-                          }
+                            );
+                          }}
                         />
                         Remove photo
                       </label>
@@ -831,12 +912,13 @@ export default function CandidatesPage() {
                     <label className="form-label" htmlFor={`record-name-${editForm.id}`}>
                       Candidate name
                     </label>
-                    <input
+                    <CapsFixInput
                       id={`record-name-${editForm.id}`}
                       className="form-input"
                       required
+                      kind="name"
                       value={editForm.name}
-                      onChange={(event) => updateEditForm(editForm.id, 'name', event.target.value)}
+                      onValueChange={(value) => updateEditForm(editForm.id, 'name', value)}
                     />
                   </div>
 
@@ -845,11 +927,12 @@ export default function CandidatesPage() {
                       <label className="form-label" htmlFor={`record-course-${editForm.id}`}>
                         Course
                       </label>
-                      <input
+                      <CapsFixInput
                         id={`record-course-${editForm.id}`}
                         className="form-input"
+                        kind="course"
                         value={editForm.course}
-                        onChange={(event) => updateEditForm(editForm.id, 'course', event.target.value)}
+                        onValueChange={(value) => updateEditForm(editForm.id, 'course', value)}
                       />
                     </div>
 
@@ -885,14 +968,23 @@ export default function CandidatesPage() {
             </div>
 
             <div className="confirmation-actions">
+              {!canSave(editForms) && <span className="photo-review-hint">Edit the photos before saving.</span>}
               <button
                 type="button"
                 className="secondary-button"
-                onClick={() => setEditingDate(null)}
+                onClick={closeEditModal}
               >
                 Cancel
               </button>
-              <button type="submit" className="confirm-delete-button" disabled={savingEdit}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => openEditReview()}
+                disabled={savingEdit || !editForms.some((candidate) => candidate.photo_original && !candidate.no_photo)}
+              >
+                {reviewCount(editForms) ? `Edit photos (${reviewCount(editForms)})` : 'Edit photos'}
+              </button>
+              <button type="submit" className="confirm-delete-button" disabled={savingEdit || !canSave(editForms)}>
                 {savingEdit ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
@@ -951,6 +1043,8 @@ export default function CandidatesPage() {
       {addModalOpen && (
         <div className="confirmation-overlay">
           <form
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => event.preventDefault()}
             className="candidate-edit-popup group-edit-popup"
             onSubmit={addCandidates}
             aria-labelledby="records-add-candidate-title"
@@ -978,12 +1072,11 @@ export default function CandidatesPage() {
                   form={form}
                   index={index}
                   canRemove={addForms.length > 1}
-                  processing={addProcessingIds.has(form.localId)}
                   onChange={updateAddForm}
                   onRemove={removeAddCandidate}
                   onNoPhotoChange={setAddFormNoPhoto}
                   onPhotoChange={handleAddPhotoChange}
-                  onOpenCrop={openAddPhotoCrop}
+                  onOpenEditor={(localId, reviewed) => openAddReview(localId, reviewed ? 'crop' : 'cleanup')}
                 />
               ))}
             </div>
@@ -999,6 +1092,7 @@ export default function CandidatesPage() {
             </button>
 
             <div className="confirmation-actions">
+              {!canSave(addForms) && <span className="photo-review-hint">Edit the photos before adding.</span>}
               <button
                 type="button"
                 className="secondary-button"
@@ -1008,13 +1102,19 @@ export default function CandidatesPage() {
                 Cancel
               </button>
               <button
+                type="button"
+                className="secondary-button"
+                onClick={() => openAddReview()}
+                disabled={isAddingCandidates || !addForms.some((form) => form.photo_original && !form.no_photo)}
+              >
+                {reviewCount(addForms) ? `Edit photos (${reviewCount(addForms)})` : 'Edit photos'}
+              </button>
+              <button
                 type="submit"
                 className="confirm-delete-button"
-                disabled={addProcessingIds.size > 0 || isAddingCandidates}
+                disabled={!canSave(addForms) || isAddingCandidates}
               >
-                {addProcessingIds.size > 0
-                  ? 'Processing photos...'
-                  : isAddingCandidates
+                {isAddingCandidates
                     ? 'Adding...'
                     : addForms.length > 1
                       ? `Add ${addForms.length} Candidates`
@@ -1025,12 +1125,19 @@ export default function CandidatesPage() {
         </div>
       )}
 
-      {addCropTarget && (
-        <PhotoCropModal
-          imageSrc={addCropTarget.imageSrc}
-          initialCrop={addCropTarget.initialCrop}
-          onSave={handleAddCroppedPhoto}
-          onClose={() => setAddCropTarget(null)}
+      {reviewOpen === 'edit' && (
+        <PhotoReviewDialog
+          {...reviewProps('edit', editForms, setEditForms, (candidate) => candidate.id, (candidate) =>
+            candidates.find((item) => item.id === candidate.id)?.name ?? 'Candidate'
+          )}
+        />
+      )}
+
+      {reviewOpen === 'add' && (
+        <PhotoReviewDialog
+          {...reviewProps('add', addForms, setAddForms, (form) => form.localId, (form, index) =>
+            form.name.trim() || `Candidate ${index + 1}`
+          )}
         />
       )}
 
@@ -1038,18 +1145,96 @@ export default function CandidatesPage() {
   );
 }
 
+/*
+ * Click-or-drop photo box for both Records forms. A dropped file must be a
+ * PNG, JPG or WEBP; it attaches straight away (no background removal here -
+ * that happens in Edit photos).
+ */
+function PhotoDropBox({ inputId, disabled, fileName, onFile }) {
+  /* 'over' while a file is dragged over the box, 'rejected' after a non-photo drop */
+  const [dropState, setDropState] = useState(null);
+
+  return (
+    <label
+      htmlFor={inputId}
+      className={`photo-upload-box ${disabled ? 'disabled' : ''} ${dropState === 'over' ? 'is-drop-target' : ''}`}
+      onDragOver={(event) => {
+        event.preventDefault();
+        if (disabled) {
+          event.dataTransfer.dropEffect = 'none';
+          return;
+        }
+        event.dataTransfer.dropEffect = 'copy';
+        setDropState('over');
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setDropState(null);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        if (disabled) return;
+        const file = pickImageFile(event.dataTransfer.files);
+        setDropState(file ? null : 'rejected');
+        if (file) onFile(file);
+      }}
+    >
+      <input
+        id={inputId}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        disabled={disabled}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (file) onFile(file);
+        }}
+      />
+      <div className="photo-upload-content">
+        <span className="photo-upload-title">
+          {dropState === 'over' ? 'Drop the photo here' : fileName ?? 'Upload or drop a photo'}
+        </span>
+        <span className={`photo-upload-subtitle ${dropState === 'rejected' ? 'is-error' : ''}`}>
+          {dropState === 'rejected' ? 'Only PNG, JPG or WEBP' : 'PNG, JPG or WEBP'}
+        </span>
+      </div>
+    </label>
+  );
+}
+
+/* A photo chosen in this form session, shown through the same crop maths as a saved one. */
+function LocalPhotoPreview({ file, crop, alt }) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    const made = URL.createObjectURL(file);
+    setUrl(made);
+    return () => URL.revokeObjectURL(made);
+  }, [file]);
+  return url ? <CandidatePhoto url={url} crop={crop} alt={alt} /> : null;
+}
+
+/* The Needs editing / Edited tag beside a form's photo label. */
+function ReviewChip({ entry }) {
+  if (!entry.photo_original || entry.no_photo) return null;
+  const pending = needsReview(entry);
+  return (
+    <span className={`photo-review-chip ${pending ? 'is-pending' : 'is-done'}`} data-status={entry.photo_status}>
+      {pending ? 'Needs editing' : 'Edited'}
+    </span>
+  );
+}
+
 function AddCandidateCard({
   form,
   index,
   canRemove,
-  processing,
   onChange,
   onRemove,
   onNoPhotoChange,
   onPhotoChange,
-  onOpenCrop,
+  onOpenEditor,
 }) {
   const [previewUrl, setPreviewUrl] = useState(null);
+  const awaitingReview = needsReview(form);
 
   useEffect(() => {
     if (!form.photo_file) {
@@ -1081,47 +1266,32 @@ function AddCandidateCard({
         )}
       </div>
 
-      <label className="form-label" htmlFor={photoInputId}>
-        Candidate photo
-      </label>
+      <div className="photo-label-row">
+        <label className="form-label" htmlFor={photoInputId}>
+          Candidate photo
+        </label>
+        <ReviewChip entry={form} />
+      </div>
       <div className="photo-upload">
         {previewUrl && !form.no_photo && (
           <div className="record-edit-photo-preview">
             <button
               type="button"
               className="record-edit-photo-preview-button"
-              onClick={() => onOpenCrop(form.localId, previewUrl, form.photo_crop)}
-              aria-label="Preview and crop candidate photo"
+              onClick={() => onOpenEditor(form.localId, !awaitingReview)}
+              aria-label="Open the photo editor"
             >
-              <CandidatePhoto url={previewUrl} crop={form.photo_crop} alt="Candidate preview" />
+              <CandidatePhoto url={previewUrl} crop={awaitingReview ? null : form.photo_crop} alt="Candidate preview" />
             </button>
           </div>
         )}
 
-        <label
-          htmlFor={photoInputId}
-          className={`photo-upload-box ${form.no_photo ? 'disabled' : ''}`}
-        >
-          <input
-            id={photoInputId}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            disabled={form.no_photo}
-            onChange={(event) => {
-              void onPhotoChange(form.localId, event.target.files?.[0] ?? null);
-            }}
-          />
-          <div className="photo-upload-content">
-            <span className="photo-upload-title">
-              {processing
-                ? 'Processing...'
-                : form.photo_file
-                  ? form.photo_file.name
-                  : 'Upload Photo'}
-            </span>
-            <span className="photo-upload-subtitle">PNG, JPG or WEBP</span>
-          </div>
-        </label>
+        <PhotoDropBox
+          inputId={photoInputId}
+          disabled={form.no_photo}
+          fileName={(form.photo_original ?? form.photo_file)?.name}
+          onFile={(file) => onPhotoChange(form.localId, file)}
+        />
 
         <label className="none-photo-option">
           <input
@@ -1136,24 +1306,26 @@ function AddCandidateCard({
       <label className="form-label" htmlFor={`add-name-${form.localId}`}>
         Candidate name
       </label>
-      <input
+      <CapsFixInput
         id={`add-name-${form.localId}`}
         className="form-input"
         required
+        kind="name"
         placeholder="Enter candidate name"
         value={form.name}
-        onChange={(event) => onChange(form.localId, 'name', event.target.value)}
+        onValueChange={(value) => onChange(form.localId, 'name', value)}
       />
 
       <label className="form-label" htmlFor={`add-course-${form.localId}`}>
         Course
       </label>
-      <input
+      <CapsFixInput
         id={`add-course-${form.localId}`}
         className="form-input"
+        kind="course"
         placeholder="Course"
         value={form.course}
-        onChange={(event) => onChange(form.localId, 'course', event.target.value)}
+        onValueChange={(value) => onChange(form.localId, 'course', value)}
       />
 
       <label className="form-label" htmlFor={`add-date-${form.localId}`}>
